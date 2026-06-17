@@ -50,6 +50,20 @@ npm run tiles
 | Spawn   | `tile_spawn.png`     | `tile_spawn`                          |
 | Goal    | `tile_goal.png`      | `tile_goal`                           |
 
+**Default generation size is 1024×1024** — this is intentional to support
+crop-based anti-repetition (see below).
+
+### Anti-repetition via crop variation
+
+Each grid cell gets a **unique 48×48 crop** from the large AI texture, selected
+deterministically from `(row, col, seed)`. This means:
+- No two adjacent tiles ever show the same region of the source texture
+- The same seed always produces the same crop layout (maps are reproducible)
+- ~441 unique crops per dimension at 1024×1024 — effectively infinite variation
+
+Crop selection is handled by `src/utils/TileCropSelector.ts` and applied in
+`GameScene.buildMap()` via Phaser's `sprite.setCrop()`.
+
 ### Transition tiles
 
 Transition tiles (`tile_trans_grass_0.png` through `tile_trans_grass_15.png`)
@@ -72,12 +86,26 @@ preload()
   │   └── Missing?       → console.warn, mark for procedural fallback
   │
 create()
-  ├── fillMissingTileTextures()  — procedural fallback for any missing tile
-  ├── generateUITileTextures()   — always-procedural UI overlays
-  ├── generateBlobTextures()     — 16 blob path tiles (procedural cobblestone)
-  ├── generateTerrainTransitionTextures() — 16 grass transition tiles (procedural)
+  ├── extractTilePalettes()          — sample AI tile colours for transition/blob matching
+  ├── fillMissingTileTextures()      — procedural fallback for any missing tile
+  ├── generateUITileTextures()       — always-procedural UI overlays
+  ├── generateBlobTextures()         — 16 blob path tiles (procedural, AI-colour-matched)
+  ├── generateTerrainTransitionTextures() — 16 grass transition tiles (procedural, AI-colour-matched)
   └── ...towers, enemies, hero, particles, UI...
 ```
+
+### Palette extraction (`src/utils/TileColorExtractor.ts`)
+
+After AI tiles load, `extractTerrainPalette()` reads pixel data from each
+texture and extracts:
+- **base** — dominant terrain colour
+- **light / dark** — highlight and shadow colours
+- **gradientTop / Mid / Bottom** — vertical gradient stops
+
+These palettes are passed to `TerrainTransition.generateTransitionTextures()`
+and `BlobTileset.generateBlobTextures()` so that procedural transition and path
+tiles blend seamlessly into the AI base tiles. If no AI tile is available,
+hardcoded `DEFAULT_PALETTES` are used instead.
 
 ### Layered terrain rendering (`GameScene.ts`)
 
@@ -86,11 +114,16 @@ Terrains are rendered as separate passes ordered by Z-index:
 | Layer | Depth | Content                                     |
 |-------|-------|---------------------------------------------|
 | Water | 0     | `tile_ground` — full base tiles             |
-| Grass | 0.1   | Transition overlays — corner-bitmasked      |
+| Grass | 0.05  | Transition overlays — corner-bitmasked      |
+| Grass | 0.1   | `tile_buildable` — interior (non-boundary)  |
+| Special | 0.15 | `tile_spawn`, `tile_goal`                   |
+| Path  | 0.2   | Blob tiles — on top of terrain              |
 | Hover | 1     | `tile_buildable_hover` — placement preview  |
 
-Lower layers render fully first. Higher layers overlay with alpha-blended edges
-that let the lower layer show through naturally.
+Lower layers render first. Transition overlays use alpha-blended polygon edges
+that let the water layer show through naturally. Crop-based variation applies to
+water and grass base tiles when AI textures are available (detected by checking
+if the source texture is larger than 256px).
 
 ### Corner bitmasking (`TerrainTransition.ts`)
 

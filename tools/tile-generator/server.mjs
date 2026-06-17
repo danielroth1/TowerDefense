@@ -6,7 +6,7 @@
  */
 
 import { createServer } from 'node:http';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync, renameSync } from 'node:fs';
 import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -14,6 +14,7 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const PORT = 3456;
 const FAL_KEY = process.env.FAL_AI_KEY || '';
 const OUTPUT_DIR = join(__dirname, '..', '..', 'public', 'assets', 'tiles');
+const ARCHIVE_DIR = join(__dirname, '..', '..', 'archive', 'tiles');
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -49,6 +50,22 @@ async function readBody(req) {
     req.on('data', (chunk) => (body += chunk));
     req.on('end', () => resolve(body));
   });
+}
+
+/** Return a unique archive path for a filename, appending _2, _3, etc. if needed. */
+function uniqueArchivePath(fname) {
+  const ext = extname(fname);
+  const base = fname.slice(0, -ext.length);
+
+  let candidate = join(ARCHIVE_DIR, fname);
+  if (!existsSync(candidate)) return candidate;
+
+  let n = 2;
+  while (existsSync(candidate)) {
+    candidate = join(ARCHIVE_DIR, `${base}_${n}${ext}`);
+    n++;
+  }
+  return candidate;
 }
 
 const server = createServer(async (req, res) => {
@@ -132,10 +149,20 @@ const server = createServer(async (req, res) => {
       const imgResp = await fetch(result.imageUrl);
       const buffer = Buffer.from(await imgResp.arrayBuffer());
 
-      // Save (always .png — browsers detect real format from magic bytes)
+      // Ensure output and archive directories exist
       if (!existsSync(OUTPUT_DIR)) mkdirSync(OUTPUT_DIR, { recursive: true });
+      if (!existsSync(ARCHIVE_DIR)) mkdirSync(ARCHIVE_DIR, { recursive: true });
+
       const fname = tileName.replace(/[^a-z0-9_-]/gi, '_') + '.png';
       const filePath = join(OUTPUT_DIR, fname);
+
+      // Archive existing tile if present (don't overwrite)
+      if (existsSync(filePath)) {
+        const archivePath = uniqueArchivePath(fname);
+        renameSync(filePath, archivePath);
+        console.log(`[archive] Moved existing "${fname}" → archive/tiles/${archivePath.split('/').pop()}`);
+      }
+
       writeFileSync(filePath, buffer);
 
       return json(res, {
