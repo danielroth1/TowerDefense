@@ -13,6 +13,9 @@ export class SynergySystem {
     this.synergyLines = scene.add.graphics().setDepth(1);
   }
 
+  /** The synergy lines graphics object – must be ignored on the UI camera. */
+  getLines(): Phaser.GameObjects.Graphics { return this.synergyLines; }
+
   /** Call when a tower is placed or upgraded */
   register(tower: Tower, col: number, row: number) {
     this.towerGrid[row][col] = tower;

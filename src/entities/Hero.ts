@@ -43,6 +43,11 @@ export class Hero extends Phaser.Physics.Arcade.Sprite {
     this.attackFlash   = scene.add.graphics().setDepth(9);
   }
 
+  /** Returns all standalone graphics objects for dual-camera UI ignoring. */
+  getGraphics(): Phaser.GameObjects.Graphics[] {
+    return [this.hpBarBg, this.hpBarFg, this.targetMarker, this.selectionRing, this.attackFlash];
+  }
+
   setSelected(val: boolean) {
     this.isSelected = val;
     if (!val) this.selectionRing.clear();

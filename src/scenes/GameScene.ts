@@ -56,7 +56,7 @@ export class GameScene extends Phaser.Scene {
   // Dual-camera system
   private uiCam!: Phaser.Cameras.Scene2D.Camera;
   private uiGroup!: Phaser.GameObjects.Group;
-  // no wallDecorations needed — blob tiles handle visual transitions
+  private wallDecorations: Phaser.GameObjects.Image[] = [];
 
   // Interaction state
   private placingTower: TowerType | null = null;
@@ -140,6 +140,27 @@ export class GameScene extends Phaser.Scene {
     // Flyers – separate group, no ground collision
     this.flyerGroup = this.physics.add.group({ classType: Enemy, runChildUpdate: true });
 
+    // ── Patch group add() methods to auto-ignore new members on the UI camera ──
+    // Phaser 3.60 Group.add() does NOT emit any 'added' event, so event-based
+    // approaches (group.on('added'), scene.on('addedtogroup')) never fire.
+    for (const g of [this.towerGroup, this.enemyGroup, this.flyerGroup,
+                     this.projectileGroup, this.barricadeGroup]) {
+      const origAdd = g.add.bind(g);
+      g.add = (child: any, addToScene?: boolean) => {
+        const result = origAdd(child, addToScene);
+        if (this.uiCam) {
+          this.uiCam.ignore(child);
+          if (child instanceof Enemy) {
+            for (const bar of child.getHpBars()) this.uiCam.ignore(bar);
+          }
+          if (child instanceof Barricade) {
+            this.uiCam.ignore(child.getHpBar());
+          }
+        }
+        return result;
+      };
+    }
+
     // Enemy-enemy collision disabled for smooth pathing
     // Projectile hits enemies
     this.physics.add.overlap(
@@ -171,6 +192,15 @@ export class GameScene extends Phaser.Scene {
 
   private createUI() {
     this.uiGroup = this.add.group();
+
+    // Patch uiGroup.add() so new members are also ignored on the main camera
+    // (camera.ignore(group) only ignores members that exist at call time)
+    const origUIGroupAdd = this.uiGroup.add.bind(this.uiGroup);
+    this.uiGroup.add = (child: any, addToScene?: boolean) => {
+      const result = origUIGroupAdd(child, addToScene);
+      if (this.cameras?.main) this.cameras.main.ignore(child);
+      return result;
+    };
 
     this.hud = new HUD(this);
     this.bottomBar = new BottomBar(this, this.economy, this.abilitySystem);
@@ -253,45 +283,29 @@ export class GameScene extends Phaser.Scene {
   }
 
   private setupUICameraIgnore() {
-    // Known game groups – ignore current + future members via 'added' events
-    const ignoreOnUI = (child: Phaser.GameObjects.GameObject) => {
-      if (this.uiCam) this.uiCam.ignore(child);
-    };
-
-    for (const group of [this.towerGroup, this.enemyGroup, this.flyerGroup,
-                        this.projectileGroup, this.barricadeGroup]) {
-      this.uiCam.ignore(group);
-      group.on('added', ignoreOnUI);
-    }
-
-    // For enemy groups, also ignore HP bar graphics created by each Enemy
-    for (const eg of [this.enemyGroup, this.flyerGroup]) {
-      eg.on('added', (child: Phaser.GameObjects.GameObject) => {
-        if (child instanceof Enemy && this.uiCam) {
-          for (const bar of child.getHpBars()) {
-            this.uiCam.ignore(bar);
-          }
-        }
-      });
-    }
-
-    // For barricade group, also ignore HP bar graphics
-    this.barricadeGroup.on('added', (child: Phaser.GameObjects.GameObject) => {
-      if (child instanceof Barricade && this.uiCam) {
-        this.uiCam.ignore(child.getHpBar());
-      }
-    });
-
-    // Tile sprites
+    // Tile sprites (already exist, won't go through patched group add())
     for (const row of this.tileSprites) {
       for (const img of row) {
         if (img) this.uiCam.ignore(img);
       }
     }
 
-    // Individual game objects
-    if (this.hero)          this.uiCam.ignore(this.hero);
-    if (this.hoverOverlay)  this.uiCam.ignore(this.hoverOverlay);
+    // Wall decorations
+    for (const w of this.wallDecorations) {
+      this.uiCam.ignore(w);
+    }
+
+    // Hero and its standalone graphics (HP bars, selection ring, target, etc.)
+    if (this.hero) {
+      this.uiCam.ignore(this.hero);
+      for (const g of this.hero.getGraphics()) {
+        this.uiCam.ignore(g);
+      }
+    }
+    if (this.hoverOverlay) this.uiCam.ignore(this.hoverOverlay);
+
+    // Synergy lines (created directly via scene.add.graphics(), not in a group)
+    if (this.synergySystem) this.uiCam.ignore(this.synergySystem.getLines());
   }
 
   private setupInput() {
