@@ -2,12 +2,14 @@ import Phaser from 'phaser';
 import { COLORS, TILE_SIZE } from '../utils/constants';
 import { TOWER_DEFS, TOWER_TYPES_ORDERED } from '../data/towers';
 import { ENEMY_DEFS, BOSS_DEFS } from '../data/enemies';
+import { generateBlobTextures } from '../systems/BlobTileset';
 
 export class BootScene extends Phaser.Scene {
   constructor() { super('BootScene'); }
 
   create() {
     this.generateTileTextures();
+    this.generateBlobTextures();
     this.generateTowerTextures();
     this.generateEnemySheets();
     this.generateHeroSheet();
@@ -88,61 +90,6 @@ export class BootScene extends Phaser.Scene {
       g.strokePath();
     }
     g.generateTexture('tile_blocked', S, S);
-
-    // ── Path – cobblestone road, tileable ────────────────────────────────────
-    g.clear();
-    // Base: warm grey stone
-    for (let y = 0; y < S; y++) {
-      const t = y / S;
-      const r = Math.floor((0.50 + 0.06 * Math.sin(t * Math.PI * 2 + 0.5)) * 255);
-      const gr = Math.floor((0.44 + 0.06 * Math.sin(t * Math.PI * 2 + 1.0)) * 255);
-      const b = Math.floor((0.34 + 0.06 * Math.sin(t * Math.PI * 2 + 1.5)) * 255);
-      g.fillStyle(Phaser.Display.Color.GetColor(r, gr, b), 1);
-      g.fillRect(0, y, S, 1);
-    }
-    // Cobblestone blocks arranged in a staggered grid (tileable pattern)
-    const cols = 3, rows = 3;
-    const cw = S / cols, ch = S / rows;
-    for (let row = 0; row < rows; row++) {
-      for (let col = 0; col < cols; col++) {
-        // Stagger: odd rows shift by half a column (wrap around)
-        const stagger = (row % 2 === 1) ? cw / 2 : 0;
-        const cx = col * cw + stagger;
-        const cy = row * ch;
-        const pad = 3;
-        const sw = cw - pad * 2;
-        const sh = ch - pad * 2;
-        // Shift x to wrap correctly for staggered columns
-        let sx = cx + pad;
-        if (sx + sw > S) {
-          // Wrap: draw in two parts
-          const part1W = S - sx;
-          const part2W = sw - part1W;
-          g.fillStyle(0x7a6e58, 0.85);
-          g.fillRoundedRect(sx, cy + pad, part1W, sh, 2);
-          g.fillRoundedRect(0, cy + pad, part2W, sh, 2);
-          g.lineStyle(1, 0x5a4e30, 0.5);
-          g.strokeRoundedRect(sx, cy + pad, part1W, sh, 2);
-          g.strokeRoundedRect(0, cy + pad, part2W, sh, 2);
-          // Stone highlight
-          g.fillStyle(0x9a8e70, 0.2);
-          g.fillRoundedRect(sx, cy + pad + 1, part1W, sh * 0.3, 1);
-          g.fillRoundedRect(0, cy + pad + 1, part2W, sh * 0.3, 1);
-        } else {
-          g.fillStyle(0x7a6e58, 0.85);
-          g.fillRoundedRect(sx, cy + pad, sw, sh, 2);
-          g.lineStyle(1, 0x5a4e30, 0.5);
-          g.strokeRoundedRect(sx, cy + pad, sw, sh, 2);
-          // Stone highlight (light on top-left)
-          g.fillStyle(0x9a8e70, 0.2);
-          g.fillRoundedRect(sx, cy + pad + 1, sw * 0.9, sh * 0.3, 1);
-        }
-      }
-    }
-    // Mortar lines between stones
-    g.lineStyle(1, 0x4a3e20, 0.35);
-    g.strokeRect(0, 0, S, S);
-    g.generateTexture('tile_path', S, S);
 
     // ── Buildable – lush grass, tileable ─────────────────────────────────────
     g.clear();
@@ -262,7 +209,14 @@ export class BootScene extends Phaser.Scene {
     g.generateTexture('tile_goal', S, S);
 
     g.destroy();
-  }// ─── Towers ───────────────────────────────────────────────────────────────
+  }
+
+  // ─── Blob tileset ─────────────────────────────────────────────────────────
+  private generateBlobTextures() {
+    generateBlobTextures(this);
+  }
+
+  // ─── Towers ───────────────────────────────────────────────────────────────
   private generateTowerTextures() {
     const S = 44;
     const C = S / 2;

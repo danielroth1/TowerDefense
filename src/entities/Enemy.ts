@@ -190,6 +190,11 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     }
   }
 
+  /** Returns HP bar graphics for dual-camera UI ignoring. */
+  getHpBars(): Phaser.GameObjects.Graphics[] {
+    return [this.hpBarBg, this.hpBarFg];
+  }
+
   private updateHPBar() {
     const bw = 28;
     const bh = 4;

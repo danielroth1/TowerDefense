@@ -20,6 +20,9 @@ export class Barricade extends Phaser.GameObjects.Image {
     this.hpBar = scene.add.graphics().setDepth(5);
   }
 
+  /** Returns the HP bar graphics for dual-camera UI ignoring. */
+  getHpBar(): Phaser.GameObjects.Graphics { return this.hpBar; }
+
   takeDamage(amount: number) {
     this.hp -= amount;
     if (this.hp <= 0) {

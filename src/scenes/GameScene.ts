@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
-import { generateMap, type MapData, type TileType } from '../systems/MapGenerator';
+import { generateMap, type MapData, type GridTile } from '../systems/MapGenerator';
+import { computeBlobMask, blobTileKey } from '../systems/BlobTileset';
 import { Tower } from '../entities/Tower';
 import { Enemy } from '../entities/Enemy';
 import { Projectile, type ProjectileConfig } from '../entities/Projectile';
@@ -55,7 +56,7 @@ export class GameScene extends Phaser.Scene {
   // Dual-camera system
   private uiCam!: Phaser.Cameras.Scene2D.Camera;
   private uiGroup!: Phaser.GameObjects.Group;
-  private wallDecorations: Phaser.GameObjects.Image[] = [];
+  // no wallDecorations needed — blob tiles handle visual transitions
 
   // Interaction state
   private placingTower: TowerType | null = null;
@@ -104,7 +105,7 @@ export class GameScene extends Phaser.Scene {
       this.tileSprites[r] = [];
       for (let c = 0; c < GRID_COLS; c++) {
         const tile = grid[r][c];
-        const key = this.tileKey(tile.type);
+        const key = this.tileKey(tile, r, c);
         const img  = this.add.image(
           c * TILE_SIZE + TILE_SIZE / 2,
           r * TILE_SIZE + TILE_SIZE / 2,
@@ -114,39 +115,19 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // Wall barriers between adjacent path tiles (draw only right and down to avoid dupes)
-    for (let r = 0; r < GRID_ROWS; r++) {
-      for (let c = 0; c < GRID_COLS; c++) {
-        if (grid[r][c].type !== 'path') continue;
-        // Check right neighbor
-        if (c + 1 < GRID_COLS && grid[r][c + 1].type === 'path') {
-          const wx = c * TILE_SIZE + TILE_SIZE;
-          const wy = r * TILE_SIZE + TILE_SIZE / 2;
-          const wall = this.add.image(wx, wy, 'tile_wall').setDepth(1).setAlpha(0.45).setAngle(90);
-          this.wallDecorations.push(wall);
-        }
-        // Check down neighbor
-        if (r + 1 < GRID_ROWS && grid[r + 1][c].type === 'path') {
-          const wx = c * TILE_SIZE + TILE_SIZE / 2;
-          const wy = r * TILE_SIZE + TILE_SIZE;
-          const wall = this.add.image(wx, wy, 'tile_wall').setDepth(1).setAlpha(0.45);
-          this.wallDecorations.push(wall);
-        }
-      }
-    }
-
     // Hover overlay
     this.hoverOverlay = this.add.image(0, 0, 'tile_buildable_hover').setAlpha(0).setDepth(1);
   }
 
-  private tileKey(type: TileType): string {
-    switch (type) {
-      case 'spawn':     return 'tile_spawn';
-      case 'goal':      return 'tile_goal';
-      case 'path':      return 'tile_path';
-      case 'buildable': return 'tile_buildable';
-      default:          return 'tile_blocked';
+  private tileKey(tile: GridTile, row: number, col: number): string {
+    if (tile.type === 'spawn')     return 'tile_spawn';
+    if (tile.type === 'goal')      return 'tile_goal';
+    if (tile.type === 'path') {
+      const mask = computeBlobMask(this.mapData.grid, row, col);
+      return blobTileKey(mask);
     }
+    if (tile.type === 'buildable') return 'tile_buildable';
+    return 'tile_blocked';
   }
 
   private createGroups() {
@@ -283,16 +264,29 @@ export class GameScene extends Phaser.Scene {
       group.on('added', ignoreOnUI);
     }
 
+    // For enemy groups, also ignore HP bar graphics created by each Enemy
+    for (const eg of [this.enemyGroup, this.flyerGroup]) {
+      eg.on('added', (child: Phaser.GameObjects.GameObject) => {
+        if (child instanceof Enemy && this.uiCam) {
+          for (const bar of child.getHpBars()) {
+            this.uiCam.ignore(bar);
+          }
+        }
+      });
+    }
+
+    // For barricade group, also ignore HP bar graphics
+    this.barricadeGroup.on('added', (child: Phaser.GameObjects.GameObject) => {
+      if (child instanceof Barricade && this.uiCam) {
+        this.uiCam.ignore(child.getHpBar());
+      }
+    });
+
     // Tile sprites
     for (const row of this.tileSprites) {
       for (const img of row) {
         if (img) this.uiCam.ignore(img);
       }
-    }
-
-    // Wall decorations
-    for (const w of this.wallDecorations) {
-      this.uiCam.ignore(w);
     }
 
     // Individual game objects
