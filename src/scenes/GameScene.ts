@@ -1,11 +1,6 @@
 import Phaser from 'phaser';
 import { generateMap, type MapData, type GridTile } from '../systems/MapGenerator';
 import { computeBlobMask, blobTileKey } from '../systems/BlobTileset';
-import {
-  computeCornerMask,
-  transitionTileKey,
-  tileTypeToLayerId,
-} from '../systems/TerrainTransition';
 import { Tower } from '../entities/Tower';
 import { Enemy } from '../entities/Enemy';
 import { Projectile, type ProjectileConfig } from '../entities/Projectile';
@@ -102,60 +97,34 @@ export class GameScene extends Phaser.Scene {
     this.physics.world.setBounds(0, 0, GRID_COLS * TILE_SIZE, GRID_ROWS * TILE_SIZE);
   }
 
-  private transitionOverlays: Phaser.GameObjects.Image[][] = [];
-
   private buildMap() {
     const { grid } = this.mapData;
     this.tileSprites = [];
-    this.transitionOverlays = [];
 
     for (let r = 0; r < GRID_ROWS; r++) {
       this.tileSprites[r] = [];
-      this.transitionOverlays[r] = [];
       for (let c = 0; c < GRID_COLS; c++) {
         const tile = grid[r][c];
         const px = c * TILE_SIZE + TILE_SIZE / 2;
         const py = r * TILE_SIZE + TILE_SIZE / 2;
 
-        const key = this.tileKey(tile, r, c);
-        const img = this.add.image(px, py, key).setDepth(0);
+        const key = this.tileKey(tile);
+        const img = this.add.image(px, py, key).setDepth(0).setDisplaySize(TILE_SIZE, TILE_SIZE);
         this.tileSprites[r][c] = img;
-
-        if (tile.type === 'buildable') {
-          this.renderTransitionOverlay(r, c, px, py);
-        } else {
-          this.transitionOverlays[r][c] = null as any;
-        }
       }
     }
 
-    this.hoverOverlay = this.add.image(0, 0, 'tile_buildable_hover').setAlpha(0).setDepth(1);
+    this.hoverOverlay = this.add.image(0, 0, 'tile_buildable_hover').setAlpha(0).setDepth(1).setDisplaySize(TILE_SIZE, TILE_SIZE);
   }
 
-  private renderTransitionOverlay(row: number, col: number, px: number, py: number): void {
-    const layerId = tileTypeToLayerId('buildable');
-    if (!layerId) return;
-    if (this.transitionOverlays[row]?.[col]) {
-      this.transitionOverlays[row][col].destroy();
-      this.transitionOverlays[row][col] = null as any;
-    }
-    const grid = this.mapData.grid;
-    const isLand = (r: number, c: number): boolean => {
-      if (r < 0 || r >= GRID_ROWS || c < 0 || c >= GRID_COLS) return false;
-      const type = grid[r][c].type;
-      return type === 'buildable' || type === 'path' || type === 'spawn' || type === 'goal';
-    };
-    const mask = computeCornerMask(isLand, row, col);
-    const tKey = transitionTileKey(layerId, mask);
-    const overlay = this.add.image(px, py, tKey).setDepth(0.1);
-    this.transitionOverlays[row][col] = overlay;
-  }
-
-  private tileKey(tile: GridTile, row: number, col: number): string {
+  private tileKey(tile: GridTile): string {
     if (tile.type === 'spawn')     return 'tile_spawn';
     if (tile.type === 'goal')      return 'tile_goal';
+    if (tile.type === 'buildable') return 'tile_buildable';
     if (tile.type === 'path') {
-      const mask = computeBlobMask(this.mapData.grid, row, col);
+      // Use AI path tile if loaded; fall back to procedural blob tiles
+      if (this.textures.exists('tile_path')) return 'tile_path';
+      const mask = computeBlobMask(this.mapData.grid, tile.row, tile.col);
       return blobTileKey(mask);
     }
     return 'tile_ground';
@@ -284,11 +253,8 @@ export class GameScene extends Phaser.Scene {
       // Restore tile to buildable!
       this.mapData.grid[row][col].type = 'buildable';
       if (this.tileSprites[row]?.[col]) {
-        this.tileSprites[row][col].setTexture('tile_ground');
+        this.tileSprites[row][col].setTexture('tile_buildable');
       }
-      const px = col * TILE_SIZE + TILE_SIZE / 2;
-      const py = row * TILE_SIZE + TILE_SIZE / 2;
-      this.renderTransitionOverlay(row, col, px, py);
       this.bottomBar.showBuildMode();
     };
 
@@ -318,14 +284,6 @@ export class GameScene extends Phaser.Scene {
   private setupUICameraIgnore() {
     // Tile sprites (already exist, won't go through patched group add())
     for (const row of this.tileSprites) {
-      for (const img of row) {
-        if (img) this.uiCam.ignore(img);
-      }
-    }
-
-    // Transition overlay sprites
-    for (const row of this.transitionOverlays) {
-      if (!row) continue;
       for (const img of row) {
         if (img) this.uiCam.ignore(img);
       }
@@ -487,11 +445,8 @@ export class GameScene extends Phaser.Scene {
       this.mapData.grid[b.row][b.col].type = 'buildable';
       this.barricadeCount--;
       if (this.tileSprites[b.row]?.[b.col]) {
-        this.tileSprites[b.row][b.col].setTexture('tile_ground');
+        this.tileSprites[b.row][b.col].setTexture('tile_buildable');
       }
-      const px = b.col * TILE_SIZE + TILE_SIZE / 2;
-      const py = b.row * TILE_SIZE + TILE_SIZE / 2;
-      this.renderTransitionOverlay(b.row, b.col, px, py);
     });
 
     this.events.on('game_over', () => {
@@ -607,11 +562,6 @@ export class GameScene extends Phaser.Scene {
       this.barricadeGroup.add(b);
       this.mapData.grid[row][col].type = 'path';
 
-      // Destroy transition overlay (tile is now path)
-      if (this.transitionOverlays[row]?.[col]) {
-        this.transitionOverlays[row][col].destroy();
-        this.transitionOverlays[row][col] = null as any;
-      }
       // Update tile to path blob texture
       if (this.tileSprites[row]?.[col]) {
         const mask = computeBlobMask(this.mapData.grid, row, col);

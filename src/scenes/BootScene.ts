@@ -6,10 +6,41 @@ import { generateBlobTextures } from '../systems/BlobTileset';
 import { generateTransitionTextures } from '../systems/TerrainTransition';
 
 export class BootScene extends Phaser.Scene {
+  /** Set of tile keys that were loaded from AI-generated images (vs procedural). */
+  private aiLoadedTiles = new Set<string>();
+
   constructor() { super('BootScene'); }
 
+  preload() {
+    // ── Try to load AI-generated tile images from assets/tiles/ ─────────
+    // Missing images are silently skipped; procedural fallback runs in create().
+    // Transition tiles (tile_trans_*) are NOT preloaded — they are always
+    // generated procedurally in generateTerrainTransitionTextures().
+    this.load.on('loaderror', (file: Phaser.Loader.File) => {
+      console.warn(`[Boot] AI tile not found: ${file.key} → generating procedurally`);
+    });
+    this.load.on('filecomplete', (_key: string) => {
+      this.aiLoadedTiles.add(_key);
+    });
+
+    // Base terrain tiles
+    this.load.image('tile_water',    'assets/tiles/tile_water.png');
+    this.load.image('tile_grass',    'assets/tiles/tile_grass.png');
+    this.load.image('tile_sand',     'assets/tiles/tile_sand.png');
+    this.load.image('tile_buildable','assets/tiles/tile_grass.png'); // alias
+    this.load.image('tile_ground',   'assets/tiles/tile_water.png'); // alias
+
+    // Path / road tiles
+    this.load.image('tile_path',     'assets/tiles/tile_path.png');
+
+    // Special tiles
+    this.load.image('tile_spawn',    'assets/tiles/tile_spawn.png');
+    this.load.image('tile_goal',     'assets/tiles/tile_goal.png');
+  }
+
   create() {
-    this.generateTileTextures();
+    this.fillMissingTileTextures();
+    this.generateUITileTextures();
     this.generateBlobTextures();
     this.generateTerrainTransitionTextures();
     this.generateTowerTextures();
@@ -22,129 +53,24 @@ export class BootScene extends Phaser.Scene {
     this.scene.start('MenuScene');
   }
 
-  // ─── Tiles ───────────────────────────────────────────────────────────────
-  // ─── Tiles ───────────────────────────────────────────────────────────────
-  // ─── Tiles ───────────────────────────────────────────────────────────────
-  private generateTileTextures() {
+  /** Generate procedural textures for any tiles not loaded from disk. */
+  private fillMissingTileTextures() {
+    if (!this.textures.exists('tile_water')) this.generateWaterTile();
+    if (!this.textures.exists('tile_ground')) this.generateWaterTileAlias();
+    if (!this.textures.exists('tile_grass')) this.generateGrassTile();
+    if (!this.textures.exists('tile_buildable')) this.generateGrassTileAlias();
+    if (!this.textures.exists('tile_sand')) this.generateSandTile();
+    if (!this.textures.exists('tile_path')) this.generatePathTile();
+    if (!this.textures.exists('tile_spawn')) this.generateSpawnTile();
+    if (!this.textures.exists('tile_goal')) this.generateGoalTile();
+  }
+
+  /** Generate UI tile overlays that are always procedural (never AI). */
+  private generateUITileTextures() {
     const g = this.add.graphics();
     const S = TILE_SIZE;
 
-    // ── Ground (water) – tileable bright blue water with sine waves ──────────
-    g.clear();
-    // Use same color at top and bottom for seamless vertical tiling
-    for (let y = 0; y < S; y++) {
-      const t = y / S;
-      // Interpolate between gradient points
-      const r = 0.12 + (0.14 - 0.12) * (t < 0.33 ? t * 3 : t < 0.66 ? 1 - (t - 0.33) * 3 : (t - 0.66) * 3);
-      const gr = 0.22 + (0.28 - 0.22) * Math.sin(t * Math.PI);
-      const b  = 0.48 + (0.55 - 0.48) * Math.sin(t * Math.PI);
-      g.fillStyle(Phaser.Display.Color.GetColor(
-        Math.floor(r * 255), Math.floor(gr * 255), Math.floor(b * 255)), 1);
-      g.fillRect(0, y, S, 1);
-    }
-    // Sine wave ripples – seamless via modulo phase
-    for (let row = 0; row < 3; row++) {
-      const baseY = S * (0.25 + row * 0.22);
-      // Wave amplitude
-      const amp = 2.5;
-      g.lineStyle(1.5, 0x66bbee, 0.40);
-      g.beginPath();
-      for (let x = 0; x < S; x++) {
-        // Phase wraps at S so left and right edges match
-        const phase = (x / S) * Math.PI * 2 + row * 1.7;
-        const wy = baseY + amp * Math.sin(phase);
-        if (x === 0) g.moveTo(x, wy); else g.lineTo(x, wy);
-      }
-      g.strokePath();
-    }
-    // Foam flecks on wave crests – seeded so they repeat tileably
-    for (let row = 0; row < 3; row++) {
-      const baseY = S * (0.25 + row * 0.22);
-      g.fillStyle(0x99ddff, 0.22);
-      for (let i = 0; i < 4; i++) {
-        const fx = (i * 13 + row * 7) % S;
-        const wy = baseY + 2.5 * Math.sin((fx / S) * Math.PI * 2 + row * 1.7);
-        g.fillEllipse(fx, wy, 5, 2);
-      }
-    }
-    g.generateTexture('tile_ground', S, S);
-
-    // ── Blocked (deep water) – same as ground but darker, tileable ───────────
-    g.clear();
-    for (let y = 0; y < S; y++) {
-      const t = y / S;
-      const r = 0.08 + 0.03 * Math.sin(t * Math.PI);
-      const gr = 0.14 + 0.05 * Math.sin(t * Math.PI);
-      const b = 0.34 + 0.08 * Math.sin(t * Math.PI);
-      g.fillStyle(Phaser.Display.Color.GetColor(
-        Math.floor(r * 255), Math.floor(gr * 255), Math.floor(b * 255)), 1);
-      g.fillRect(0, y, S, 1);
-    }
-    for (let row = 0; row < 3; row++) {
-      const baseY = S * (0.25 + row * 0.22);
-      g.lineStyle(1, 0x4488bb, 0.35);
-      g.beginPath();
-      for (let x = 0; x < S; x++) {
-        const phase = (x / S) * Math.PI * 2 + row * 1.7 + 1;
-        const wy = baseY + 2 * Math.sin(phase);
-        if (x === 0) g.moveTo(x, wy); else g.lineTo(x, wy);
-      }
-      g.strokePath();
-    }
-    g.generateTexture('tile_blocked', S, S);
-
-    // ── Buildable – lush grass, tileable ─────────────────────────────────────
-    g.clear();
-    // Base green gradient that wraps vertically
-    for (let y = 0; y < S; y++) {
-      const t = y / S;
-      const osc = 0.5 + 0.5 * Math.sin(t * Math.PI * 2 - Math.PI / 2);
-      const r = Math.floor((0.14 + 0.04 * osc) * 255);
-      const gr = Math.floor((0.34 + 0.10 * osc) * 255);
-      const b = Math.floor((0.10 + 0.03 * osc) * 255);
-      g.fillStyle(Phaser.Display.Color.GetColor(r, gr, b), 1);
-      g.fillRect(0, y, S, 1);
-    }
-    // Grass blade clusters (tileable via modulo positioning)
-    for (let i = 0; i < 16; i++) {
-      const gx = (i * 17 + 5) % S;
-      const gy = (i * 13 + 7) % S;
-      const shade = (i % 3) === 0 ? 0.5 : 0.35;
-      g.fillStyle(0x3a8a22, shade);
-      g.fillRect(gx, gy, 2, 5 + (i % 4));
-    }
-    // Lighter grass highlights
-    for (let i = 0; i < 10; i++) {
-      const gx = (i * 23 + 3) % S;
-      const gy = (i * 19 + 11) % S;
-      g.fillStyle(0x5aaa33, 0.25);
-      g.fillRect(gx, gy, 1, 3);
-    }
-    // Tiny flowers
-    const flowerPositions = [
-      [0.15, 0.12], [0.55, 0.08], [0.35, 0.42],
-      [0.85, 0.28], [0.10, 0.62], [0.65, 0.72],
-      [0.45, 0.88], [0.88, 0.55], [0.72, 0.92],
-    ];
-    for (const [fx, fy] of flowerPositions) {
-      const col = Math.random() > 0.5 ? 0xffdd44 : 0xff9933;
-      g.fillStyle(col, 0.45);
-      g.fillCircle(fx * S, fy * S, 1.2);
-    }
-    // Stake markers for buildable identification
-    for (let side = 0; side < 4; side++) {
-      const sx2 = side < 2 ? 4 : S - 4;
-      const sy2 = (side % 2 === 0) ? 4 : S - 4;
-      g.fillStyle(0x5a3a1a, 0.7);
-      g.fillRect(sx2 - 1, sy2 - 2, 2, 4);
-      g.fillStyle([0xff4444, 0x44ff44, 0x4444ff, 0xffff44][side], 0.6);
-      g.fillCircle(sx2, sy2 - 2, 2);
-    }
-    g.lineStyle(1, 0x0a1808, 0.2);
-    g.strokeRect(0, 0, S, S);
-    g.generateTexture('tile_buildable', S, S);
-
-    // ── Buildable hover – green overlay ──────────────────────────────────────
+    // Buildable hover – green overlay
     g.clear();
     g.fillStyle(0x0a2a1a, 1);
     g.fillRect(0, 0, S, S);
@@ -154,7 +80,7 @@ export class BootScene extends Phaser.Scene {
     g.fillRect(2, 2, S - 4, S - 4);
     g.generateTexture('tile_buildable_hover', S, S);
 
-    // ── Transition edge + wall (kept for compat, not used in buildMap) ──────
+    // Edge transition wall
     g.clear();
     for (let y = 0; y < S; y++) {
       if (y < S * 0.4) {
@@ -173,6 +99,7 @@ export class BootScene extends Phaser.Scene {
     }
     g.generateTexture('tile_edge', S, S);
 
+    // Wall
     g.clear();
     g.fillStyle(0x5a4a30, 1);
     g.fillRect(0, 0, S, S);
@@ -181,8 +108,178 @@ export class BootScene extends Phaser.Scene {
     g.fillRect(1, 0, 3, S);
     g.generateTexture('tile_wall', S, S);
 
-    // ── Spawn – fire portal ──────────────────────────────────────────────────
-    g.clear();
+    g.destroy();
+  }
+
+  // ─── Individual tile generators (procedural fallback) ──────────────────
+
+  private generateWaterTile() {
+    const g = this.add.graphics();
+    const S = TILE_SIZE;
+    for (let y = 0; y < S; y++) {
+      const t = y / S;
+      const r = 0.12 + (0.14 - 0.12) * (t < 0.33 ? t * 3 : t < 0.66 ? 1 - (t - 0.33) * 3 : (t - 0.66) * 3);
+      const gr = 0.22 + (0.28 - 0.22) * Math.sin(t * Math.PI);
+      const b  = 0.48 + (0.55 - 0.48) * Math.sin(t * Math.PI);
+      g.fillStyle(Phaser.Display.Color.GetColor(Math.floor(r * 255), Math.floor(gr * 255), Math.floor(b * 255)), 1);
+      g.fillRect(0, y, S, 1);
+    }
+    for (let row = 0; row < 3; row++) {
+      const baseY = S * (0.25 + row * 0.22);
+      g.lineStyle(1.5, 0x66bbee, 0.40);
+      g.beginPath();
+      for (let x = 0; x < S; x++) {
+        const phase = (x / S) * Math.PI * 2 + row * 1.7;
+        const wy = baseY + 2.5 * Math.sin(phase);
+        if (x === 0) g.moveTo(x, wy); else g.lineTo(x, wy);
+      }
+      g.strokePath();
+    }
+    for (let row = 0; row < 3; row++) {
+      const baseY = S * (0.25 + row * 0.22);
+      g.fillStyle(0x99ddff, 0.22);
+      for (let i = 0; i < 4; i++) {
+        const fx = (i * 13 + row * 7) % S;
+        const wy = baseY + 2.5 * Math.sin((fx / S) * Math.PI * 2 + row * 1.7);
+        g.fillEllipse(fx, wy, 5, 2);
+      }
+    }
+    g.generateTexture('tile_water', S, S);
+    g.destroy();
+  }
+
+  private generateWaterTileAlias() {
+    const g = this.add.graphics();
+    const S = TILE_SIZE;
+    for (let y = 0; y < S; y++) {
+      const t = y / S;
+      const r = 0.12 + 0.02 * Math.sin(t * Math.PI * 2);
+      const gr = 0.22 + 0.06 * Math.sin(t * Math.PI);
+      const b = 0.48 + 0.07 * Math.sin(t * Math.PI);
+      g.fillStyle(Phaser.Display.Color.GetColor(Math.floor(r * 255), Math.floor(gr * 255), Math.floor(b * 255)), 1);
+      g.fillRect(0, y, S, 1);
+    }
+    for (let row = 0; row < 3; row++) {
+      const baseY = S * (0.25 + row * 0.22);
+      g.lineStyle(1.5, 0x66bbee, 0.40);
+      g.beginPath();
+      for (let x = 0; x < S; x++) {
+        const wy = baseY + 2.5 * Math.sin((x / S) * Math.PI * 2 + row * 1.7);
+        if (x === 0) g.moveTo(x, wy); else g.lineTo(x, wy);
+      }
+      g.strokePath();
+    }
+    g.generateTexture('tile_ground', S, S);
+    g.generateTexture('tile_blocked', S, S);
+    g.destroy();
+  }
+
+  private generateGrassTile() {
+    const g = this.add.graphics();
+    const S = TILE_SIZE;
+    for (let y = 0; y < S; y++) {
+      const t = y / S;
+      const osc = 0.5 + 0.5 * Math.sin(t * Math.PI * 2 - Math.PI / 2);
+      const r = Math.floor((0.14 + 0.04 * osc) * 255);
+      const gr = Math.floor((0.34 + 0.10 * osc) * 255);
+      const b = Math.floor((0.10 + 0.03 * osc) * 255);
+      g.fillStyle(Phaser.Display.Color.GetColor(r, gr, b), 1);
+      g.fillRect(0, y, S, 1);
+    }
+    for (let i = 0; i < 16; i++) {
+      const gx = (i * 17 + 5) % S;
+      const gy = (i * 13 + 7) % S;
+      g.fillStyle(0x3a8a22, (i % 3) === 0 ? 0.5 : 0.35);
+      g.fillRect(gx, gy, 2, 5 + (i % 4));
+    }
+    for (let i = 0; i < 10; i++) {
+      g.fillStyle(0x5aaa33, 0.25);
+      g.fillRect((i * 23 + 3) % S, (i * 19 + 11) % S, 1, 3);
+    }
+    const fps = [[0.15,0.12],[0.55,0.08],[0.35,0.42],[0.85,0.28],[0.10,0.62],[0.65,0.72],[0.45,0.88],[0.88,0.55],[0.72,0.92]];
+    for (const [fx, fy] of fps) {
+      g.fillStyle(Math.random() > 0.5 ? 0xffdd44 : 0xff9933, 0.45);
+      g.fillCircle(fx * S, fy * S, 1.2);
+    }
+    g.generateTexture('tile_grass', S, S);
+    g.destroy();
+  }
+
+  private generateGrassTileAlias() {
+    const g = this.add.graphics();
+    const S = TILE_SIZE;
+    for (let y = 0; y < S; y++) {
+      const t = y / S;
+      const osc = 0.5 + 0.5 * Math.sin(t * Math.PI * 2 - Math.PI / 2);
+      const r = Math.floor((0.14 + 0.04 * osc) * 255);
+      const gr = Math.floor((0.34 + 0.10 * osc) * 255);
+      const b = Math.floor((0.10 + 0.03 * osc) * 255);
+      g.fillStyle(Phaser.Display.Color.GetColor(r, gr, b), 1);
+      g.fillRect(0, y, S, 1);
+    }
+    for (let i = 0; i < 16; i++) {
+      g.fillStyle(0x3a8a22, (i % 3) === 0 ? 0.5 : 0.35);
+      g.fillRect((i * 17 + 5) % S, (i * 13 + 7) % S, 2, 5 + (i % 4));
+    }
+    for (let i = 0; i < 10; i++) {
+      g.fillStyle(0x5aaa33, 0.25);
+      g.fillRect((i * 23 + 3) % S, (i * 19 + 11) % S, 1, 3);
+    }
+    for (let side = 0; side < 4; side++) {
+      const sx2 = side < 2 ? 4 : S - 4;
+      const sy2 = (side % 2 === 0) ? 4 : S - 4;
+      g.fillStyle(0x5a3a1a, 0.7);
+      g.fillRect(sx2 - 1, sy2 - 2, 2, 4);
+      g.fillStyle([0xff4444, 0x44ff44, 0x4444ff, 0xffff44][side], 0.6);
+      g.fillCircle(sx2, sy2 - 2, 2);
+    }
+    g.lineStyle(1, 0x0a1808, 0.2);
+    g.strokeRect(0, 0, S, S);
+    g.generateTexture('tile_buildable', S, S);
+    g.destroy();
+  }
+
+  private generateSandTile() {
+    const g = this.add.graphics();
+    const S = TILE_SIZE;
+    for (let y = 0; y < S; y++) {
+      const t = y / S;
+      const r = Math.floor((0.70 + 0.08 * Math.sin(t * Math.PI)) * 255);
+      const gr = Math.floor((0.62 + 0.06 * Math.sin(t * Math.PI + 0.5)) * 255);
+      const b = Math.floor((0.40 + 0.04 * Math.sin(t * Math.PI * 2)) * 255);
+      g.fillStyle(Phaser.Display.Color.GetColor(r, gr, b), 1);
+      g.fillRect(0, y, S, 1);
+    }
+    for (let i = 0; i < 12; i++) {
+      g.fillStyle(0xa09058, 0.3);
+      g.fillCircle((i * 19 + 7) % S, (i * 15 + 3) % S, 1.5 + (i % 3));
+    }
+    g.generateTexture('tile_sand', S, S);
+    g.destroy();
+  }
+
+  private generatePathTile() {
+    const g = this.add.graphics();
+    const S = TILE_SIZE;
+    for (let y = 0; y < S; y++) {
+      const t = y / S;
+      const r = Math.floor((0.35 + 0.06 * Math.sin(t * Math.PI)) * 255);
+      const gr = Math.floor((0.30 + 0.05 * Math.sin(t * Math.PI + 0.5)) * 255);
+      const b = Math.floor((0.20 + 0.04 * Math.sin(t * Math.PI * 2)) * 255);
+      g.fillStyle(Phaser.Display.Color.GetColor(r, gr, b), 1);
+      g.fillRect(0, y, S, 1);
+    }
+    for (let i = 0; i < 8; i++) {
+      g.fillStyle(0x5a4a30, 0.5);
+      g.fillRect((i * 25 + 3) % S, (i * 17 + 5) % S, 6 + (i % 4), 4 + (i % 3));
+    }
+    g.generateTexture('tile_path', S, S);
+    g.destroy();
+  }
+
+  private generateSpawnTile() {
+    const g = this.add.graphics();
+    const S = TILE_SIZE;
     g.fillStyle(0x1a0a00, 1); g.fillRect(0, 0, S, S);
     for (let i = 0; i < 5; i++) {
       g.fillStyle(0xff2200 + i * 0x331100, 0.5 - i * 0.08);
@@ -192,9 +289,12 @@ export class BootScene extends Phaser.Scene {
     g.fillStyle(0xff8800, 1);
     g.fillTriangle(S*0.22, S*0.28, S*0.80, S*0.5, S*0.22, S*0.72);
     g.generateTexture('tile_spawn', S, S);
+    g.destroy();
+  }
 
-    // ── Goal – golden castle gate ────────────────────────────────────────────
-    g.clear();
+  private generateGoalTile() {
+    const g = this.add.graphics();
+    const S = TILE_SIZE;
     g.fillStyle(0x0a1a08, 1); g.fillRect(0, 0, S, S);
     for (let i = 0; i < 4; i++) {
       g.fillStyle(0x006622 + i * 0x004411, 0.45 - i * 0.09);
@@ -209,7 +309,6 @@ export class BootScene extends Phaser.Scene {
     for (let ci = 0; ci < 3; ci++)
       g.fillRect(S*(0.34 + ci*0.11), S*0.20, S*0.06, S*0.08);
     g.generateTexture('tile_goal', S, S);
-
     g.destroy();
   }
 
@@ -220,9 +319,10 @@ export class BootScene extends Phaser.Scene {
 
   // ─── Terrain transition tiles ─────────────────────────────────────────────
   private generateTerrainTransitionTextures() {
-    generateTransitionTextures(this, 'grass');
-    // More terrain layers (e.g. 'sand', 'water') can be added here
-    // when the map generator produces them.
+    // Only generate procedurally for masks not loaded from AI images
+    generateTransitionTextures(this, 'grass', this.aiLoadedTiles);
+    // Sand & water transition layers — generate when those tile types are used
+    // More terrain layers can be added here when the map generator produces them.
   }
 
   // ─── Towers ───────────────────────────────────────────────────────────────

@@ -156,18 +156,29 @@ function colorsFor(terrainId: string): TerrainColors {
  * register them in Phaser's texture manager.
  *
  * Call this during BootScene.create() after the base tiles are ready.
+ *
+ * @param scene       — Phaser scene
+ * @param terrainId   — terrain identifier ('grass', 'sand', 'water')
+ * @param aiLoaded    — (optional) set of texture keys already loaded from AI images;
+ *                       masks present in this set are skipped.
  */
 export function generateTransitionTextures(
   scene: Phaser.Scene,
   terrainId: string,
+  aiLoaded?: Set<string>,
 ): void {
   const g = scene.add.graphics();
   const cols = colorsFor(terrainId);
 
   for (let mask = 0; mask < 16; mask++) {
+    const key = transitionTileKey(terrainId, mask);
+    // Skip if already loaded from AI-generated images
+    if (aiLoaded?.has(key)) continue;
+    if (scene.textures.exists(key)) continue; // already generated
+
     g.clear();
     drawTransitionTile(g, mask, terrainId, cols);
-    g.generateTexture(transitionTileKey(terrainId, mask), TS, TS);
+    g.generateTexture(key, TS, TS);
   }
 
   g.destroy();

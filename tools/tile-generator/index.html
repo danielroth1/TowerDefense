@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🎨 Tower Defense - AI Tile Generator</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #0d1117;
+      --panel: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --red: #f85149;
+      --yellow: #d2991d;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+    }
+
+    /* ─── Sidebar ─────────────────────────────────────────────── */
+    .sidebar {
+      width: 380px;
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+    .sidebar-header {
+      padding: 20px 24px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sidebar-header h1 {
+      font-size: 20px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .sidebar-header .subtitle {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 4px;
+    }
+    .sidebar-section {
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sidebar-section h3 {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+
+    /* Model selector */
+    .model-select {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .model-select:focus {
+      border-color: var(--accent);
+      outline: none;
+    }
+    .model-info {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+    .model-info .price {
+      color: var(--green);
+    }
+
+    /* Tile presets */
+    .preset-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .preset-btn {
+      padding: 10px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 13px;
+      cursor: pointer;
+      text-align: left;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: border-color 0.2s;
+    }
+    .preset-btn:hover { border-color: var(--accent); }
+    .preset-btn.active { border-color: var(--accent); background: #1a2332; }
+    .preset-dot {
+      width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0;
+    }
+
+    /* Prompt */
+    .prompt-area {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 13px;
+      font-family: inherit;
+      resize: vertical;
+      min-height: 70px;
+    }
+    .prompt-area:focus {
+      border-color: var(--accent);
+      outline: none;
+    }
+
+    /* Size inputs */
+    .size-row {
+      display: flex;
+      gap: 12px;
+    }
+    .size-input {
+      flex: 1;
+    }
+    .size-input label {
+      display: block;
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .size-input input {
+      width: 100%;
+      padding: 8px 10px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    /* Generate button */
+    .generate-btn {
+      display: block;
+      width: 100%;
+      padding: 12px;
+      margin-top: 8px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .generate-btn:hover { opacity: 0.9; }
+    .generate-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .generate-btn.spinning::after {
+      content: '';
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid transparent;
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Status */
+    .status {
+      padding: 8px 24px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .status.error { color: var(--red); }
+    .status.success { color: var(--green); }
+
+    /* ─── Preview area ────────────────────────────────────────── */
+    .preview {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+    }
+    .preview-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+    .preview-header h2 {
+      font-size: 16px;
+      font-weight: 500;
+    }
+    .preview-count {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .empty-state {
+      text-align: center;
+      color: var(--muted);
+      padding: 80px 20px;
+    }
+    .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+    .empty-state p { font-size: 14px; }
+
+    /* Tile cards */
+    .tile-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 12px;
+    }
+    .tile-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      transition: border-color 0.2s, transform 0.15s;
+    }
+    .tile-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+    }
+    .tile-card img {
+      width: 100%;
+      aspect-ratio: 1;
+      object-fit: cover;
+      display: block;
+    }
+    .tile-card .info {
+      padding: 10px 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .tile-card .name {
+      font-size: 12px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 110px;
+    }
+    .tile-card .size {
+      font-size: 10px;
+      color: var(--muted);
+    }
+    .tile-card .actions {
+      display: flex;
+      gap: 6px;
+    }
+    .tile-card .btn-icon {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      width: 26px; height: 26px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+    }
+    .tile-card .btn-icon:hover {
+      background: var(--bg);
+      color: var(--text);
+    }
+    .tile-card .btn-icon.delete:hover {
+      border-color: var(--red);
+      color: var(--red);
+    }
+
+    /* Tooltip */
+    .tooltip {
+      position: fixed;
+      background: #000;
+      color: #fff;
+      padding: 4px 8px;
+      font-size: 11px;
+      border-radius: 4px;
+      pointer-events: none;
+      z-index: 999;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+    .tooltip.visible { opacity: 1; }
+  </style>
+</head>
+<body>
+  <!-- ─── Sidebar ─────────────────────────────────────────────── -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h1>🎨 AI Tile Generator</h1>
+      <div class="subtitle">Tower Defense Game — Replace vector tiles with AI images</div>
+    </div>
+
+    <!-- Model -->
+    <div class="sidebar-section">
+      <h3>🤖 Model</h3>
+      <select class="model-select" id="modelSelect">
+        <option value="fal-ai/fast-sdxl" selected>Fast SDXL — Cheap & Fast ⚡</option>
+        <option value="fal-ai/flux/schnell">Flux Schnell — Good & Fast</option>
+        <option value="fal-ai/flux/dev">Flux Dev — Best Quality</option>
+        <option value="fal-ai/stable-diffusion-v3.5">SD 3.5 — Great Quality</option>
+      </select>
+      <div class="model-info" id="modelInfo">Cost: <span class="price">~$0.001/img</span> &bull; Speed: ~2s</div>
+    </div>
+
+    <!-- Tile presets -->
+    <div class="sidebar-section">
+      <h3>🧩 Tile Preset</h3>
+      <div class="preset-grid" id="presetGrid">
+        <button class="preset-btn active" data-preset="water">
+          <span class="preset-dot" style="background:#1e5099"></span> Water
+        </button>
+        <button class="preset-btn" data-preset="grass">
+          <span class="preset-dot" style="background:#3a8a22"></span> Grass
+        </button>
+        <button class="preset-btn" data-preset="sand">
+          <span class="preset-dot" style="background:#c4b078"></span> Sand
+        </button>
+        <button class="preset-btn" data-preset="path">
+          <span class="preset-dot" style="background:#7a6e58"></span> Path
+        </button>
+        <button class="preset-btn" data-preset="spawn">
+          <span class="preset-dot" style="background:#cc3300"></span> Spawn
+        </button>
+        <button class="preset-btn" data-preset="goal">
+          <span class="preset-dot" style="background:#d4a017"></span> Goal
+        </button>
+        <button class="preset-btn" data-preset="custom">
+          <span class="preset-dot" style="background:#666"></span> Custom
+        </button>
+      </div>
+    </div>
+
+    <!-- Prompt -->
+    <div class="sidebar-section">
+      <h3>📝 Prompt</h3>
+      <textarea class="prompt-area" id="prompt" placeholder="Describe your tile..."></textarea>
+    </div>
+
+    <!-- Size -->
+    <div class="sidebar-section">
+      <h3>📐 Dimensions</h3>
+      <div class="size-row">
+        <div class="size-input">
+          <label>Width</label>
+          <input type="number" id="tileWidth" value="512" min="64" max="2048" step="64" />
+        </div>
+        <div class="size-input">
+          <label>Height</label>
+          <input type="number" id="tileHeight" value="512" min="64" max="2048" step="64" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Filename -->
+    <div class="sidebar-section">
+      <h3>💾 Filename</h3>
+      <input type="text" class="prompt-area" id="filename" placeholder="tile_name (auto-filled from preset)"
+             style="min-height:unset; height:40px;" />
+    </div>
+
+    <!-- Generate -->
+    <div class="sidebar-section">
+      <button class="generate-btn" id="generateBtn" disabled>✨ Generate Tile</button>
+      <div class="status" id="status"></div>
+    </div>
+  </aside>
+
+  <!-- ─── Preview ─────────────────────────────────────────────── -->
+  <main class="preview">
+    <div class="preview-header">
+      <h2>🖼️ Generated Tiles</h2>
+      <span class="preview-count" id="tileCount">0 tiles</span>
+    </div>
+    <div id="previewContent">
+      <div class="empty-state">
+        <div class="icon">🎲</div>
+        <p>No tiles generated yet.<br />Select a preset, adjust the prompt, and click Generate.</p>
+      </div>
+    </div>
+    <div class="tile-grid" id="tileGrid" style="display:none;"></div>
+  </main>
+
+  <div class="tooltip" id="tooltip"></div>
+
+  <script>
+    // ─── Constants ──────────────────────────────────────────────
+    const PRESETS = {
+      water: {
+        name: 'Water',
+        prompt: 'seamless tileable top-down water texture, cartoon fantasy style, deep blue ocean with soft ripples, clean edges, game tile isometric rpg, 2d sprite texture map',
+        color: '#1e5099',
+        file: 'tile_water',
+      },
+      grass: {
+        name: 'Grass',
+        prompt: 'seamless tileable top-down grass texture, cartoon fantasy style, lush green meadow with tiny flowers and grass blades, clean edges, game tile isometric rpg, 2d sprite texture map',
+        color: '#3a8a22',
+        file: 'tile_grass',
+      },
+      sand: {
+        name: 'Sand',
+        prompt: 'seamless tileable top-down sand texture, cartoon fantasy style, warm golden beach sand with subtle dunes and pebbles, clean edges, game tile isometric rpg, 2d sprite texture map',
+        color: '#c4b078',
+        file: 'tile_sand',
+      },
+      path: {
+        name: 'Path',
+        prompt: 'seamless tileable top-down cobblestone path texture, cartoon fantasy style, medieval stone road with moss between stones, clean edges, game tile isometric rpg, 2d sprite texture map',
+        color: '#7a6e58',
+        file: 'tile_path',
+      },
+      spawn: {
+        name: 'Spawn',
+        prompt: 'seamless tileable top-down dark magical portal texture, cartoon fantasy style, fiery demon spawn rune circle on scorched ground, clean edges, game tile isometric rpg, 2d sprite texture map',
+        color: '#cc3300',
+        file: 'tile_spawn',
+      },
+      goal: {
+        name: 'Goal',
+        prompt: 'seamless tileable top-down sacred ground texture, cartoon fantasy style, golden glowing holy sanctuary with ornate runes, clean edges, game tile isometric rpg, 2d sprite texture map',
+        color: '#d4a017',
+        file: 'tile_goal',
+      },
+      custom: {
+        name: 'Custom',
+        prompt: 'seamless tileable top-down texture, cartoon fantasy style, game tile isometric rpg, 2d sprite texture map',
+        color: '#666666',
+        file: 'tile_custom',
+      },
+    };
+
+    const MODEL_INFO = {
+      'fal-ai/fast-sdxl': { cost: '~$0.001/img', speed: '~2s' },
+      'fal-ai/flux/schnell': { cost: '~$0.003/img', speed: '~3s' },
+      'fal-ai/flux/dev': { cost: '~$0.005/img', speed: '~5s' },
+      'fal-ai/stable-diffusion-v3.5': { cost: '~$0.004/img', speed: '~4s' },
+    };
+
+    // ─── State ──────────────────────────────────────────────────
+    let currentPreset = 'water';
+    let isGenerating = false;
+
+    // ─── DOM refs ───────────────────────────────────────────────
+    const $model = document.getElementById('modelSelect');
+    const $modelInfo = document.getElementById('modelInfo');
+    const $prompt = document.getElementById('prompt');
+    const $filename = document.getElementById('filename');
+    const $width = document.getElementById('tileWidth');
+    const $height = document.getElementById('tileHeight');
+    const $generateBtn = document.getElementById('generateBtn');
+    const $status = document.getElementById('status');
+    const $tileCount = document.getElementById('tileCount');
+    const $tileGrid = document.getElementById('tileGrid');
+    const $empty = document.getElementById('previewContent').querySelector('.empty-state');
+    const $tooltip = document.getElementById('tooltip');
+
+    // ─── Init ───────────────────────────────────────────────────
+    function init() {
+      applyPreset('water');
+      document.querySelectorAll('.preset-btn').forEach((btn) => {
+        btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
+      });
+      $model.addEventListener('change', updateModelInfo);
+      $generateBtn.addEventListener('click', generateTile);
+      updateModelInfo();
+      loadTileList();
+    }
+
+    function applyPreset(name) {
+      currentPreset = name;
+      const preset = PRESETS[name];
+      $prompt.value = preset.prompt;
+      $filename.value = preset.file;
+      document.querySelectorAll('.preset-btn').forEach((b) => b.classList.toggle('active', b.dataset.preset === name));
+      $generateBtn.disabled = false;
+    }
+
+    function updateModelInfo() {
+      const info = MODEL_INFO[$model.value] || {};
+      $modelInfo.innerHTML = `Cost: <span class="price">${info.cost || '?'}</span> &bull; Speed: ${info.speed || '?'}`;
+    }
+
+    // ─── Generate ───────────────────────────────────────────────
+    async function generateTile() {
+      if (isGenerating) return;
+      const model = $model.value;
+      const prompt = $prompt.value.trim();
+      const tileName = $filename.value.trim() || 'tile';
+      const width = parseInt($width.value) || 512;
+      const height = parseInt($height.value) || 512;
+
+      if (!prompt) { setStatus('Please enter a prompt', 'error'); return; }
+
+      isGenerating = true;
+      $generateBtn.disabled = true;
+      $generateBtn.classList.add('spinning');
+      $generateBtn.textContent = 'Generating...';
+      setStatus('Sending to fal.ai...');
+
+      try {
+        const resp = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, prompt, tileName, width, height }),
+        });
+        const data = await resp.json();
+        if (data.ok) {
+          setStatus(`✅ Saved as ${data.name} (${formatSize(data.size)})`, 'success');
+          loadTileList();
+        } else {
+          setStatus(`❌ ${data.error}`, 'error');
+        }
+      } catch (err) {
+        setStatus(`❌ ${err.message}`, 'error');
+      } finally {
+        isGenerating = false;
+        $generateBtn.disabled = false;
+        $generateBtn.classList.remove('spinning');
+        $generateBtn.textContent = '✨ Generate Tile';
+      }
+    }
+
+    function setStatus(msg, type = '') {
+      $status.textContent = msg;
+      $status.className = 'status ' + type;
+    }
+
+    // ─── Tile list ──────────────────────────────────────────────
+    async function loadTileList() {
+      try {
+        const resp = await fetch('/api/tiles');
+        const tiles = await resp.json();
+        renderTiles(tiles);
+      } catch (err) {
+        console.error('Failed to load tiles', err);
+      }
+    }
+
+    function renderTiles(tiles) {
+      $tileCount.textContent = `${tiles.length} tile${tiles.length !== 1 ? 's' : ''}`;
+      if (tiles.length === 0) {
+        $empty.style.display = '';
+        $tileGrid.style.display = 'none';
+        return;
+      }
+      $empty.style.display = 'none';
+      $tileGrid.style.display = '';
+      $tileGrid.innerHTML = tiles
+        .map(
+          (t) => `
+          <div class="tile-card">
+            <img src="${t.path}" alt="${t.name}" loading="lazy" />
+            <div class="info">
+              <span class="name" title="${t.name}">${t.name}</span>
+              <span class="size">${formatSize(t.size)}</span>
+              <div class="actions">
+                <button class="btn-icon" onclick="copyToClipboard('${t.name}')" title="Copy name">📋</button>
+                <button class="btn-icon delete" onclick="deleteTile('${t.name}')" title="Delete">🗑</button>
+              </div>
+            </div>
+          </div>
+        `
+        )
+        .join('');
+    }
+
+    async function deleteTile(name) {
+      if (!confirm(`Delete "${name}"?`)) return;
+      try {
+        await fetch(`/api/tiles/${encodeURIComponent(name)}`, { method: 'DELETE' });
+        loadTileList();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    function copyToClipboard(name) {
+      navigator.clipboard.writeText(name).then(() => {
+        setStatus(`📋 "${name}" copied`, 'success');
+        setTimeout(() => setStatus(''), 2000);
+      });
+    }
+
+    function formatSize(bytes) {
+      if (bytes < 1024) return `${bytes}B`;
+      if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)}KB`;
+      return `${(bytes / 1048576).toFixed(1)}MB`;
+    }
+
+    // Tooltip on card hover
+    document.addEventListener('mouseover', (e) => {
+      const card = e.target.closest('.tile-card img');
+      if (card) {
+        $tooltip.textContent = card.alt;
+        $tooltip.classList.add('visible');
+      }
+    });
+    document.addEventListener('mousemove', (e) => {
+      $tooltip.style.left = (e.clientX + 12) + 'px';
+      $tooltip.style.top = (e.clientY - 30) + 'px';
+    });
+    document.addEventListener('mouseout', () => $tooltip.classList.remove('visible'));
+
+    init();
+  </script>
+</body>
+</html>
