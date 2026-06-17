@@ -1,0 +1,807 @@
+import Phaser from 'phaser';
+import { COLORS, TILE_SIZE } from '../utils/constants';
+import { TOWER_DEFS, TOWER_TYPES_ORDERED } from '../data/towers';
+import { ENEMY_DEFS, BOSS_DEFS } from '../data/enemies';
+
+export class BootScene extends Phaser.Scene {
+  constructor() { super('BootScene'); }
+
+  create() {
+    this.generateTileTextures();
+    this.generateTowerTextures();
+    this.generateEnemySheets();
+    this.generateHeroSheet();
+    this.generateProjectileTextures();
+    this.generateParticleTextures();
+    this.generateUITextures();
+    this.registerAnimations();
+    this.scene.start('MenuScene');
+  }
+
+  // ─── Tiles ───────────────────────────────────────────────────────────────
+  // ─── Tiles ───────────────────────────────────────────────────────────────
+  // ─── Tiles ───────────────────────────────────────────────────────────────
+  private generateTileTextures() {
+    const g = this.add.graphics();
+    const S = TILE_SIZE;
+
+    // ── Ground (water) – tileable bright blue water with sine waves ──────────
+    g.clear();
+    // Use same color at top and bottom for seamless vertical tiling
+    for (let y = 0; y < S; y++) {
+      const t = y / S;
+      // Interpolate between gradient points
+      const r = 0.12 + (0.14 - 0.12) * (t < 0.33 ? t * 3 : t < 0.66 ? 1 - (t - 0.33) * 3 : (t - 0.66) * 3);
+      const gr = 0.22 + (0.28 - 0.22) * Math.sin(t * Math.PI);
+      const b  = 0.48 + (0.55 - 0.48) * Math.sin(t * Math.PI);
+      g.fillStyle(Phaser.Display.Color.GetColor(
+        Math.floor(r * 255), Math.floor(gr * 255), Math.floor(b * 255)), 1);
+      g.fillRect(0, y, S, 1);
+    }
+    // Sine wave ripples – seamless via modulo phase
+    for (let row = 0; row < 3; row++) {
+      const baseY = S * (0.25 + row * 0.22);
+      // Wave amplitude
+      const amp = 2.5;
+      g.lineStyle(1.5, 0x66bbee, 0.40);
+      g.beginPath();
+      for (let x = 0; x < S; x++) {
+        // Phase wraps at S so left and right edges match
+        const phase = (x / S) * Math.PI * 2 + row * 1.7;
+        const wy = baseY + amp * Math.sin(phase);
+        if (x === 0) g.moveTo(x, wy); else g.lineTo(x, wy);
+      }
+      g.strokePath();
+    }
+    // Foam flecks on wave crests – seeded so they repeat tileably
+    for (let row = 0; row < 3; row++) {
+      const baseY = S * (0.25 + row * 0.22);
+      g.fillStyle(0x99ddff, 0.22);
+      for (let i = 0; i < 4; i++) {
+        const fx = (i * 13 + row * 7) % S;
+        const wy = baseY + 2.5 * Math.sin((fx / S) * Math.PI * 2 + row * 1.7);
+        g.fillEllipse(fx, wy, 5, 2);
+      }
+    }
+    g.generateTexture('tile_ground', S, S);
+
+    // ── Blocked (deep water) – same as ground but darker, tileable ───────────
+    g.clear();
+    for (let y = 0; y < S; y++) {
+      const t = y / S;
+      const r = 0.08 + 0.03 * Math.sin(t * Math.PI);
+      const gr = 0.14 + 0.05 * Math.sin(t * Math.PI);
+      const b = 0.34 + 0.08 * Math.sin(t * Math.PI);
+      g.fillStyle(Phaser.Display.Color.GetColor(
+        Math.floor(r * 255), Math.floor(gr * 255), Math.floor(b * 255)), 1);
+      g.fillRect(0, y, S, 1);
+    }
+    for (let row = 0; row < 3; row++) {
+      const baseY = S * (0.25 + row * 0.22);
+      g.lineStyle(1, 0x4488bb, 0.35);
+      g.beginPath();
+      for (let x = 0; x < S; x++) {
+        const phase = (x / S) * Math.PI * 2 + row * 1.7 + 1;
+        const wy = baseY + 2 * Math.sin(phase);
+        if (x === 0) g.moveTo(x, wy); else g.lineTo(x, wy);
+      }
+      g.strokePath();
+    }
+    g.generateTexture('tile_blocked', S, S);
+
+    // ── Path – cobblestone road, tileable ────────────────────────────────────
+    g.clear();
+    // Base: warm grey stone
+    for (let y = 0; y < S; y++) {
+      const t = y / S;
+      const r = Math.floor((0.50 + 0.06 * Math.sin(t * Math.PI * 2 + 0.5)) * 255);
+      const gr = Math.floor((0.44 + 0.06 * Math.sin(t * Math.PI * 2 + 1.0)) * 255);
+      const b = Math.floor((0.34 + 0.06 * Math.sin(t * Math.PI * 2 + 1.5)) * 255);
+      g.fillStyle(Phaser.Display.Color.GetColor(r, gr, b), 1);
+      g.fillRect(0, y, S, 1);
+    }
+    // Cobblestone blocks arranged in a staggered grid (tileable pattern)
+    const cols = 3, rows = 3;
+    const cw = S / cols, ch = S / rows;
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        // Stagger: odd rows shift by half a column (wrap around)
+        const stagger = (row % 2 === 1) ? cw / 2 : 0;
+        const cx = col * cw + stagger;
+        const cy = row * ch;
+        const pad = 3;
+        const sw = cw - pad * 2;
+        const sh = ch - pad * 2;
+        // Shift x to wrap correctly for staggered columns
+        let sx = cx + pad;
+        if (sx + sw > S) {
+          // Wrap: draw in two parts
+          const part1W = S - sx;
+          const part2W = sw - part1W;
+          g.fillStyle(0x7a6e58, 0.85);
+          g.fillRoundedRect(sx, cy + pad, part1W, sh, 2);
+          g.fillRoundedRect(0, cy + pad, part2W, sh, 2);
+          g.lineStyle(1, 0x5a4e30, 0.5);
+          g.strokeRoundedRect(sx, cy + pad, part1W, sh, 2);
+          g.strokeRoundedRect(0, cy + pad, part2W, sh, 2);
+          // Stone highlight
+          g.fillStyle(0x9a8e70, 0.2);
+          g.fillRoundedRect(sx, cy + pad + 1, part1W, sh * 0.3, 1);
+          g.fillRoundedRect(0, cy + pad + 1, part2W, sh * 0.3, 1);
+        } else {
+          g.fillStyle(0x7a6e58, 0.85);
+          g.fillRoundedRect(sx, cy + pad, sw, sh, 2);
+          g.lineStyle(1, 0x5a4e30, 0.5);
+          g.strokeRoundedRect(sx, cy + pad, sw, sh, 2);
+          // Stone highlight (light on top-left)
+          g.fillStyle(0x9a8e70, 0.2);
+          g.fillRoundedRect(sx, cy + pad + 1, sw * 0.9, sh * 0.3, 1);
+        }
+      }
+    }
+    // Mortar lines between stones
+    g.lineStyle(1, 0x4a3e20, 0.35);
+    g.strokeRect(0, 0, S, S);
+    g.generateTexture('tile_path', S, S);
+
+    // ── Buildable – lush grass, tileable ─────────────────────────────────────
+    g.clear();
+    // Base green gradient that wraps vertically
+    for (let y = 0; y < S; y++) {
+      const t = y / S;
+      const osc = 0.5 + 0.5 * Math.sin(t * Math.PI * 2 - Math.PI / 2);
+      const r = Math.floor((0.14 + 0.04 * osc) * 255);
+      const gr = Math.floor((0.34 + 0.10 * osc) * 255);
+      const b = Math.floor((0.10 + 0.03 * osc) * 255);
+      g.fillStyle(Phaser.Display.Color.GetColor(r, gr, b), 1);
+      g.fillRect(0, y, S, 1);
+    }
+    // Grass blade clusters (tileable via modulo positioning)
+    for (let i = 0; i < 16; i++) {
+      const gx = (i * 17 + 5) % S;
+      const gy = (i * 13 + 7) % S;
+      const shade = (i % 3) === 0 ? 0.5 : 0.35;
+      g.fillStyle(0x3a8a22, shade);
+      g.fillRect(gx, gy, 2, 5 + (i % 4));
+    }
+    // Lighter grass highlights
+    for (let i = 0; i < 10; i++) {
+      const gx = (i * 23 + 3) % S;
+      const gy = (i * 19 + 11) % S;
+      g.fillStyle(0x5aaa33, 0.25);
+      g.fillRect(gx, gy, 1, 3);
+    }
+    // Tiny flowers
+    const flowerPositions = [
+      [0.15, 0.12], [0.55, 0.08], [0.35, 0.42],
+      [0.85, 0.28], [0.10, 0.62], [0.65, 0.72],
+      [0.45, 0.88], [0.88, 0.55], [0.72, 0.92],
+    ];
+    for (const [fx, fy] of flowerPositions) {
+      const col = Math.random() > 0.5 ? 0xffdd44 : 0xff9933;
+      g.fillStyle(col, 0.45);
+      g.fillCircle(fx * S, fy * S, 1.2);
+    }
+    // Stake markers for buildable identification
+    for (let side = 0; side < 4; side++) {
+      const sx2 = side < 2 ? 4 : S - 4;
+      const sy2 = (side % 2 === 0) ? 4 : S - 4;
+      g.fillStyle(0x5a3a1a, 0.7);
+      g.fillRect(sx2 - 1, sy2 - 2, 2, 4);
+      g.fillStyle([0xff4444, 0x44ff44, 0x4444ff, 0xffff44][side], 0.6);
+      g.fillCircle(sx2, sy2 - 2, 2);
+    }
+    g.lineStyle(1, 0x0a1808, 0.2);
+    g.strokeRect(0, 0, S, S);
+    g.generateTexture('tile_buildable', S, S);
+
+    // ── Buildable hover – green overlay ──────────────────────────────────────
+    g.clear();
+    g.fillStyle(0x0a2a1a, 1);
+    g.fillRect(0, 0, S, S);
+    g.lineStyle(2, 0x44ff44, 0.8);
+    g.strokeRect(1, 1, S - 2, S - 2);
+    g.fillStyle(0x44ff44, 0.06);
+    g.fillRect(2, 2, S - 4, S - 4);
+    g.generateTexture('tile_buildable_hover', S, S);
+
+    // ── Transition edge + wall (kept for compat, not used in buildMap) ──────
+    g.clear();
+    for (let y = 0; y < S; y++) {
+      if (y < S * 0.4) {
+        g.fillStyle(0x4a8a3a, 0.9);
+      } else {
+        const r = Math.floor((0.35 + (y / S) * 0.10) * 255);
+        const gr = Math.floor((0.28 + (y / S) * 0.12) * 255);
+        const b = Math.floor((0.18 + (y / S) * 0.08) * 255);
+        g.fillStyle(Phaser.Display.Color.GetColor(r, gr, b), 1);
+      }
+      g.fillRect(0, y, S, 1);
+    }
+    for (let x = 2; x < S - 2; x += 6) {
+      g.fillStyle(0x888877, 0.4);
+      g.fillCircle(x, S * 0.38, 1.5 + Math.sin(x * 0.5));
+    }
+    g.generateTexture('tile_edge', S, S);
+
+    g.clear();
+    g.fillStyle(0x5a4a30, 1);
+    g.fillRect(0, 0, S, S);
+    g.fillStyle(0x8a7a5a, 0.5);
+    g.fillRect(0, 1, S, 3);
+    g.fillRect(1, 0, 3, S);
+    g.generateTexture('tile_wall', S, S);
+
+    // ── Spawn – fire portal ──────────────────────────────────────────────────
+    g.clear();
+    g.fillStyle(0x1a0a00, 1); g.fillRect(0, 0, S, S);
+    for (let i = 0; i < 5; i++) {
+      g.fillStyle(0xff2200 + i * 0x331100, 0.5 - i * 0.08);
+      g.fillCircle(S / 2, S / 2, (S / 2) - i * 4);
+    }
+    g.lineStyle(3, 0xff3300, 1); g.strokeCircle(S/2, S/2, S/2 - 2);
+    g.fillStyle(0xff8800, 1);
+    g.fillTriangle(S*0.22, S*0.28, S*0.80, S*0.5, S*0.22, S*0.72);
+    g.generateTexture('tile_spawn', S, S);
+
+    // ── Goal – golden castle gate ────────────────────────────────────────────
+    g.clear();
+    g.fillStyle(0x0a1a08, 1); g.fillRect(0, 0, S, S);
+    for (let i = 0; i < 4; i++) {
+      g.fillStyle(0x006622 + i * 0x004411, 0.45 - i * 0.09);
+      g.fillCircle(S / 2, S / 2, (S / 2) - i * 4);
+    }
+    g.lineStyle(3, 0x00ff66, 1); g.strokeCircle(S/2, S/2, S/2 - 3);
+    g.fillStyle(0xffd700, 0.9);
+    g.fillRect(S*0.34, S*0.26, S*0.32, S*0.46);
+    g.fillStyle(0x0a1a08, 1);
+    g.fillRect(S*0.37, S*0.29, S*0.12, S*0.22);
+    g.fillRect(S*0.52, S*0.29, S*0.12, S*0.22);
+    for (let ci = 0; ci < 3; ci++)
+      g.fillRect(S*(0.34 + ci*0.11), S*0.20, S*0.06, S*0.08);
+    g.generateTexture('tile_goal', S, S);
+
+    g.destroy();
+  }// ─── Towers ───────────────────────────────────────────────────────────────
+  private generateTowerTextures() {
+    const S = 44;
+    const C = S / 2;
+    const g = this.add.graphics();
+
+    for (const type of TOWER_TYPES_ORDERED) {
+      const def = TOWER_DEFS[type];
+      [0, 1, 2, 3].forEach(level => {
+        const key = `tower_${type}_${level}`;
+        const scale = 1 + level * 0.10;
+        const R = Math.round(13 * scale);
+        const color = level === 3 ? def.evolutions[0].color : def.color;
+        g.clear();
+
+        // Ground plate
+        g.fillStyle(0x223344, 1);
+        g.fillCircle(C, C + 2, R + 5);
+        // Shadow
+        g.fillStyle(0x000000, 0.3);
+        g.fillEllipse(C, C + R + 3, R * 2, 6);
+        // Base
+        g.fillStyle(COLORS.TOWER_BASE, 1);
+        g.fillCircle(C, C, R + 4);
+        g.lineStyle(2, 0x445566, 0.8);
+        g.strokeCircle(C, C, R + 4);
+        // Body
+        g.fillStyle(color, 1);
+        g.lineStyle(2, 0xffffff, 0.3);
+        switch (def.drawShape) {
+          case 'triangle':
+            g.fillTriangle(C, C - R, C + R * 0.9, C + R * 0.7, C - R * 0.9, C + R * 0.7);
+            g.strokeTriangle(C, C - R, C + R * 0.9, C + R * 0.7, C - R * 0.9, C + R * 0.7);
+            // Barrel
+            g.fillStyle(Phaser.Display.Color.IntegerToColor(color).darken(20).color, 1);
+            g.fillRect(C - 3, C - R, 6, R * 0.6);
+            break;
+          case 'circle':
+            g.fillCircle(C, C, R);
+            g.strokeCircle(C, C, R);
+            // Inner glow
+            g.fillStyle(0xffffff, 0.15);
+            g.fillCircle(C - R * 0.25, C - R * 0.25, R * 0.4);
+            // Cannon barrel
+            g.fillStyle(Phaser.Display.Color.IntegerToColor(color).darken(30).color, 1);
+            g.fillRect(C - 4, C - R - 6, 8, R * 0.7);
+            break;
+          case 'diamond':
+            g.fillPoints([
+              { x: C, y: C - R }, { x: C + R, y: C },
+              { x: C, y: C + R }, { x: C - R, y: C },
+            ], true);
+            // Crystal lines
+            g.lineStyle(1, 0xffffff, 0.4);
+            g.lineBetween(C, C - R, C + R, C);
+            g.lineBetween(C, C - R, C - R, C);
+            break;
+          case 'square':
+            g.fillRoundedRect(C - R + 2, C - R + 2, R * 2 - 4, R * 2 - 4, 3);
+            g.strokeRoundedRect(C - R + 2, C - R + 2, R * 2 - 4, R * 2 - 4, 3);
+            // X cross rivet  
+            g.lineStyle(2, Phaser.Display.Color.IntegerToColor(color).darken(20).color, 1);
+            g.lineBetween(C - R + 5, C, C + R - 5, C);
+            g.lineBetween(C, C - R + 5, C, C + R - 5);
+            break;
+          case 'star': {
+            const pts = this.starPoints(C, C, R, R * 0.5, 5);
+            g.fillPoints(pts, true);
+            g.strokePoints(pts, true);
+            // Inner ring
+            g.fillStyle(0xffffff, 0.2);
+            g.fillCircle(C, C, R * 0.3);
+            break;
+          }
+          case 'hex': {
+            const pts = this.hexPoints(C, C, R);
+            g.fillPoints(pts, true);
+            g.strokePoints(pts, true);
+            // Hex center pattern
+            g.fillStyle(Phaser.Display.Color.IntegerToColor(color).darken(25).color, 0.8);
+            const inner = this.hexPoints(C, C, R * 0.55);
+            g.fillPoints(inner, true);
+            break;
+          }
+        }
+
+        // Level pips
+        for (let i = 0; i < level; i++) {
+          g.fillStyle(0xffd700, 0.95);
+          g.fillCircle(C - (level - 1) * 4 + i * 8, C + R + 6, 3);
+        }
+
+        g.generateTexture(key, S, S);
+      });
+    }
+    g.destroy();
+  }
+
+  // ─── Enemy sprite sheets (4-frame walk cycle, 32×32 per frame) ───────────
+  private generateEnemySheets() {
+    const FS = 32; // frame size
+    const FRAMES = 4;
+    const g = this.add.graphics();
+
+    const allDefs = [
+      ...Object.values(ENEMY_DEFS),
+      ...Object.values(BOSS_DEFS),
+    ];
+
+    // Walk cycle squish: [normal, wide/short, normal, narrow/tall]
+    const scaleX = [1.0, 1.2, 1.0, 0.85];
+    const scaleY = [1.0, 0.85, 1.0, 1.2];
+
+    for (const def of allDefs) {
+      const totalW = FS * FRAMES;
+      const R = def.isBoss ? 13 : 9;
+      g.clear();
+
+      for (let f = 0; f < FRAMES; f++) {
+        const cx = f * FS + FS / 2;
+        const cy = FS / 2 + (f % 2 === 1 ? 2 : 0); // slight vertical bob
+        const sx = scaleX[f];
+        const sy = scaleY[f];
+        const rx = R * sx;
+        const ry = R * sy;
+
+        // Shadow
+        g.fillStyle(0x000000, 0.3);
+        g.fillEllipse(cx, cy + R + 2, rx * 2, 5);
+
+        // Body
+        g.fillStyle(def.color, 1);
+        g.lineStyle(2, 0xffffff, 0.5);
+
+        switch (def.drawShape) {
+          case 'circle':
+            g.fillEllipse(cx, cy, rx * 2, ry * 2);
+            g.strokeEllipse(cx, cy, rx * 2, ry * 2);
+            // Eyes
+            g.fillStyle(0xffffff, 1);
+            g.fillCircle(cx - rx * 0.3, cy - ry * 0.15, 2.5);
+            g.fillCircle(cx + rx * 0.3, cy - ry * 0.15, 2.5);
+            g.fillStyle(0x000000, 1);
+            g.fillCircle(cx - rx * 0.3 + 0.5, cy - ry * 0.15, 1.2);
+            g.fillCircle(cx + rx * 0.3 + 0.5, cy - ry * 0.15, 1.2);
+            break;
+
+          case 'tri': {
+            // Runner: sleek arrow shape with speed lines
+            const w = rx * 2, h = ry * 2;
+            g.fillTriangle(cx + w * 0.5, cy, cx - w * 0.4, cy - h * 0.5, cx - w * 0.4, cy + h * 0.5);
+            g.strokeTriangle(cx + w * 0.5, cy, cx - w * 0.4, cy - h * 0.5, cx - w * 0.4, cy + h * 0.5);
+            // Speed streaks
+            g.lineStyle(1, def.color, 0.5);
+            for (let l = 0; l < 3; l++) {
+              const ly = cy - h * 0.3 + l * h * 0.3;
+              g.lineBetween(cx - w * 0.8 - l * 4, ly, cx - w * 0.4 - l * 4, ly);
+            }
+            // Eye
+            g.fillStyle(0xffffff, 1);
+            g.fillCircle(cx + rx * 0.15, cy - 2, 2);
+            g.fillStyle(0x000000, 1);
+            g.fillCircle(cx + rx * 0.3, cy - 2, 1);
+            break;
+          }
+
+          case 'square': {
+            // Tank: armored blocky shape
+            const bw = rx * 2 - 2, bh = ry * 2 - 2;
+            g.fillRect(cx - bw/2, cy - bh/2, bw, bh);
+            g.strokeRect(cx - bw/2, cy - bh/2, bw, bh);
+            // Armor plates
+            g.fillStyle(Phaser.Display.Color.IntegerToColor(def.color).darken(25).color, 1);
+            g.fillRect(cx - bw * 0.4, cy - bh * 0.45, bw * 0.8, bh * 0.25);
+            // Eye slit
+            g.fillStyle(0xff4400, 1);
+            g.fillRect(cx - bw * 0.3, cy - bh * 0.15, bw * 0.6, bh * 0.12);
+            // Treads
+            g.fillStyle(0x333333, 1);
+            g.fillRect(cx - bw/2, cy + bh * 0.35, bw, bh * 0.15);
+            break;
+          }
+
+          case 'diamond': {
+            // Flyer: wing spread varies by frame
+            const wingSpread = [1.0, 1.3, 1.0, 0.7][f];
+            const wx2 = rx * wingSpread * 2.2;
+            const wy2 = ry * 1.5;
+            // Wings
+            g.fillStyle(Phaser.Display.Color.IntegerToColor(def.color).lighten(15).color, 0.7);
+            g.fillTriangle(cx, cy, cx - wx2/2, cy - wy2/3, cx - wx2/4, cy + wy2/3);
+            g.fillTriangle(cx, cy, cx + wx2/2, cy - wy2/3, cx + wx2/4, cy + wy2/3);
+            // Body
+            g.fillStyle(def.color, 1);
+            g.fillPoints([
+              { x: cx, y: cy - ry }, { x: cx + rx * 0.6, y: cy },
+              { x: cx, y: cy + ry * 0.7 }, { x: cx - rx * 0.6, y: cy },
+            ], true);
+            // Eyes
+            g.fillStyle(0xffffff, 1);
+            g.fillCircle(cx - rx * 0.2, cy - ry * 0.15, 2);
+            g.fillCircle(cx + rx * 0.2, cy - ry * 0.15, 2);
+            break;
+          }
+
+          case 'star': {
+            // Healer: cross/plus shape with glow
+            const arm = ry * 0.5;
+            g.fillRect(cx - rx * 0.4, cy - arm - ry * 0.3, rx * 0.8, arm * 2 + ry * 0.6);
+            g.fillRect(cx - rx * 0.8, cy - arm * 0.5, rx * 1.6, arm);
+            // Cross highlight
+            g.fillStyle(0xffffff, 0.5);
+            g.fillRect(cx - rx * 0.15, cy - ry * 0.7, rx * 0.3, ry * 1.4);
+            // Orb above cross
+            g.fillStyle(0x88ffbb, 0.9);
+            g.fillCircle(cx, cy - ry * 0.5, rx * 0.3);
+            break;
+          }
+        }
+
+        // Boss: crown indicator
+        if (def.isBoss) {
+          g.fillStyle(0xffd700, 1);
+          const crownPts = [
+            { x: cx - rx * 0.6, y: cy - R - 2 },
+            { x: cx - rx * 0.3, y: cy - R - 6 },
+            { x: cx, y: cy - R - 2 },
+            { x: cx + rx * 0.3, y: cy - R - 6 },
+            { x: cx + rx * 0.6, y: cy - R - 2 },
+          ];
+          g.fillPoints(crownPts, false);
+        }
+      }
+
+      g.generateTexture(`enemy_${def.type}_sheet`, totalW, FS);
+
+      // Add frame data
+      const tex = this.textures.get(`enemy_${def.type}_sheet`);
+      for (let f = 0; f < FRAMES; f++) {
+        tex.add(f, 0, f * FS, 0, FS, FS);
+      }
+    }
+
+    g.destroy();
+  }
+
+  // ─── Hero sprite sheet (40×40 per frame, 4 frames) ───────────────────────
+  private generateHeroSheet() {
+    const FS = 40;
+    const FRAMES = 6; // 4 walk + 1 idle + 1 attack
+    const C = FS / 2;
+    const g = this.add.graphics();
+
+    const bobY  = [0, -3, 0, 3, 0, -2];
+    const swordAngle = [0, -15, 0, 15, 0, 40]; // degrees, last is attack swing
+
+    g.clear();
+    for (let f = 0; f < FRAMES; f++) {
+      const cx = f * FS + C;
+      const cy = C + bobY[f];
+      const isAttack = f === 5;
+
+      // Shadow
+      g.fillStyle(0x000000, 0.25);
+      g.fillEllipse(cx, C + 16, 22, 6);
+
+      // Cape / cloak back
+      g.fillStyle(0x3355aa, 0.8);
+      g.fillEllipse(cx, cy + 5, 20, 22);
+
+      // Body armor (torso)
+      g.fillStyle(0xddaa22, 1);
+      g.fillRoundedRect(cx - 8, cy - 10, 16, 18, 3);
+
+      // Armor highlight
+      g.fillStyle(0xffcc44, 0.6);
+      g.fillRoundedRect(cx - 5, cy - 8, 10, 8, 2);
+
+      // Shoulder pads
+      g.fillStyle(0xcc8800, 1);
+      g.fillCircle(cx - 9, cy - 8, 5);
+      g.fillCircle(cx + 9, cy - 8, 5);
+
+      // Helmet
+      g.fillStyle(0xddaa22, 1);
+      g.fillCircle(cx, cy - 14, 9);
+      // Visor
+      g.fillStyle(0x223366, 1);
+      g.fillRect(cx - 6, cy - 17, 12, 5);
+      // Visor slit
+      g.fillStyle(0x4488ff, 0.8);
+      g.fillRect(cx - 4, cy - 16, 8, 2);
+      // Plume
+      g.fillStyle(0xff2222, 0.9);
+      for (let p = 0; p < 3; p++) {
+        g.fillRect(cx - 2 + p * 2, cy - 23 + (f % 2) * p, 2, 6 - p);
+      }
+
+      // Sword
+      const sa = swordAngle[f] * (Math.PI / 180);
+      const sLen = isAttack ? 20 : 16;
+      const sBase = { x: cx + 10, y: cy };
+      g.lineStyle(3, 0xcccccc, 1);
+      g.lineBetween(
+        sBase.x, sBase.y,
+        sBase.x + Math.cos(sa) * sLen,
+        sBase.y + Math.sin(sa) * sLen
+      );
+      // Sword guard
+      g.fillStyle(0xffaa00, 1);
+      g.fillRect(sBase.x - 2, sBase.y - 1, 4, 4);
+
+      // Shield (left side)
+      g.fillStyle(0x3355aa, 1);
+      g.fillRoundedRect(cx - 16, cy - 8, 8, 14, 2);
+      g.lineStyle(1, 0x8899cc, 0.7);
+      g.strokeRoundedRect(cx - 16, cy - 8, 8, 14, 2);
+      g.fillStyle(0xffaa00, 0.8);
+      g.fillCircle(cx - 12, cy, 3);
+
+      // Legs
+      const legStep = [0, 5, 0, -5, 0, 0][f];
+      g.fillStyle(0x334455, 1);
+      g.fillRect(cx - 7, cy + 8, 6, 10 + legStep);
+      g.fillRect(cx + 1, cy + 8, 6, 10 - legStep);
+      // Boots
+      g.fillStyle(0x5a3a1a, 1);
+      g.fillRect(cx - 8, cy + 15 + legStep, 7, 5);
+      g.fillRect(cx, cy + 15 - legStep, 7, 5);
+
+      // Attack flash effect
+      if (isAttack) {
+        g.lineStyle(2, 0xffffaa, 0.8);
+        g.lineBetween(sBase.x, sBase.y, sBase.x + 22, sBase.y + 8);
+        g.lineBetween(sBase.x, sBase.y, sBase.x + 18, sBase.y - 10);
+      }
+    }
+
+    g.generateTexture('hero_sheet', FS * FRAMES, FS);
+
+    // Add frame data
+    const tex = this.textures.get('hero_sheet');
+    for (let f = 0; f < FRAMES; f++) {
+      tex.add(f, 0, f * FS, 0, FS, FS);
+    }
+
+    g.destroy();
+  }
+
+  // ─── Projectiles ─────────────────────────────────────────────────────────
+  private generateProjectileTextures() {
+    const g = this.add.graphics();
+
+    // Arrow
+    g.clear();
+    g.fillStyle(0xcccccc, 1);
+    g.fillRect(0, 2, 12, 2); // shaft
+    g.fillStyle(COLORS.TOWER_ARROW, 1);
+    g.fillTriangle(10, 0, 16, 3, 10, 6); // head
+    g.fillStyle(0x888888, 0.7);
+    g.fillTriangle(0, 1, 4, 3, 0, 5); // fletching
+    g.generateTexture('proj_arrow', 16, 6);
+
+    // Cannon ball - glowing sphere
+    g.clear();
+    g.fillStyle(0x111111, 1);
+    g.fillCircle(6, 6, 6);
+    g.fillStyle(COLORS.TOWER_CANNON, 0.7);
+    g.fillCircle(6, 6, 4);
+    g.fillStyle(0xffaa44, 0.5);
+    g.fillCircle(4, 4, 2);
+    g.generateTexture('proj_cannon', 12, 12);
+
+    // Ice shard - crystal
+    g.clear();
+    g.fillStyle(0xaaeeff, 1);
+    g.fillPoints([{x:4,y:0},{x:8,y:4},{x:4,y:8},{x:0,y:4}], true);
+    g.fillStyle(0xffffff, 0.5);
+    g.fillPoints([{x:4,y:0},{x:6,y:3},{x:4,y:2}], true);
+    g.generateTexture('proj_ice', 8, 8);
+
+    // Lightning bolt
+    g.clear();
+    g.fillStyle(COLORS.TOWER_LIGHTNING, 1);
+    g.fillPoints([{x:6,y:0},{x:2,y:5},{x:4,y:5},{x:0,y:10},{x:5,y:4},{x:3,y:4}], true);
+    g.generateTexture('proj_lightning', 7, 10);
+
+    // Poison orb
+    g.clear();
+    g.fillStyle(0x224400, 1);
+    g.fillCircle(5, 5, 5);
+    g.fillStyle(COLORS.TOWER_POISON, 0.8);
+    g.fillCircle(5, 5, 4);
+    g.fillStyle(0x99ff99, 0.4);
+    g.fillCircle(3, 3, 2);
+    // Drip
+    g.fillStyle(COLORS.TOWER_POISON, 0.6);
+    g.fillTriangle(4, 10, 6, 10, 5, 14);
+    g.generateTexture('proj_poison', 10, 14);
+
+    // Boomerang - crescent shape
+    g.clear();
+    g.fillStyle(COLORS.TOWER_BOOMERANG, 1);
+    // Outer arc
+    g.fillEllipse(8, 4, 14, 6);
+    // Cut out inner part
+    g.fillStyle(0x000000, 1); // background
+    // Instead draw two lines
+    g.fillStyle(COLORS.TOWER_BOOMERANG, 1);
+    g.fillRect(0, 0, 16, 3);
+    g.fillRect(0, 5, 16, 3);
+    g.generateTexture('proj_boomerang', 16, 8);
+
+    g.destroy();
+  }
+
+  // ─── Particles ─────────────────────────────────────────────────────────
+  private generateParticleTextures() {
+    const g = this.add.graphics();
+    const p: Array<{ key: string; color: number; r: number }> = [
+      { key: 'particle_spark',   color: 0xffffaa, r: 4 },
+      { key: 'particle_ice',     color: COLORS.FX_FREEZE, r: 5 },
+      { key: 'particle_fire',    color: COLORS.FX_METEOR, r: 6 },
+      { key: 'particle_poison',  color: COLORS.FX_POISON_CLOUD, r: 5 },
+      { key: 'particle_heal',    color: COLORS.FX_HEAL,   r: 4 },
+      { key: 'particle_smoke',   color: 0x666666, r: 8 },
+      { key: 'particle_exp',     color: COLORS.FX_EXPLOSION, r: 7 },
+      { key: 'particle_blood',   color: 0xcc2200, r: 4 },
+      { key: 'particle_star',    color: 0xffdd44, r: 5 },
+    ];
+    for (const pt of p) {
+      g.clear();
+      // Gradient-like soft circle
+      g.fillStyle(0xffffff, 0.3);
+      g.fillCircle(pt.r, pt.r, pt.r);
+      g.fillStyle(pt.color, 1);
+      g.fillCircle(pt.r, pt.r, pt.r * 0.7);
+      g.generateTexture(pt.key, pt.r * 2, pt.r * 2);
+    }
+    g.destroy();
+  }
+
+  // ─── UI ──────────────────────────────────────────────────────────────────
+  private generateUITextures() {
+    const g = this.add.graphics();
+
+    // Panel bg
+    g.clear();
+    g.fillStyle(COLORS.PANEL_BG, 0.95);
+    g.fillRoundedRect(0, 0, 256, 128, 8);
+    g.lineStyle(1, COLORS.PANEL_BORDER, 1);
+    g.strokeRoundedRect(0, 0, 256, 128, 8);
+    g.generateTexture('panel_bg', 256, 128);
+
+    // Range ring
+    g.clear();
+    g.lineStyle(1, COLORS.TOWER_RANGE, 0.25);
+    g.strokeCircle(100, 100, 98);
+    g.generateTexture('range_ring', 200, 200);
+
+    // Barricade
+    g.clear();
+    g.fillStyle(0x5a3510, 1);
+    g.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+    // Planks
+    for (let p2 = 0; p2 < 3; p2++) {
+      const y = p2 * (TILE_SIZE / 3) + 3;
+      g.fillStyle(0x7a5520, 1);
+      g.fillRect(3, y, TILE_SIZE - 6, TILE_SIZE / 3 - 4);
+      // Wood grain
+      g.lineStyle(1, 0x4a2a08, 0.5);
+      g.lineBetween(6, y + 3, TILE_SIZE - 6, y + 3);
+    }
+    // Iron bands
+    g.fillStyle(0x445566, 1);
+    g.fillRect(TILE_SIZE / 2 - 2, 2, 4, TILE_SIZE - 4);
+    g.fillRect(2, TILE_SIZE / 2 - 2, TILE_SIZE - 4, 4);
+    g.lineStyle(2, 0xaa7755, 1);
+    g.strokeRect(0, 0, TILE_SIZE, TILE_SIZE);
+    g.generateTexture('barricade', TILE_SIZE, TILE_SIZE);
+
+    g.destroy();
+  }
+
+  // ─── Register all Phaser animations ──────────────────────────────────────
+  private registerAnimations() {
+    const allDefs = [
+      ...Object.values(ENEMY_DEFS),
+      ...Object.values(BOSS_DEFS),
+    ];
+
+    for (const def of allDefs) {
+      const key = `enemy_${def.type}_sheet`;
+      this.anims.create({
+        key: `enemy_${def.type}_walk`,
+        frames: [0, 1, 2, 3].map(f => ({ key, frame: f })),
+        frameRate: def.isBoss ? 4 : 6,
+        repeat: -1,
+      });
+    }
+
+    // Hero animations
+    this.anims.create({
+      key: 'hero_idle',
+      frames: [{ key: 'hero_sheet', frame: 4 }],
+      frameRate: 1,
+      repeat: -1,
+    });
+    this.anims.create({
+      key: 'hero_walk',
+      frames: [0, 1, 2, 3].map(f => ({ key: 'hero_sheet', frame: f })),
+      frameRate: 8,
+      repeat: -1,
+    });
+    this.anims.create({
+      key: 'hero_attack',
+      frames: [{ key: 'hero_sheet', frame: 5 }],
+      frameRate: 12,
+      repeat: 0,
+    });
+  }
+
+  // ─── Shape helpers ────────────────────────────────────────────────────────
+  private starPoints(cx: number, cy: number, outerR: number, innerR: number, points: number) {
+    const pts: { x: number; y: number }[] = [];
+    const step = Math.PI / points;
+    for (let i = 0; i < points * 2; i++) {
+      const r = i % 2 === 0 ? outerR : innerR;
+      const a = i * step - Math.PI / 2;
+      pts.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r });
+    }
+    return pts;
+  }
+
+  private hexPoints(cx: number, cy: number, r: number) {
+    const pts: { x: number; y: number }[] = [];
+    for (let i = 0; i < 6; i++) {
+      const a = (i * Math.PI) / 3 - Math.PI / 6;
+      pts.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r });
+    }
+    return pts;
+  }
+}
