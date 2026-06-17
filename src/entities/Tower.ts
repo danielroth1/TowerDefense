@@ -54,6 +54,7 @@ export class Tower extends Phaser.GameObjects.Container {
     this.totalSpent     = this.def.baseCost;
 
     scene.add.existing(this);
+    this.setDepth(2);
     this.redraw();
   }
 

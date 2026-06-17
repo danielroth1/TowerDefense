@@ -29,4 +29,6 @@ const config: Phaser.Types.Core.GameConfig = {
   },
 };
 
-new Phaser.Game(config);
+const game = new Phaser.Game(config);
+// Expose for debugging/testing
+(window as any).__game = game;

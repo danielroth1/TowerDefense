@@ -3,6 +3,7 @@ import { COLORS, TILE_SIZE } from '../utils/constants';
 import { TOWER_DEFS, TOWER_TYPES_ORDERED } from '../data/towers';
 import { ENEMY_DEFS, BOSS_DEFS } from '../data/enemies';
 import { generateBlobTextures } from '../systems/BlobTileset';
+import { generateTransitionTextures } from '../systems/TerrainTransition';
 
 export class BootScene extends Phaser.Scene {
   constructor() { super('BootScene'); }
@@ -10,6 +11,7 @@ export class BootScene extends Phaser.Scene {
   create() {
     this.generateTileTextures();
     this.generateBlobTextures();
+    this.generateTerrainTransitionTextures();
     this.generateTowerTextures();
     this.generateEnemySheets();
     this.generateHeroSheet();
@@ -214,6 +216,13 @@ export class BootScene extends Phaser.Scene {
   // ─── Blob tileset ─────────────────────────────────────────────────────────
   private generateBlobTextures() {
     generateBlobTextures(this);
+  }
+
+  // ─── Terrain transition tiles ─────────────────────────────────────────────
+  private generateTerrainTransitionTextures() {
+    generateTransitionTextures(this, 'grass');
+    // More terrain layers (e.g. 'sand', 'water') can be added here
+    // when the map generator produces them.
   }
 
   // ─── Towers ───────────────────────────────────────────────────────────────
