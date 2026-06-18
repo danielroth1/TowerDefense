@@ -11,7 +11,16 @@ interface CooldownState {
 export class AbilitySystem {
   private scene: Phaser.Scene;
   private cooldowns: Map<AbilityType, CooldownState> = new Map();
+  private uiCam: Phaser.Cameras.Scene2D.Camera | null = null;
   pendingCast: AbilityType | null = null;
+
+  setUICam(cam: Phaser.Cameras.Scene2D.Camera) { this.uiCam = cam; }
+
+  private vfxGraphics(): Phaser.GameObjects.Graphics {
+    const g = this.scene.add.graphics();
+    if (this.uiCam) this.uiCam.ignore(g);
+    return g;
+  }
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -70,7 +79,7 @@ export class AbilitySystem {
 
   private castMeteor(def: AbilityDef, wx: number, wy: number, enemies: Enemy[]) {
     // Targeting reticle then impact
-    const g = this.scene.add.graphics().setDepth(10);
+    const g = this.vfxGraphics().setDepth(10);
     g.lineStyle(3, 0xff6600, 0.8);
     g.strokeCircle(wx, wy, def.radius);
 
@@ -106,7 +115,7 @@ export class AbilitySystem {
       .sort((a, b) => b.pathProgress - a.pathProgress)
       .slice(0, def.specialValue);
 
-    const g = this.scene.add.graphics().setDepth(10);
+    const g = this.vfxGraphics().setDepth(10);
     const now = this.scene.time.now;
     let prev: Enemy | null = null;
     for (const e of inRange) {
@@ -139,7 +148,7 @@ export class AbilitySystem {
       }
     }
     // Pulsing ring
-    const ring = this.scene.add.graphics().setDepth(9);
+    const ring = this.vfxGraphics().setDepth(9);
     ring.lineStyle(2, 0xaa44ff, 0.6);
     ring.strokeCircle(wx, wy, def.radius);
     this.scene.tweens.add({ targets: ring, alpha: 0, duration: def.duration, onComplete: () => ring.destroy() });
@@ -147,7 +156,7 @@ export class AbilitySystem {
   }
 
   private showCircleEffect(cx: number, cy: number, r: number, color: number, alpha: number, duration: number) {
-    const g = this.scene.add.graphics().setDepth(9);
+    const g = this.vfxGraphics().setDepth(9);
     g.fillStyle(color, alpha * 0.5);
     g.fillCircle(cx, cy, r);
     g.lineStyle(3, color, alpha);

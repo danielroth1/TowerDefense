@@ -70,8 +70,8 @@ export class Tower extends Phaser.GameObjects.Container {
     this.rangeCircle?.destroy();
     this.rangeCircle = null;
     if (!show) return;
-    this.rangeCircle = this.scene.add.graphics();
-    this.rangeCircle.lineStyle(1, COLORS.TOWER_RANGE, 0.35);
+    this.rangeCircle = this.scene.add.graphics().setDepth(1);
+    this.rangeCircle.lineStyle(3, COLORS.TOWER_RANGE, 0.4);
     this.rangeCircle.strokeCircle(this.x, this.y, this.range);
   }
 

@@ -37,7 +37,7 @@ export const COLORS = {
   TOWER_POISON:     0x66ff66,
   TOWER_BOOMERANG:  0xff88cc,
   TOWER_BASE:       0x334455,
-  TOWER_RANGE:      0xffffff,
+  TOWER_RANGE:      0x171717,
 
   // Enemies
   ENEMY_GRUNT:    0xdd3333,

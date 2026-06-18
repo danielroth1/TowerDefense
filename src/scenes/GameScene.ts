@@ -303,6 +303,9 @@ export class GameScene extends Phaser.Scene {
     this.uiCam.setScroll(0, 0);
     this.uiCam.setZoom(1);
 
+    // Tell the ability system about the UI camera so its VFX are ignored
+    this.abilitySystem.setUICam(this.uiCam);
+
     // UI camera ignores known game-world groups and objects
     this.setupUICameraIgnore();
   }
