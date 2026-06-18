@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { generateMap, type MapData, type GridTile } from '../systems/MapGenerator';
 import { computeBlobMask, blobTileKey } from '../systems/BlobTileset';
+import { computeCornerMask, transitionTileKey } from '../systems/TerrainTransition';
 import { Tower } from '../entities/Tower';
 import { Enemy } from '../entities/Enemy';
 import { Projectile, type ProjectileConfig } from '../entities/Projectile';
@@ -28,6 +29,7 @@ export class GameScene extends Phaser.Scene {
   // Map
   private mapData!: MapData;
   private tileSprites: Phaser.GameObjects.Image[][] = [];
+  private waterSprites: Phaser.GameObjects.Image[][] = [];
 
   // Groups
   private towerGroup!: Phaser.GameObjects.Group;
@@ -100,16 +102,23 @@ export class GameScene extends Phaser.Scene {
   private buildMap() {
     const { grid } = this.mapData;
     this.tileSprites = [];
+    this.waterSprites = [];
 
     for (let r = 0; r < GRID_ROWS; r++) {
       this.tileSprites[r] = [];
+      this.waterSprites[r] = [];
       for (let c = 0; c < GRID_COLS; c++) {
         const tile = grid[r][c];
         const px = c * TILE_SIZE + TILE_SIZE / 2;
         const py = r * TILE_SIZE + TILE_SIZE / 2;
 
-        const key = this.tileKey(tile);
-        const img = this.add.image(px, py, key).setDepth(0).setDisplaySize(TILE_SIZE, TILE_SIZE);
+        // Layer 1: Water base under every cell
+        const waterImg = this.add.image(px, py, 'tile_ground').setDepth(0).setDisplaySize(TILE_SIZE, TILE_SIZE);
+        this.waterSprites[r][c] = waterImg;
+
+        // Layer 2: Topmost tile (transition, buildable, path, special, or ground)
+        const { key, depth } = this.resolveTile(tile);
+        const img = this.add.image(px, py, key).setDepth(depth).setDisplaySize(TILE_SIZE, TILE_SIZE);
         this.tileSprites[r][c] = img;
       }
     }
@@ -117,19 +126,39 @@ export class GameScene extends Phaser.Scene {
     this.hoverOverlay = this.add.image(0, 0, 'tile_buildable_hover').setAlpha(0).setDepth(1).setDisplaySize(TILE_SIZE, TILE_SIZE);
   }
 
-  private tileKey(tile: GridTile): string {
-    if (tile.type === 'spawn')     return 'tile_spawn';
-    if (tile.type === 'goal')      return 'tile_goal';
-    if (tile.type === 'buildable') return 'tile_buildable';
+  /** Determine the texture key and depth for a tile's topmost layer. */
+  private resolveTile(tile: GridTile): { key: string; depth: number } {
+    if (tile.type === 'spawn')     return { key: 'tile_spawn',     depth: 0.15 };
+    if (tile.type === 'goal')      return { key: 'tile_goal',      depth: 0.15 };
     if (tile.type === 'path') {
       const mask = computeBlobMask(this.mapData.grid, tile.row, tile.col);
-      // Prefer AI-blob-masked tiles → plain AI tile → procedural blob tiles
       const blobAITileKey = `tile_path_blob_${mask}`;
-      if (this.textures.exists(blobAITileKey)) return blobAITileKey;
-      if (this.textures.exists('tile_path')) return 'tile_path';
-      return blobTileKey(mask);
+      const key = this.textures.exists(blobAITileKey) ? blobAITileKey
+        : this.textures.exists('tile_path') ? 'tile_path'
+        : blobTileKey(mask);
+      return { key, depth: 0.2 };
     }
-    return 'tile_ground';
+    if (tile.type === 'buildable') {
+      const mask = computeCornerMask(
+        (rr, cc) => this.mapData.grid[rr][cc].type !== 'ground',
+        tile.row, tile.col,
+      );
+      // Mask 0 = isolated (no corner conditions met) → show full grass tile.
+      // Mask 15 = fully interior → solid fill.
+      // Masks 1-14 = edge cells → transition overlay blends into water.
+      if (mask === 0 || mask === 15) return { key: 'tile_buildable', depth: 0.1 };
+      return { key: transitionTileKey('grass', mask), depth: 0.05 };
+    }
+    // Ground / water — only the water base layer is visible
+    return { key: 'tile_ground', depth: 0 };
+  }
+
+  /** Recompute and apply the correct tile texture and depth for a grid cell. */
+  private refreshTileSprite(row: number, col: number): void {
+    const sprite = this.tileSprites[row]?.[col];
+    if (!sprite) return;
+    const { key, depth } = this.resolveTile(this.mapData.grid[row][col]);
+    sprite.setTexture(key).setDepth(depth);
   }
 
   private createGroups() {
@@ -254,9 +283,7 @@ export class GameScene extends Phaser.Scene {
       this.selectedTower = null;
       // Restore tile to buildable!
       this.mapData.grid[row][col].type = 'buildable';
-      if (this.tileSprites[row]?.[col]) {
-        this.tileSprites[row][col].setTexture('tile_buildable');
-      }
+      this.refreshTileSprite(row, col);
       this.bottomBar.showBuildMode();
     };
 
@@ -286,6 +313,13 @@ export class GameScene extends Phaser.Scene {
   private setupUICameraIgnore() {
     // Tile sprites (already exist, won't go through patched group add())
     for (const row of this.tileSprites) {
+      for (const img of row) {
+        if (img) this.uiCam.ignore(img);
+      }
+    }
+
+    // Water base sprites — also ignore so they don't paint over the game view
+    for (const row of this.waterSprites) {
       for (const img of row) {
         if (img) this.uiCam.ignore(img);
       }
@@ -446,9 +480,7 @@ export class GameScene extends Phaser.Scene {
     this.events.on('barricade_destroyed', (b: Barricade) => {
       this.mapData.grid[b.row][b.col].type = 'buildable';
       this.barricadeCount--;
-      if (this.tileSprites[b.row]?.[b.col]) {
-        this.tileSprites[b.row][b.col].setTexture('tile_buildable');
-      }
+      this.refreshTileSprite(b.row, b.col);
     });
 
     this.events.on('game_over', () => {
@@ -565,14 +597,7 @@ export class GameScene extends Phaser.Scene {
       this.mapData.grid[row][col].type = 'path';
 
       // Update tile to path blob texture
-      if (this.tileSprites[row]?.[col]) {
-        const mask = computeBlobMask(this.mapData.grid, row, col);
-        const blobAITileKey = `tile_path_blob_${mask}`;
-        const key = this.textures.exists(blobAITileKey) ? blobAITileKey
-          : this.textures.exists('tile_path') ? 'tile_path'
-          : blobTileKey(mask);
-        this.tileSprites[row][col].setTexture(key);
-      }
+      this.refreshTileSprite(row, col);
 
       this.barricadeCount++;
       if (this.barricadeCount >= MAX_BARRICADES) this.placingBarricade = false;

@@ -323,10 +323,10 @@ export class BootScene extends Phaser.Scene {
 
   // ─── Terrain transition tiles ─────────────────────────────────────────────
   private generateTerrainTransitionTextures() {
-    // Only generate procedurally for masks not loaded from AI images
-    generateTransitionTextures(this, 'grass', this.aiLoadedTiles);
-    // Sand & water transition layers — generate when those tile types are used
-    // More terrain layers can be added here when the map generator produces them.
+    // Always generate transition textures. If an AI grass texture was loaded,
+    // pass its key as the source so it gets baked into the transition polygons.
+    const grassSource = this.textures.exists('tile_grass') ? 'tile_grass' : undefined;
+    generateTransitionTextures(this, 'grass', grassSource);
   }
 
   // ─── Towers ───────────────────────────────────────────────────────────────

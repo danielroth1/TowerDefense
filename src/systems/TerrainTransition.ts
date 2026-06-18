@@ -157,49 +157,58 @@ function colorsFor(terrainId: string): TerrainColors {
  *
  * Call this during BootScene.create() after the base tiles are ready.
  *
- * @param scene       — Phaser scene
- * @param terrainId   — terrain identifier ('grass', 'sand', 'water')
- * @param aiLoaded    — (optional) set of texture keys already loaded from AI images;
- *                       masks present in this set are skipped.
+ * @param scene             — Phaser scene
+ * @param terrainId         — terrain identifier ('grass', 'sand', 'water')
+ * @param sourceTextureKey  — (optional) if set, use this texture as the fill
+ *                            inside the transition polygon (e.g. AI tile_grass).
+ *                            When omitted, a procedural gradient fill is used.
  */
 export function generateTransitionTextures(
   scene: Phaser.Scene,
   terrainId: string,
-  aiLoaded?: Set<string>,
+  sourceTextureKey?: string,
 ): void {
-  const g = scene.add.graphics();
   const cols = colorsFor(terrainId);
 
   for (let mask = 0; mask < 16; mask++) {
     const key = transitionTileKey(terrainId, mask);
-    // Skip if already loaded from AI-generated images
-    if (aiLoaded?.has(key)) continue;
     if (scene.textures.exists(key)) continue; // already generated
 
-    g.clear();
-    drawTransitionTile(g, mask, terrainId, cols);
-    g.generateTexture(key, TS, TS);
-  }
+    if (sourceTextureKey && scene.textures.exists(sourceTextureKey)) {
+      // ── AI-source path: bake source texture into the polygon ──
+      const srcTex = scene.textures.get(sourceTextureKey);
+      const srcImg = srcTex.getSourceImage() as HTMLImageElement | HTMLCanvasElement;
 
-  g.destroy();
+      const ct = scene.textures.createCanvas(key, TS, TS);
+      if (!ct) continue;
+      const ctx = ct.getContext();
+
+      drawTransitionFromSource(ctx, mask, srcImg);
+      ct.refresh();
+    } else {
+      // ── Procedural path: draw gradient fill and details ──
+      const g = scene.add.graphics();
+      drawTransitionTile(g, mask, terrainId, cols);
+      g.generateTexture(key, TS, TS);
+      g.destroy();
+    }
+  }
 }
 
-// ─── Per-tile drawing ─────────────────────────────────────────────────────
+// ─── Shared polygon computation ──────────────────────────────────────────
 
-function drawTransitionTile(
-  g: Phaser.GameObjects.Graphics,
-  mask: number,
-  terrainId: string,
-  cols: TerrainColors,
-): void {
-  if (mask === 0) return; // nothing to draw
+/**
+ * Build the terrain-coverage polygon vertices for a given corner mask.
+ * Returns an empty array when mask === 0 (nothing to draw).
+ */
+function computeTransitionPolygon(mask: number): { x: number; y: number }[] {
+  if (mask === 0) return [];
 
   const tl = !!(mask & TL);
   const tr = !!(mask & TR);
   const br = !!(mask & BR);
   const bl = !!(mask & BL);
 
-  // ── 1. Build the terrain-coverage polygon ─────────────────────────
   const verts: { x: number; y: number }[] = [];
 
   if (tl) verts.push({ x: 0, y: 0 });
@@ -211,6 +220,18 @@ function drawTransitionTile(
   if (bl) verts.push({ x: 0, y: TS });
   if (bl !== tl) verts.push({ x: 0, y: C });
 
+  return verts;
+}
+
+// ─── Per-tile drawing (procedural) ────────────────────────────────────────
+
+function drawTransitionTile(
+  g: Phaser.GameObjects.Graphics,
+  mask: number,
+  terrainId: string,
+  cols: TerrainColors,
+): void {
+  const verts = computeTransitionPolygon(mask);
   if (verts.length < 3) return;
 
   // ── 2. For partial masks, the area outside the polygon stays
@@ -231,6 +252,37 @@ function drawTransitionTile(
   // ── 4. Subtle border ─────────────────────────────────────────────
   g.lineStyle(1, 0x0a0a0a, 0.08);
   g.strokeRect(0, 0, TS, TS);
+}
+
+// ─── Per-tile drawing (AI-source, canvas-based) ───────────────────────────
+
+function drawTransitionFromSource(
+  ctx: CanvasRenderingContext2D,
+  mask: number,
+  srcImg: HTMLImageElement | HTMLCanvasElement,
+): void {
+  const verts = computeTransitionPolygon(mask);
+  if (verts.length < 3) return;
+
+  // Clip to the polygon and draw the AI source texture as fill
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(verts[0].x, verts[0].y);
+  for (let i = 1; i < verts.length; i++) {
+    ctx.lineTo(verts[i].x, verts[i].y);
+  }
+  ctx.closePath();
+  ctx.clip();
+
+  // Draw AI source texture (fills the entire clipped polygon area)
+  ctx.drawImage(srcImg, 0, 0, TS, TS);
+
+  ctx.restore();
+
+  // Subtle border
+  ctx.strokeStyle = 'rgba(10,10,10,0.08)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0, 0, TS, TS);
 }
 
 /**
