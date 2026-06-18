@@ -50,6 +50,7 @@ export class BottomBar {
   // UPGRADE mode elements (hidden by default)
   private upgRoot:    Phaser.GameObjects.Container;
   private upgBtnList: UBtn[] = [];
+  private currentUpgradeTower: Tower | null = null;
 
   // Ability buttons
   private abilityObjs: Map<AbilityType, ABtn> = new Map();
@@ -90,7 +91,8 @@ export class BottomBar {
       const cy  = TOWER_CY;
 
       const bg2 = scene.add.graphics().setScrollFactor(0).setDepth(D + 1);
-      this.drawTowerBtn(bg2, cx, cy, TBW, TBH, def.color, false, false);
+      const canAfford = economy.canAfford(def.baseCost);
+      this.drawTowerBtn(bg2, cx, cy, TBW, TBH, def.color, false, false, canAfford);
       this.buildBgs.push(bg2);
 
       const icon = scene.add.image(cx, cy - 12, `tower_${type}_0`)
@@ -116,15 +118,15 @@ export class BottomBar {
 
       const hit = scene.add.rectangle(cx, cy, TBW - 4, TBH - 4, 0, 0)
         .setScrollFactor(0).setInteractive({ useHandCursor: true }).setDepth(D + 3);
-      hit.on('pointerover',  () => this.drawTowerBtn(bg2, cx, cy, TBW, TBH, def.color, true, false));
-      hit.on('pointerout',   () => this.drawTowerBtn(bg2, cx, cy, TBW, TBH, def.color, false, false));
+      hit.on('pointerover',  () => this.drawTowerBtn(bg2, cx, cy, TBW, TBH, def.color, true, false, this.economy.canAfford(def.baseCost)));
+      hit.on('pointerout',   () => this.drawTowerBtn(bg2, cx, cy, TBW, TBH, def.color, false, false, this.economy.canAfford(def.baseCost)));
       hit.on('pointerup',    () => {
         if (!economy.canAfford(def.baseCost)) return;
         this.onPlaceTower?.(type);
         // Highlight selected
         this.buildBgs.forEach((b, j) => {
           const t = TOWER_TYPES_ORDERED[j];
-          this.drawTowerBtn(b, towerCX(j), TOWER_CY, TBW, TBH, TOWER_DEFS[t].color, false, j === i);
+          this.drawTowerBtn(b, towerCX(j), TOWER_CY, TBW, TBH, TOWER_DEFS[t].color, false, j === i, this.economy.canAfford(TOWER_DEFS[t].baseCost));
         });
       });
       this.buildHits.push(hit);
@@ -188,6 +190,14 @@ export class BottomBar {
     waveHit.on('pointerover', () => this.drawWaveBtn(true));
     waveHit.on('pointerout',  () => this.drawWaveBtn(false));
     waveHit.on('pointerup',   () => this.onSendWave?.());
+
+    // Listen for gold changes to refresh affordability on build & upgrade buttons
+    scene.events.on('gold_changed', () => {
+      this.refreshBuildAffordability();
+      if (this.upgRoot.visible && this.currentUpgradeTower) {
+        this.showUpgradeMode(this.currentUpgradeTower);
+      }
+    });
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────
@@ -215,6 +225,7 @@ export class BottomBar {
   }
 
   showBuildMode() {
+    this.currentUpgradeTower = null;
     this.setBuildVisible(true);
     this.upgRoot.setVisible(false);
     this.clearUpgHits();
@@ -222,6 +233,7 @@ export class BottomBar {
   }
 
   showUpgradeMode(tower: Tower) {
+    this.currentUpgradeTower = tower;
     this.setBuildVisible(false);
     this.clearUpgHits();
     this.rebuildUpgradeSection(tower);
@@ -233,6 +245,7 @@ export class BottomBar {
       const def = TOWER_DEFS[type];
       const can = this.economy.canAfford(def.baseCost);
       this.buildCosts[i].setColor(can ? '#ffd700' : '#885533');
+      this.drawTowerBtn(this.buildBgs[i], towerCX(i), TOWER_CY, TBW, TBH, def.color, false, false, can);
     });
   }
 
@@ -359,12 +372,12 @@ export class BottomBar {
 
   // ── Drawing helpers ────────────────────────────────────────────────────────
   private drawTowerBtn(g: Phaser.GameObjects.Graphics, cx: number, cy: number,
-    w: number, h: number, color: number, hover: boolean, active: boolean) {
+    w: number, h: number, color: number, hover: boolean, active: boolean, affordable: boolean = true) {
     g.clear();
-    const fill = active ? 0x2a4a2a : hover ? COLORS.BTN_HOVER : COLORS.BTN_NORMAL;
+    const fill = !affordable ? 0x1a1a1a : active ? 0x2a4a2a : hover ? COLORS.BTN_HOVER : COLORS.BTN_NORMAL;
     g.fillStyle(fill, 1);
     g.fillRoundedRect(cx - w / 2, cy - h / 2, w, h, 5);
-    g.lineStyle(active ? 3 : 1, active ? 0x44ff88 : color, active ? 1 : 0.5);
+    g.lineStyle(active ? 3 : 1, active ? 0x44ff88 : affordable ? color : 0x333333, active ? 1 : 0.5);
     g.strokeRoundedRect(cx - w / 2, cy - h / 2, w, h, 5);
   }
 

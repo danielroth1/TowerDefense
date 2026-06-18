@@ -19,6 +19,10 @@ export class TowerPanel {
     this.container = scene.add.container(8, 46).setDepth(40).setScrollFactor(0);
     this.build();
     this.hide();
+
+    scene.events.on('gold_changed', () => {
+      if (this.visible) this.build();
+    });
   }
 
   private build() {
