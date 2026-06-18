@@ -2,23 +2,18 @@ import Phaser from 'phaser';
 import { TILE_SIZE, GRID_COLS, GRID_ROWS } from '../utils/constants';
 
 /*
- * ─── Terrain Auto-Tiling: Corner-Based Bitmasking ──────────────────────────
+ * ─── Terrain Auto-Tiling: Blob-Based Transition ──────────────────────────
  *
- * Each terrain layer (Water → Sand → Grass) is rendered as a separate pass.
- * Higher-layer tiles use a 4-bit corner bitmask (0–15) to select one of 16
- * transition textures that alpha-blend into the layer beneath.
+ * Each terrain cell uses a 4-bit cardinal-neighbor mask (0–15) to select
+ * one of 16 transition textures. The terrain is drawn as a rounded blob
+ * with rectangular arms + circular end caps, matching the path blob system.
  *
- * Corner bit weights:
- *   Top-Left   (TL) = 1
- *   Top-Right  (TR) = 2
- *   Bottom-Right (BR) = 4
- *   Bottom-Left (BL) = 8
+ * Bit weights (cardinal neighbors):
+ *   North (N) = 1     East (E) = 2
+ *   South (S) = 4     West (W) = 8
  *
- * A corner is 1 iff the tile itself AND both cardinal neighbours adjacent to
- * that corner belong to the target terrain.
- *
- * Texture mapping (4×4 spritesheet layout):
- *   Row = floor(mask / 4), Col = mask % 4
+ * Smooth grass-to-water blending is achieved via expanding alpha bands
+ * (outer → inner), identical in approach to BlobTileset.
  */
 
 // ─── Terrain layer definitions ────────────────────────────────────────────
@@ -51,66 +46,27 @@ export function getLayerDepth(layerId: string): number {
   return layer ? layer.depth : 0;
 }
 
-// ─── Corner bit constants ─────────────────────────────────────────────────
+// ─── Blob bit constants (cardinal neighbors) ──────────────────────────────
 
-const TL = 0x1;
-const TR = 0x2;
-const BR = 0x4;
-const BL = 0x8;
+const B_N = 0x1, B_E = 0x2, B_S = 0x4, B_W = 0x8;
 
 /**
- * Compute the 4-bit corner mask (0–15) for a tile at (row, col).
+ * Compute the 4-bit blob mask (0–15) for a terrain cell at (row, col).
  *
- * A corner is True (1) iff:
- *   - The tile itself at (row, col) matches the target terrain
- *   - Both cardinal neighbours adjacent to that corner also match
- *
- * Out-of-bounds cells are treated as NOT matching (returning 0 for
- * boundary corners, which naturally creates edge transitions).
- *
- * @param isTerrain - predicate returning true if cell (r,c) is target terrain
- * @param row       - tile row
- * @param col       - tile column
- * @returns integer 0–15
+ * Each bit is set when the corresponding cardinal neighbour is NOT water
+ * (i.e. type !== 'ground'). Path / spawn / goal cells count as solid so the
+ * terrain blob extends right up to the path without a visual gap.
  */
-export function computeCornerMask(
-  isTerrain: (r: number, c: number) => boolean,
+export function computeTerrainBlobMask(
+  grid: { type: string }[][],
   row: number,
   col: number,
 ): number {
-  // Tile itself must be target terrain
-  if (!isTerrain(row, col)) return 0;
-
   let mask = 0;
-
-  // TL: check N, W, and NW diagonal
-  if (row > 0 && col > 0
-      && isTerrain(row - 1, col) && isTerrain(row, col - 1)
-      && isTerrain(row - 1, col - 1)) {
-    mask |= TL;
-  }
-
-  // TR: check N, E, and NE diagonal
-  if (row > 0 && col < GRID_COLS - 1
-      && isTerrain(row - 1, col) && isTerrain(row, col + 1)
-      && isTerrain(row - 1, col + 1)) {
-    mask |= TR;
-  }
-
-  // BR: check S, E, and SE diagonal
-  if (row < GRID_ROWS - 1 && col < GRID_COLS - 1
-      && isTerrain(row + 1, col) && isTerrain(row, col + 1)
-      && isTerrain(row + 1, col + 1)) {
-    mask |= BR;
-  }
-
-  // BL: check S, W, and SW diagonal
-  if (row < GRID_ROWS - 1 && col > 0
-      && isTerrain(row + 1, col) && isTerrain(row, col - 1)
-      && isTerrain(row + 1, col - 1)) {
-    mask |= BL;
-  }
-
+  if (row > 0                && grid[row - 1][col].type !== 'ground') mask |= B_N;
+  if (row < GRID_ROWS - 1    && grid[row + 1][col].type !== 'ground') mask |= B_S;
+  if (col > 0                && grid[row][col - 1].type !== 'ground') mask |= B_W;
+  if (col < GRID_COLS - 1    && grid[row][col + 1].type !== 'ground') mask |= B_E;
   return mask;
 }
 
@@ -119,37 +75,10 @@ export function transitionTileKey(terrainId: string, mask: number): string {
   return `tile_trans_${terrainId}_${mask}`;
 }
 
-/** Returns the spritesheet grid position for a mask (UV / tile-coord mapping). */
-export function cornerMaskToGrid(mask: number): { row: number; col: number } {
-  return { row: Math.floor(mask / 4), col: mask % 4 };
-}
-
-/** Count set bits in a 4-bit number. */
-// popcount4 intentionally omitted — not needed in final implementation
-
 // ─── Texture generation ───────────────────────────────────────────────────
 
 const TS = TILE_SIZE;   // 48
 const C  = TS / 2;       // 24 (centre)
-
-// ─── Colour palettes ──────────────────────────────────────────────────────
-
-interface TerrainColors {
-  base: number;
-  light: number;
-  dark: number;
-}
-
-const GRASS_COLORS: TerrainColors = { base: 0x3a8a22, light: 0x5aaa33, dark: 0x2a6a18 };
-const SAND_COLORS:  TerrainColors = { base: 0xc4b078, light: 0xd4c088, dark: 0xa09058 };
-const WATER_COLORS: TerrainColors = { base: 0x1e3866, light: 0x3e5a99, dark: 0x0e1e44 };
-
-function colorsFor(terrainId: string): TerrainColors {
-  if (terrainId === 'grass') return GRASS_COLORS;
-  if (terrainId === 'sand')  return SAND_COLORS;
-  if (terrainId === 'water') return WATER_COLORS;
-  return { base: 0x888888, light: 0xaaaaaa, dark: 0x666666 };
-}
 
 /**
  * Generate all 16 transition tile textures for a given terrain type and
@@ -159,23 +88,25 @@ function colorsFor(terrainId: string): TerrainColors {
  *
  * @param scene             — Phaser scene
  * @param terrainId         — terrain identifier ('grass', 'sand', 'water')
- * @param sourceTextureKey  — (optional) if set, use this texture as the fill
- *                            inside the transition polygon (e.g. AI tile_grass).
- *                            When omitted, a procedural gradient fill is used.
+ * @param sourceTextureKey  — (optional) if set, bake this texture into the
+ *                            blob shape (e.g. AI tile_grass).
+ * @param halfWidth         — blob half-width in px (default 20).
+ *                            Higher values make the terrain reach closer to
+ *                            the tile edge.  Must be ≤ C (24) for arm rects
+ *                            to stay within the tile.
  */
 export function generateTransitionTextures(
   scene: Phaser.Scene,
   terrainId: string,
   sourceTextureKey?: string,
+  halfWidth: number = 24,
 ): void {
-  const cols = colorsFor(terrainId);
-
   for (let mask = 0; mask < 16; mask++) {
     const key = transitionTileKey(terrainId, mask);
-    if (scene.textures.exists(key)) continue; // already generated
+    if (scene.textures.exists(key)) continue;
 
     if (sourceTextureKey && scene.textures.exists(sourceTextureKey)) {
-      // ── AI-source path: bake source texture into the polygon ──
+      // ── AI-source: draw blob-shaped grass with smooth transition bands ──
       const srcTex = scene.textures.get(sourceTextureKey);
       const srcImg = srcTex.getSourceImage() as HTMLImageElement | HTMLCanvasElement;
 
@@ -183,274 +114,216 @@ export function generateTransitionTextures(
       if (!ct) continue;
       const ctx = ct.getContext();
 
-      drawTransitionFromSource(ctx, mask, srcImg);
+      drawTransitionBlobSource(ctx, mask, srcImg, halfWidth);
       ct.refresh();
     } else {
-      // ── Procedural path: draw gradient fill and details ──
+      // ── Procedural: draw gradient-filled blob ──
       const g = scene.add.graphics();
-      drawTransitionTile(g, mask, terrainId, cols);
+      drawTransitionBlobProc(g, mask, terrainId, halfWidth);
       g.generateTexture(key, TS, TS);
       g.destroy();
     }
   }
 }
 
-// ─── Shared polygon computation ──────────────────────────────────────────
+// ─── Blob shape helpers ──────────────────────────────────────────────────
+
+/** Build the arm rectangles for a given blob mask and half-width. */
+function blobArms(mask: number, hw: number): { x: number; y: number; w: number; h: number }[] {
+  const rects: { x: number; y: number; w: number; h: number }[] = [];
+  if (mask & B_N) rects.push({ x: C - hw, y: 0,     w: hw * 2, h: C });
+  if (mask & B_S) rects.push({ x: C - hw, y: C,     w: hw * 2, h: C });
+  if (mask & B_W) rects.push({ x: 0,      y: C - hw, w: C,      h: hw * 2 });
+  if (mask & B_E) rects.push({ x: C,      y: C - hw, w: C,      h: hw * 2 });
+
+  const popcount = (mask & B_N ? 1 : 0) + (mask & B_S ? 1 : 0) +
+                   (mask & B_W ? 1 : 0) + (mask & B_E ? 1 : 0);
+
+  if (popcount === 1) {
+    const shortLen = C - hw * 0.6;
+    if (mask & B_N) rects[0] = { x: C - hw, y: 0, w: hw * 2, h: shortLen };
+    if (mask & B_S) rects[0] = { x: C - hw, y: C, w: hw * 2, h: shortLen };
+    if (mask & B_W) rects[0] = { x: 0, y: C - hw, w: shortLen, h: hw * 2 };
+    if (mask & B_E) rects[0] = { x: C, y: C - hw, w: shortLen, h: hw * 2 };
+  }
+  return rects;
+}
+
+function blobPopcount(mask: number): number {
+  return (mask & B_N ? 1 : 0) + (mask & B_S ? 1 : 0) +
+         (mask & B_W ? 1 : 0) + (mask & B_E ? 1 : 0);
+}
+
+// ─── Canvas drawing (AI-source) ──────────────────────────────────────────
 
 /**
- * Build the terrain-coverage polygon vertices for a given corner mask.
- * Returns an empty array when mask === 0 (nothing to draw).
+ * Draw a blob-shaped terrain transition onto a canvas context using an
+ * AI source texture. Expanding alpha bands create a smooth grass→water edge.
  */
-function computeTransitionPolygon(mask: number): { x: number; y: number }[] {
-  if (mask === 0) return [];
-
-  const tl = !!(mask & TL);
-  const tr = !!(mask & TR);
-  const br = !!(mask & BR);
-  const bl = !!(mask & BL);
-
-  const verts: { x: number; y: number }[] = [];
-
-  if (tl) verts.push({ x: 0, y: 0 });
-  if (tl !== tr) verts.push({ x: C, y: 0 });
-  if (tr) verts.push({ x: TS, y: 0 });
-  if (tr !== br) verts.push({ x: TS, y: C });
-  if (br) verts.push({ x: TS, y: TS });
-  if (br !== bl) verts.push({ x: C, y: TS });
-  if (bl) verts.push({ x: 0, y: TS });
-  if (bl !== tl) verts.push({ x: 0, y: C });
-
-  return verts;
-}
-
-// ─── Per-tile drawing (procedural) ────────────────────────────────────────
-
-function drawTransitionTile(
-  g: Phaser.GameObjects.Graphics,
-  mask: number,
-  terrainId: string,
-  cols: TerrainColors,
-): void {
-  const verts = computeTransitionPolygon(mask);
-  if (verts.length < 3) return;
-
-  // ── 2. For partial masks, the area outside the polygon stays
-  //    transparent — the water base layer shows through naturally.
-  //    No background fill needed.
-
-  // ── 3. Draw grass inside the polygon ──────────────────────────────
-  drawGradientFill(g, verts, terrainId);
-
-  if (terrainId === 'grass') {
-    drawGrassDetail(g, verts, cols);
-  } else if (terrainId === 'sand') {
-    drawSandDetail(g, verts, cols);
-  } else if (terrainId === 'water') {
-    drawWaterDetail(g, verts, cols);
-  }
-
-  // ── 4. Subtle border ─────────────────────────────────────────────
-  g.lineStyle(1, 0x0a0a0a, 0.08);
-  g.strokeRect(0, 0, TS, TS);
-}
-
-// ─── Per-tile drawing (AI-source, canvas-based) ───────────────────────────
-
-function drawTransitionFromSource(
+function drawTransitionBlobSource(
   ctx: CanvasRenderingContext2D,
   mask: number,
   srcImg: HTMLImageElement | HTMLCanvasElement,
+  hw: number,
 ): void {
-  const verts = computeTransitionPolygon(mask);
-  if (verts.length < 3) return;
+  const rects = blobArms(mask, hw);
+  const popcount = blobPopcount(mask);
 
-  // Clip to the polygon and draw the AI source texture as fill
-  ctx.save();
-  ctx.beginPath();
-  ctx.moveTo(verts[0].x, verts[0].y);
-  for (let i = 1; i < verts.length; i++) {
-    ctx.lineTo(verts[i].x, verts[i].y);
+  if (popcount === 0) {
+    // Isolated — small rounded blob at centre
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(C, C, hw * 0.7, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.drawImage(srcImg, 0, 0, TS, TS);
+    ctx.restore();
+    drawBorder(ctx);
+    return;
   }
-  ctx.closePath();
+
+  // Transition bands (outer → inner, same pattern as BlobTileset)
+  const bands = [
+    { alpha: 0.12, expand: 5 },
+    { alpha: 0.35, expand: 2 },
+    { alpha: 0.70, expand: 0 },
+    { alpha: 1.00, expand: 0 },
+  ];
+
+  for (const band of bands) {
+    const e = band.expand;
+    ctx.save();
+    ctx.globalAlpha = band.alpha;
+    ctx.beginPath();
+    clipBlobShape(ctx, mask, rects, popcount, e, hw);
+    ctx.drawImage(srcImg, 0, 0, TS, TS);
+    ctx.restore();
+  }
+
+  drawBorder(ctx);
+}
+
+/** Add the blob path (rects + circles) to the canvas context and clip. */
+function clipBlobShape(
+  ctx: CanvasRenderingContext2D,
+  mask: number,
+  rects: { x: number; y: number; w: number; h: number }[],
+  popcount: number,
+  expand: number,
+  hw: number,
+): void {
+  for (const r of rects) {
+    ctx.rect(r.x - expand, r.y - expand, r.w + expand * 2, r.h + expand * 2);
+  }
+
+  if (popcount >= 2) {
+    const circleR = hw + (expand === 5 ? 0 : expand);
+    ctx.moveTo(C + circleR, C);
+    ctx.arc(C, C, circleR, 0, Math.PI * 2);
+  }
+
+  if (popcount === 1) {
+    if (mask & B_N)
+      ctx.arc(C, rects[0].y + rects[0].h + expand, hw + expand, 0, Math.PI * 2);
+    if (mask & B_S)
+      ctx.arc(C, rects[0].y - expand, hw + expand, 0, Math.PI * 2);
+    if (mask & B_W)
+      ctx.arc(rects[0].x + rects[0].w + expand, C, hw + expand, 0, Math.PI * 2);
+    if (mask & B_E)
+      ctx.arc(rects[0].x - expand, C, hw + expand, 0, Math.PI * 2);
+  }
+
   ctx.clip();
+}
 
-  // Draw AI source texture (fills the entire clipped polygon area)
-  ctx.drawImage(srcImg, 0, 0, TS, TS);
-
-  ctx.restore();
-
-  // Subtle border
+function drawBorder(ctx: CanvasRenderingContext2D): void {
   ctx.strokeStyle = 'rgba(10,10,10,0.08)';
   ctx.lineWidth = 1;
   ctx.strokeRect(0, 0, TS, TS);
 }
 
+// ─── Graphics drawing (procedural) ───────────────────────────────────────
+
 /**
- * Draw a gradient fill clipped to the polygon. Different terrains use
- * different colour gradients matching the original BootScene tiles.
+ * Draw a blob-shaped terrain transition using Phaser Graphics (procedural
+ * fallback when no AI source texture is available).
  */
-function drawGradientFill(
+function drawTransitionBlobProc(
   g: Phaser.GameObjects.Graphics,
-  verts: { x: number; y: number }[],
+  mask: number,
   terrainId: string,
+  hw: number,
 ): void {
-  // Pre-compute min/max y of the polygon for the row loop
-  let minY = TS, maxY = 0;
-  for (const v of verts) {
-    if (v.y < minY) minY = v.y;
-    if (v.y > maxY) maxY = v.y;
-  }
-  minY = Math.max(0, Math.floor(minY));
-  maxY = Math.min(TS, Math.ceil(maxY));
+  const rects = blobArms(mask, hw);
+  const popcount = blobPopcount(mask);
 
-  for (let y = minY; y < maxY; y++) {
-    // Compute gradient colour for this row
-    const t = y / TS;
-    let color: number;
-
-    if (terrainId === 'grass') {
-      const osc = 0.5 + 0.5 * Math.sin(t * Math.PI * 2 - Math.PI / 2);
-      const r = Math.floor((0.14 + 0.04 * osc) * 255);
-      const gr = Math.floor((0.34 + 0.10 * osc) * 255);
-      const b = Math.floor((0.10 + 0.03 * osc) * 255);
-      color = Phaser.Display.Color.GetColor(r, gr, b);
-    } else if (terrainId === 'sand') {
-      const osc = 0.5 + 0.5 * Math.sin(t * Math.PI * 2 - Math.PI / 2);
-      const r = Math.floor((0.58 + 0.08 * osc) * 255);
-      const gr = Math.floor((0.50 + 0.06 * osc) * 255);
-      const b = Math.floor((0.30 + 0.04 * osc) * 255);
-      color = Phaser.Display.Color.GetColor(r, gr, b);
-    } else {
-      // Water
-      const r = 0.12 + 0.02 * Math.sin(t * Math.PI);
-      const gr2 = 0.22 + 0.06 * Math.sin(t * Math.PI);
-      const b2 = 0.48 + 0.07 * Math.sin(t * Math.PI);
-      color = Phaser.Display.Color.GetColor(
-        Math.floor(r * 255), Math.floor(gr2 * 255), Math.floor(b2 * 255));
-    }
-
-    // Find x-range inside the polygon for this y row
-    let x0 = TS, x1 = 0;
-    for (let x = 0; x < TS; x++) {
-      if (pointInPolygon(x + 0.5, y + 0.5, verts)) {
-        if (x < x0) x0 = x;
-        x1 = x;
-      }
-    }
-
-    if (x0 <= x1) {
-      g.fillStyle(color, 1);
-      g.fillRect(x0, y, x1 - x0 + 1, 1);
-    }
-  }
-}
-
-// ─── Terrain detail drawing ───────────────────────────────────────────────
-
-function drawGrassDetail(
-  g: Phaser.GameObjects.Graphics,
-  verts: { x: number; y: number }[],
-  cols: TerrainColors,
-): void {
-  // Grass blade clusters (matching BootScene tile_buildable density)
-  for (let i = 0; i < 16; i++) {
-    const gx = (i * 17 + 5) % TS;
-    const gy = (i * 13 + 7) % TS;
-
-    // Skip if outside polygon
-    if (!pointInPolygon(gx + 1, gy + 2, verts)) continue;
-
-    const shade = (i % 3) === 0 ? 0.5 : 0.35;
-    g.fillStyle(cols.base, shade);
-    g.fillRect(gx, gy, 2, 5 + (i % 4));
+  if (popcount === 0) {
+    // Isolated — small rounded blob at centre
+    const col = gradientColor(TS / 2, terrainId);
+    g.fillStyle(col, 1);
+    g.fillCircle(C, C, hw * 0.7);
+    g.lineStyle(1, 0x0a0a0a, 0.08);
+    g.strokeRect(0, 0, TS, TS);
+    return;
   }
 
-  // Grass highlights
-  for (let i = 0; i < 10; i++) {
-    const gx = (i * 23 + 3) % TS;
-    const gy = (i * 19 + 11) % TS;
-    if (!pointInPolygon(gx, gy + 1, verts)) continue;
-    g.fillStyle(cols.light, 0.25);
-    g.fillRect(gx, gy, 1, 3);
-  }
-
-  // Flowers (inside polygon)
-  const flowerPositions = [
-    [0.15, 0.12], [0.55, 0.08], [0.35, 0.42],
-    [0.85, 0.28], [0.10, 0.62], [0.65, 0.72],
-    [0.45, 0.88], [0.88, 0.55], [0.72, 0.92],
+  const bands = [
+    { alpha: 0.12, expand: 5 },
+    { alpha: 0.35, expand: 2 },
+    { alpha: 0.70, expand: 0 },
+    { alpha: 1.00, expand: 0 },
   ];
-  for (const [fx, fy] of flowerPositions) {
-    const px = fx * TS, py = fy * TS;
-    if (!pointInPolygon(px, py, verts)) continue;
-    const col = ((Math.floor(fx * 100) + Math.floor(fy * 100)) % 2 === 0) ? 0xffdd44 : 0xff9933;
-    g.fillStyle(col, 0.40);
-    g.fillCircle(px, py, 1.2);
-  }
-}
 
-function drawSandDetail(
-  g: Phaser.GameObjects.Graphics,
-  verts: { x: number; y: number }[],
-  cols: TerrainColors,
-): void {
-  // Sand grain dots
-  for (let i = 0; i < 24; i++) {
-    const sx = (i * 19 + 7) % TS;
-    const sy = (i * 23 + 3) % TS;
-    if (!pointInPolygon(sx, sy, verts)) continue;
-    g.fillStyle(cols.light, 0.3);
-    g.fillCircle(sx, sy, 1);
-  }
-  // Darker specks
-  for (let i = 0; i < 12; i++) {
-    const sx = (i * 13 + 11) % TS;
-    const sy = (i * 17 + 5) % TS;
-    if (!pointInPolygon(sx, sy, verts)) continue;
-    g.fillStyle(cols.dark, 0.2);
-    g.fillCircle(sx, sy, 0.8);
-  }
-}
+  for (const band of bands) {
+    const e = band.expand;
+    const col = gradientColor(C, terrainId);
+    g.fillStyle(col, band.alpha);
 
-function drawWaterDetail(
-  g: Phaser.GameObjects.Graphics,
-  verts: { x: number; y: number }[],
-  _cols: TerrainColors,
-): void {
-  // Sine wave ripples (segment-based clipping via sample points)
-  for (let row = 0; row < 3; row++) {
-    const baseY = TS * (0.25 + row * 0.22);
-    g.lineStyle(1.5, 0x66bbee, 0.35);
-    g.beginPath();
-    let started = false;
-    for (let x = 0; x <= TS; x += 2) {
-      const phase = (x / TS) * Math.PI * 2 + row * 1.7;
-      const wy = baseY + 2.5 * Math.sin(phase);
-      if (pointInPolygon(x, wy, verts)) {
-        if (!started) { g.moveTo(x, wy); started = true; }
-        else { g.lineTo(x, wy); }
-      } else {
-        started = false;
-      }
+    for (const r of rects) {
+      g.fillRect(r.x - e, r.y - e, r.w + e * 2, r.h + e * 2);
     }
-    g.strokePath();
-  }
-}
 
-// ─── Point-in-polygon (ray casting) ───────────────────────────────────────
+    if (popcount >= 2) {
+      const circleR = hw + (band.expand === 5 ? 0 : e);
+      g.fillCircle(C, C, circleR);
+    }
 
-function pointInPolygon(
-  px: number, py: number,
-  verts: { x: number; y: number }[],
-): boolean {
-  let inside = false;
-  for (let i = 0, j = verts.length - 1; i < verts.length; j = i++) {
-    const xi = verts[i].x, yi = verts[i].y;
-    const xj = verts[j].x, yj = verts[j].y;
-    if ((yi > py) !== (yj > py) &&
-        px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
-      inside = !inside;
+    if (popcount === 1) {
+      if (mask & B_N)
+        g.fillCircle(C, rects[0].y + rects[0].h + e, hw + e);
+      if (mask & B_S)
+        g.fillCircle(C, rects[0].y - e, hw + e);
+      if (mask & B_W)
+        g.fillCircle(rects[0].x + rects[0].w + e, C, hw + e);
+      if (mask & B_E)
+        g.fillCircle(rects[0].x - e, C, hw + e);
     }
   }
-  return inside;
+
+  g.lineStyle(1, 0x0a0a0a, 0.08);
+  g.strokeRect(0, 0, TS, TS);
+}
+
+/** Single-column gradient colour matching the given terrain at height t (0–1). */
+function gradientColor(y: number, terrainId: string): number {
+  const t = y / TS;
+  if (terrainId === 'grass') {
+    const osc = 0.5 + 0.5 * Math.sin(t * Math.PI * 2 - Math.PI / 2);
+    const r = Math.floor((0.14 + 0.04 * osc) * 255);
+    const gr = Math.floor((0.34 + 0.10 * osc) * 255);
+    const b = Math.floor((0.10 + 0.03 * osc) * 255);
+    return Phaser.Display.Color.GetColor(r, gr, b);
+  }
+  if (terrainId === 'sand') {
+    const osc = 0.5 + 0.5 * Math.sin(t * Math.PI * 2 - Math.PI / 2);
+    const r = Math.floor((0.58 + 0.08 * osc) * 255);
+    const gr = Math.floor((0.50 + 0.06 * osc) * 255);
+    const b = Math.floor((0.30 + 0.04 * osc) * 255);
+    return Phaser.Display.Color.GetColor(r, gr, b);
+  }
+  // Water
+  const r = 0.12 + 0.02 * Math.sin(t * Math.PI);
+  const gr2 = 0.22 + 0.06 * Math.sin(t * Math.PI);
+  const b2 = 0.48 + 0.07 * Math.sin(t * Math.PI);
+  return Phaser.Display.Color.GetColor(
+    Math.floor(r * 255), Math.floor(gr2 * 255), Math.floor(b2 * 255));
 }

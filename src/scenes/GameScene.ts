@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { generateMap, type MapData, type GridTile } from '../systems/MapGenerator';
 import { computeBlobMask, blobTileKey } from '../systems/BlobTileset';
-import { computeCornerMask, transitionTileKey } from '../systems/TerrainTransition';
+import { computeTerrainBlobMask, transitionTileKey } from '../systems/TerrainTransition';
 import { Tower } from '../entities/Tower';
 import { Enemy } from '../entities/Enemy';
 import { Projectile, type ProjectileConfig } from '../entities/Projectile';
@@ -139,13 +139,10 @@ export class GameScene extends Phaser.Scene {
       return { key, depth: 0.2 };
     }
     if (tile.type === 'buildable') {
-      const mask = computeCornerMask(
-        (rr, cc) => this.mapData.grid[rr][cc].type !== 'ground',
-        tile.row, tile.col,
-      );
-      // Mask 0 = isolated (no corner conditions met) → show full grass tile.
-      // Mask 15 = fully interior → solid fill.
-      // Masks 1-14 = edge cells → transition overlay blends into water.
+      const mask = computeTerrainBlobMask(this.mapData.grid, tile.row, tile.col);
+      // Blobs: mask 0 = isolated (no neighbours) → full grass tile.
+      // Mask 15 = fully surrounded → solid fill.
+      // Masks 1-14 = edge cells → blob transition blends into water.
       if (mask === 0 || mask === 15) return { key: 'tile_buildable', depth: 0.1 };
       return { key: transitionTileKey('grass', mask), depth: 0.05 };
     }
