@@ -70,6 +70,118 @@ export function generateBlobTextures(scene: Phaser.Scene): void {
   g.destroy();
 }
 
+/**
+ * Generate 16 blob tile textures by masking a source texture (e.g. AI path tile)
+ * with the blob road shapes. The source texture is used as the road surface,
+ * while non-road areas show the procedural grass background.
+ *
+ * Creates textures with keys like `${prefix}_0` … `${prefix}_15`.
+ * Call this AFTER the source texture is loaded.
+ */
+export function generateBlobTexturesFromSource(
+  scene: Phaser.Scene,
+  sourceKey: string,
+  prefix: string,
+): void {
+  const sourceTex = scene.textures.get(sourceKey);
+  const srcImg = sourceTex.getSourceImage() as HTMLImageElement | HTMLCanvasElement;
+
+  // Use AI grass texture as the background (tile_grass / tile_buildable)
+  const grassTex = scene.textures.get('tile_grass');
+  const grassImg = grassTex.getSourceImage() as HTMLImageElement | HTMLCanvasElement;
+
+  for (let mask = 0; mask < 16; mask++) {
+    const key = `${prefix}_${mask}`;
+    if (scene.textures.exists(key)) scene.textures.remove(key);
+
+    const ct = scene.textures.createCanvas(key, TS, TS);
+    if (!ct) continue;
+    const ctx = ct.getContext();
+
+    // 1. AI grass background (instead of procedural grass)
+    ctx.drawImage(grassImg, 0, 0, TS, TS);
+
+    // 2. Mask in AI path source texture for the road area
+    ctx.save();
+    applyRoadClipPath(ctx, mask);
+    ctx.drawImage(srcImg, 0, 0, TS, TS);
+    ctx.restore();
+
+    // 3. Subtle border for crisp tiling
+    ctx.strokeStyle = 'rgba(10,10,10,0.10)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0, 0, TS, TS);
+
+    ct.refresh();
+  }
+}
+
+// ─── Canvas helpers for AI-blended textures ───────────────────────────────
+
+/** Build a clip path matching the road shape for the given mask. */
+function applyRoadClipPath(ctx: CanvasRenderingContext2D, mask: number): void {
+  const rects: { x: number; y: number; w: number; h: number }[] = [];
+
+  if (mask & B_N) rects.push({ x: C - HW, y: 0,      w: HW * 2, h: C });
+  if (mask & B_S) rects.push({ x: C - HW, y: C,      w: HW * 2, h: C });
+  if (mask & B_W) rects.push({ x: 0,      y: C - HW, w: C,      h: HW * 2 });
+  if (mask & B_E) rects.push({ x: C,      y: C - HW, w: C,      h: HW * 2 });
+
+  const popcount = (mask & B_N ? 1 : 0) + (mask & B_S ? 1 : 0) +
+                   (mask & B_W ? 1 : 0) + (mask & B_E ? 1 : 0);
+
+  if (popcount === 0) {
+    // Isolated – small rounded blob at centre
+    ctx.beginPath();
+    ctx.arc(C, C, HW * 0.7, 0, Math.PI * 2);
+    ctx.clip();
+    return;
+  }
+
+  if (popcount === 1) {
+    const shortLen = C - HW * 0.6;
+    if (mask & B_N) rects[0] = { x: C - HW, y: 0, w: HW * 2, h: shortLen };
+    if (mask & B_S) rects[0] = { x: C - HW, y: C, w: HW * 2, h: shortLen };
+    if (mask & B_W) rects[0] = { x: 0, y: C - HW, w: shortLen, h: HW * 2 };
+    if (mask & B_E) rects[0] = { x: C, y: C - HW, w: shortLen, h: HW * 2 };
+  }
+
+  ctx.beginPath();
+
+  // Add all arm rectangles
+  for (const r of rects) {
+    ctx.rect(r.x, r.y, r.w, r.h);
+  }
+
+  // Centre circle for multi-arm blending
+  if (popcount >= 2) {
+    ctx.moveTo(C + HW, C);
+    ctx.arc(C, C, HW, 0, Math.PI * 2);
+  }
+
+  // End-cap circles for single connections
+  if (popcount === 1) {
+    if (mask & B_N) {
+      ctx.moveTo(C + HW, rects[0].y + rects[0].h);
+      ctx.arc(C, rects[0].y + rects[0].h, HW, 0, Math.PI * 2);
+    }
+    if (mask & B_S) {
+      ctx.moveTo(C + HW, rects[0].y);
+      ctx.arc(C, rects[0].y, HW, 0, Math.PI * 2);
+    }
+    if (mask & B_W) {
+      ctx.moveTo(rects[0].x + rects[0].w, C);
+      ctx.arc(rects[0].x + rects[0].w, C, HW, 0, Math.PI * 2);
+    }
+    if (mask & B_E) {
+      ctx.moveTo(rects[0].x, C);
+      ctx.arc(rects[0].x, C, HW, 0, Math.PI * 2);
+    }
+  }
+
+  ctx.clip();
+}
+
 // ─── Per-tile drawing ──────────────────────────────────────────────────────
 function drawTile(g: Phaser.GameObjects.Graphics, mask: number): void {
   // 1. Grass base (matches tile_buildable style)

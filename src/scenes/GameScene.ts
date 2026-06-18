@@ -122,9 +122,11 @@ export class GameScene extends Phaser.Scene {
     if (tile.type === 'goal')      return 'tile_goal';
     if (tile.type === 'buildable') return 'tile_buildable';
     if (tile.type === 'path') {
-      // Use AI path tile if loaded; fall back to procedural blob tiles
-      if (this.textures.exists('tile_path')) return 'tile_path';
       const mask = computeBlobMask(this.mapData.grid, tile.row, tile.col);
+      // Prefer AI-blob-masked tiles → plain AI tile → procedural blob tiles
+      const blobAITileKey = `tile_path_blob_${mask}`;
+      if (this.textures.exists(blobAITileKey)) return blobAITileKey;
+      if (this.textures.exists('tile_path')) return 'tile_path';
       return blobTileKey(mask);
     }
     return 'tile_ground';
@@ -565,7 +567,11 @@ export class GameScene extends Phaser.Scene {
       // Update tile to path blob texture
       if (this.tileSprites[row]?.[col]) {
         const mask = computeBlobMask(this.mapData.grid, row, col);
-        this.tileSprites[row][col].setTexture(blobTileKey(mask));
+        const blobAITileKey = `tile_path_blob_${mask}`;
+        const key = this.textures.exists(blobAITileKey) ? blobAITileKey
+          : this.textures.exists('tile_path') ? 'tile_path'
+          : blobTileKey(mask);
+        this.tileSprites[row][col].setTexture(key);
       }
 
       this.barricadeCount++;

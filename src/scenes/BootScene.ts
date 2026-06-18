@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { COLORS, TILE_SIZE } from '../utils/constants';
 import { TOWER_DEFS, TOWER_TYPES_ORDERED } from '../data/towers';
 import { ENEMY_DEFS, BOSS_DEFS } from '../data/enemies';
-import { generateBlobTextures } from '../systems/BlobTileset';
+import { generateBlobTextures, generateBlobTexturesFromSource } from '../systems/BlobTileset';
 import { generateTransitionTextures } from '../systems/TerrainTransition';
 
 export class BootScene extends Phaser.Scene {
@@ -42,6 +42,10 @@ export class BootScene extends Phaser.Scene {
     this.fillMissingTileTextures();
     this.generateUITileTextures();
     this.generateBlobTextures();
+    // If an AI path tile was loaded, generate masked blob textures from it
+    if (this.textures.exists('tile_path')) {
+      generateBlobTexturesFromSource(this, 'tile_path', 'tile_path_blob');
+    }
     this.generateTerrainTransitionTextures();
     this.generateTowerTextures();
     this.generateEnemySheets();
