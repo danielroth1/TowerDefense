@@ -272,7 +272,7 @@ export class BottomBar {
 
   // ── Private helpers ────────────────────────────────────────────────────────
   private setBuildVisible(vis: boolean) {
-    [...this.buildBgs, ...this.buildIcons, ...this.buildNames, ...this.buildCosts, ...this.buildHits]
+    [...this.buildBgs, ...this.buildIcons, ...this.buildNames, ...this.buildCosts, ...this.buildHits, ...this.hotkeyLabels]
       .forEach(o => o.setVisible(vis));
   }
 
@@ -310,13 +310,14 @@ export class BottomBar {
     }
 
     // Action buttons - placed at tower button positions 1-5
-    const actions: Array<{ label: string; color: number; cb: () => void; enabled: boolean }> = [];
+    const actions: Array<{ label: string; color: number; cb: () => void; enabled: boolean; hotkey?: string }> = [];
 
     if (tower.canUpgrade()) {
       const cost = tower.upgradeCost();
       const tier = tower.def.upgrades[tower.level - 1];
       actions.push({
         label: `⬆ Upgrade\n${tier.label}  ${cost}g`,
+        hotkey: 'U',
         color: this.economy.canAfford(cost) ? 0x1e5a3a : 0x333333,
         enabled: this.economy.canAfford(cost),
         cb: () => { this.onUpgrade?.(); this.showUpgradeMode(tower); },
@@ -324,11 +325,13 @@ export class BottomBar {
     }
 
     if (tower.canEvolve()) {
+      const evoKeys = ['U', 'I'];
       for (let b = 0; b < 2; b++) {
         const evo = def.evolutions[b];
         const can = this.economy.canAfford(evo.cost);
         actions.push({
           label: `★ ${evo.label}\n${evo.cost}g`,
+          hotkey: evoKeys[b],
           color: can ? 0x3a2a00 : 0x333333,
           enabled: can,
           cb: () => { this.onEvolve?.(b as 0 | 1); this.showUpgradeMode(tower); },
@@ -357,6 +360,14 @@ export class BottomBar {
         align: 'center', lineSpacing: 2,
       }).setOrigin(0.5);
       this.upgRoot.add(txt);
+
+      // Hotkey label (same style as build tower hotkeys)
+      if (act.hotkey) {
+        const hk = this.scene.add.text(cx, CY + 25, `[${act.hotkey}]`, {
+          fontSize: '9px', fontFamily: 'monospace', color: '#667788', align: 'center',
+        }).setOrigin(0.5);
+        this.upgRoot.add(hk);
+      }
 
       if (act.enabled) {
         // Hit rects MUST be outside the container and screen-fixed

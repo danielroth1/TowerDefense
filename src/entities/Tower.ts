@@ -168,8 +168,8 @@ export class Tower extends Phaser.GameObjects.Container {
     const d = Phaser.Math.Distance.Between(this.x, this.y, this.target.x, this.target.y);
     if (d > this.range) { this.target = null; return; }
 
-    // Rotate toward target
-    this.setRotation(Phaser.Math.Angle.Between(this.x, this.y, this.target.x, this.target.y));
+    // Rotate toward target (+90° offset because sprites face upward, not right)
+    this.setRotation(Phaser.Math.Angle.Between(this.x, this.y, this.target.x, this.target.y) + Math.PI / 2);
 
     if (this.fireTimer >= this.fireRate) {
       this.fireTimer = 0;

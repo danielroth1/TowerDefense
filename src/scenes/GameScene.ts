@@ -382,6 +382,19 @@ export class GameScene extends Phaser.Scene {
         }
       });
     });
+    // Upgrade / evolve selected tower
+    kb.on('keydown-U', () => {
+      if (this.selectedTower?.canEvolve()) {
+        this.bottomBar.onEvolve?.(0);
+      } else {
+        this.bottomBar.onUpgrade?.();
+      }
+    });
+    kb.on('keydown-I', () => {
+      if (this.selectedTower?.canEvolve()) {
+        this.bottomBar.onEvolve?.(1);
+      }
+    });
   }
 
   private registerEvents() {
