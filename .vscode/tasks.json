@@ -1,0 +1,56 @@
+{
+  "version": "2.0.0",
+  "inputs": [
+    {
+      "id": "k3sTag",
+      "type": "promptString",
+      "description": "Image tag",
+      "default": "latest"
+    }
+  ],
+  "tasks": [
+    {
+      "label": "k3s: build-push",
+      "type": "shell",
+      "command": "docker buildx build --platform linux/amd64 --tag ghcr.io/danielroth1/towerdefense:${input:k3sTag} --push .",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "group": "k3s" }
+    },
+    {
+      "label": "k3s: deploy",
+      "type": "shell",
+      "command": "bash scripts/deploy.sh",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "TAG": "${input:k3sTag}"
+        }
+      },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "group": "k3s" }
+    },
+    {
+      "label": "k3s: build-push-deploy",
+      "dependsOn": ["k3s: build-push", "k3s: deploy"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "group": "k3s" }
+    },
+    {
+      "label": "k3s: status",
+      "type": "shell",
+      "command": "KUBECONFIG=~/.kube/k3s-erp.yaml kubectl get pods,ingress,svc,certificate -n towerdefense -o wide",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "group": "k3s" }
+    },
+    {
+      "label": "k3s: logs",
+      "type": "shell",
+      "command": "KUBECONFIG=~/.kube/k3s-erp.yaml kubectl logs -n towerdefense -f deploy/towerdefense",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "group": "k3s" }
+    }
+  ]
+}
