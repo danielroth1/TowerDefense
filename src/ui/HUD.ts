@@ -30,6 +30,7 @@ export class HUD {
   private fpsText:     Phaser.GameObjects.Text;
   private sfxBtn:      Phaser.GameObjects.Text;
   private bgmBtn:      Phaser.GameObjects.Text;
+  private pauseBtn:    Phaser.GameObjects.Text;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -73,15 +74,20 @@ export class HUD {
       this.bgmBtn.setColor(on ? '#88cc88' : '#cc8888');
     });
 
-    this.weatherText = scene.add.text(W - 320, 5, '☀ SUNNY', {
+    this.pauseBtn = scene.add.text(W - 260, 5, '⏸ [P]', {
+      fontSize: '14px', fontFamily: 'monospace', color: '#aabbcc',
+    }).setScrollFactor(0).setDepth(DEPTH + 2).setInteractive({ useHandCursor: true });
+    this.pauseBtn.on('pointerup', () => scene.events.emit('toggle_pause'));
+
+    this.weatherText = scene.add.text(W - 450, 5, '☀ SUNNY', {
       fontSize: '14px', fontFamily: 'monospace', color: '#ffeeaa',
     }).setScrollFactor(0).setDepth(DEPTH + 1);
 
-    this.weatherTimer = scene.add.text(W - 380, 5, '', {
+    this.weatherTimer = scene.add.text(W - 520, 5, '', {
       fontSize: '12px', fontFamily: 'monospace', color: '#8899aa',
     }).setScrollFactor(0).setDepth(DEPTH + 1);
 
-    this.comboText = scene.add.text(W - 8, 44, 'COMBO ×1', {
+    this.comboText = scene.add.text(W - 315, 5, '×1', {
       fontSize: '15px', fontFamily: 'monospace', color: '#ffd700',
     }).setOrigin(1, 0).setScrollFactor(0).setDepth(DEPTH + 1);
 
@@ -131,6 +137,7 @@ export class HUD {
       this.waveText,
       this.sfxBtn,
       this.bgmBtn,
+      this.pauseBtn,
       this.weatherText,
       this.weatherTimer,
       this.comboText,
@@ -141,6 +148,12 @@ export class HUD {
     ];
   }
 
+  /** Update pause button appearance when pause state changes. */
+  setPaused(paused: boolean) {
+    this.pauseBtn.setText(paused ? '▶ [P]' : '⏸ [P]');
+    this.pauseBtn.setColor(paused ? '#ff8844' : '#aabbcc');
+  }
+
   update(gold: number, lives: number, wave: number, totalWaves: number,
          countdown: number, weatherCountdown: number,
          heroHp: number, heroMaxHp: number, heroLevel: number) {
@@ -148,7 +161,7 @@ export class HUD {
     this.setLives(lives);
     this.waveText.setText('WAVE  ' + wave + ' / ' + totalWaves);
     if (countdown > 0) {
-      this.countdownText.setText('Next wave in ' + Math.ceil(countdown / 1000) + 's  [N = send now]');
+      this.countdownText.setText('Next wave in ' + Math.ceil(countdown / 1000) + 's  [SPACE]');
     } else {
       this.countdownText.setText('');
     }
@@ -176,7 +189,7 @@ export class HUD {
   private onWaveEnd(_wave: number) { this.bossBarContainer.setVisible(false); }
 
   private setCombo(kills: number, mult: number) {
-    this.comboText.setText('COMBO ×' + mult + '  [' + kills + ']');
+    this.comboText.setText('×' + mult + (kills > 0 ? ' [' + kills + ']' : ''));
     const tier = COMBO_MULTIPLIERS.indexOf(mult as (typeof COMBO_MULTIPLIERS)[number]);
     const colors = ['#ffd700', '#ffaa00', '#ff8800', '#ff4400', '#ff0000'];
     this.comboText.setColor(colors[Math.max(0, tier)] || '#ffd700');

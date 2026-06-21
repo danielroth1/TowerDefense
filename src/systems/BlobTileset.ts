@@ -25,10 +25,39 @@ const B_N = 0x1, B_E = 0x2, B_S = 0x4, B_W = 0x8;
 /** Return the blob bitmask for a grid cell (0-15). */
 export function computeBlobMask(grid: GridTile[][], row: number, col: number): number {
   let mask = 0;
-  if (row > 0            && isPath(grid[row - 1][col])) mask |= B_N;
+  if (row > 0             && isPath(grid[row - 1][col])) mask |= B_N;
   if (row < GRID_ROWS - 1 && isPath(grid[row + 1][col])) mask |= B_S;
-  if (col > 0            && isPath(grid[row][col - 1])) mask |= B_W;
+  if (col > 0             && isPath(grid[row][col - 1])) mask |= B_W;
   if (col < GRID_COLS - 1 && isPath(grid[row][col + 1])) mask |= B_E;
+  return mask;
+}
+
+/**
+ * Visual-only blob mask for path texture rendering.
+ * Unlike computeBlobMask, this only marks a neighbour as connected when the
+ * two tiles are actually sequential on the path (|pathIndex diff| === 1).
+ * Tiles with pathIndex === -1 (barricades, tower footprints) still connect to
+ * any adjacent path tile so they look correct when placed.
+ */
+export function computePathVisualMask(grid: GridTile[][], row: number, col: number): number {
+  const tile = grid[row][col];
+  const pathIdx = tile.pathIndex;
+
+  const isConnected = (neighbor: GridTile): boolean => {
+    if (!isPath(neighbor)) return false;
+    // If both tiles are on the original path, require sequential indices.
+    if (pathIdx >= 0 && neighbor.pathIndex >= 0) {
+      return Math.abs(neighbor.pathIndex - pathIdx) === 1;
+    }
+    // At least one tile is a placed barricade / tower → always connect visually.
+    return true;
+  };
+
+  let mask = 0;
+  if (row > 0             && isConnected(grid[row - 1][col])) mask |= B_N;
+  if (row < GRID_ROWS - 1 && isConnected(grid[row + 1][col])) mask |= B_S;
+  if (col > 0             && isConnected(grid[row][col - 1])) mask |= B_W;
+  if (col < GRID_COLS - 1 && isConnected(grid[row][col + 1])) mask |= B_E;
   return mask;
 }
 

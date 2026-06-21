@@ -113,14 +113,17 @@ export function generateTransitionTextures(
     if (!ct) continue;
     const ctx = ct.getContext();
 
+    // Per-mask noise offset gives each transition variant a unique edge shape
+    const noiseOffX = (mask * 17 + 3) % NOISE_SIZE;
+    const noiseOffY = (mask * 11 + 7) % NOISE_SIZE;
     if (sourceTextureKey && scene.textures.exists(sourceTextureKey)) {
       // ── AI-source path: bake source texture through SDF+noise mask ──
       const srcTex = scene.textures.get(sourceTextureKey);
       const srcImg = srcTex.getSourceImage() as HTMLImageElement | HTMLCanvasElement;
-      drawTransitionSDF(ctx, mask, srcImg, noise, halfWidth);
+      drawTransitionSDF(ctx, mask, srcImg, noise, halfWidth, noiseOffX, noiseOffY);
     } else {
       // ── Procedural path: compute gradient colour per pixel ──
-      drawTransitionSDFProc(ctx, mask, terrainId, noise, halfWidth);
+      drawTransitionSDFProc(ctx, mask, terrainId, noise, halfWidth, noiseOffX, noiseOffY);
     }
 
     ct.refresh();
@@ -270,7 +273,7 @@ function smoothstepFn(edge0: number, edge1: number, x: number): number {
  * Noise amplitude in pixels — how far the edge can waver from the geometric
  * blob boundary. Larger values = more organic/jagged coast.
  */
-const NOISE_AMP   = 6;
+const NOISE_AMP   = 9;
 /**
  * Smooth fade half-width (px) on water-facing sides.
  * The visible blend zone is 2× this wide (feather px of grass fades into water).
@@ -311,6 +314,8 @@ function drawTransitionSDF(
   srcImg: HTMLImageElement | HTMLCanvasElement,
   noise: Float32Array,
   hw: number,
+  noiseOffX: number = 0,
+  noiseOffY: number = 0,
 ): void {
   // Read source pixels via a temporary canvas (safe for same-origin assets)
   const tmp = document.createElement('canvas');
@@ -326,7 +331,7 @@ function drawTransitionSDF(
   for (let py = 0; py < TS; py++) {
     for (let px = 0; px < TS; px++) {
       const sdf = signedDistanceToBlob(px, py, mask, hw);
-      const n   = noise[(py % NOISE_SIZE) * NOISE_SIZE + (px % NOISE_SIZE)] - 0.5;
+      const n   = noise[((py + noiseOffY) % NOISE_SIZE) * NOISE_SIZE + ((px + noiseOffX) % NOISE_SIZE)] - 0.5;
       const nw  = connectedEdgeNoiseWeight(px, py, mask);
       // Water-facing: wide smooth fade + organic noise.
       // Connected side: sharp edge pushed inward so sdf=0 at tile boundary → alpha=1.
@@ -357,6 +362,8 @@ function drawTransitionSDFProc(
   terrainId: string,
   noise: Float32Array,
   hw: number,
+  noiseOffX: number = 0,
+  noiseOffY: number = 0,
 ): void {
   const out = ctx.createImageData(TS, TS);
   const od  = out.data;
@@ -365,7 +372,7 @@ function drawTransitionSDFProc(
     const col = terrainColorAt(py, terrainId);
     for (let px = 0; px < TS; px++) {
       const sdf = signedDistanceToBlob(px, py, mask, hw);
-      const n   = noise[(py % NOISE_SIZE) * NOISE_SIZE + (px % NOISE_SIZE)] - 0.5;
+      const n   = noise[((py + noiseOffY) % NOISE_SIZE) * NOISE_SIZE + ((px + noiseOffX) % NOISE_SIZE)] - 0.5;
       const nw  = connectedEdgeNoiseWeight(px, py, mask);
       const feather = FEATHER_CONN + (FEATHER_WATER - FEATHER_CONN) * nw;
       const bias    = FEATHER_WATER * (1.0 - nw);

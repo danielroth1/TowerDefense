@@ -115,8 +115,8 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
       this.anims.timeScale = 1;
     }
 
-    // Hero attack timer
-    if (this.def.heroAttackRange) {
+    // Hero attack timer (bosses never attack the hero directly)
+    if (this.def.heroAttackRange && !this.def.isBoss) {
       this.heroAttackTimer = Math.max(0, this.heroAttackTimer - delta);
       if (this.heroAttackTimer <= 0 && !this.isPhased) {
         this.scene.events.emit('enemy_hero_range_check', this);

@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { generateMap, type MapData, type GridTile } from '../systems/MapGenerator';
-import { computeBlobMask, blobTileKey } from '../systems/BlobTileset';
+import { computePathVisualMask, blobTileKey } from '../systems/BlobTileset';
 import { computeTerrainBlobMask, transitionTileKey } from '../systems/TerrainTransition';
 import { Tower } from '../entities/Tower';
 import { Enemy } from '../entities/Enemy';
@@ -70,6 +70,19 @@ export class GameScene extends Phaser.Scene {
   private totalKills: number = 0;
   private barricadeCount: number = 0;
 
+  // Pause
+  private isPaused: boolean = false;
+
+  // Minimap
+  private minimapBg!: Phaser.GameObjects.Graphics;
+  private minimapMapImg!: Phaser.GameObjects.Image;
+  private minimapViewport!: Phaser.GameObjects.Graphics;
+  private minimapHitArea!: Phaser.GameObjects.Rectangle;
+  private readonly minimapX = GAME_WIDTH - 208;
+  private readonly minimapY = UI_TOP_HEIGHT + 6;
+  private readonly minimapW = 200;
+  private readonly minimapH = 103;
+
   constructor() { super('GameScene'); }
 
   init(data: { seed: number; seedStr?: string }) {
@@ -128,10 +141,16 @@ export class GameScene extends Phaser.Scene {
 
   /** Determine the texture key and depth for a tile's topmost layer. */
   private resolveTile(tile: GridTile): { key: string; depth: number } {
-    if (tile.type === 'spawn')     return { key: 'tile_spawn',     depth: 0.15 };
-    if (tile.type === 'goal')      return { key: 'tile_goal',      depth: 0.15 };
+    if (tile.type === 'spawn') {
+      const mask = computeTerrainBlobMask(this.mapData.grid, tile.row, tile.col);
+      return { key: mask === 15 ? 'tile_spawn' : transitionTileKey('spawn', mask), depth: 0.15 };
+    }
+    if (tile.type === 'goal') {
+      const mask = computeTerrainBlobMask(this.mapData.grid, tile.row, tile.col);
+      return { key: mask === 15 ? 'tile_goal' : transitionTileKey('goal', mask), depth: 0.15 };
+    }
     if (tile.type === 'path') {
-      const mask = computeBlobMask(this.mapData.grid, tile.row, tile.col);
+      const mask = computePathVisualMask(this.mapData.grid, tile.row, tile.col);
       const blobAITileKey = `tile_path_blob_${mask}`;
       const key = this.textures.exists(blobAITileKey) ? blobAITileKey
         : this.textures.exists('tile_path') ? 'tile_path'
@@ -285,6 +304,8 @@ export class GameScene extends Phaser.Scene {
     };
 
     this.bottomBar.onSendWave = () => this.waveManager.sendEarlyWave();
+
+    this.createMinimap();
   }
 
   private setupCamera() {
@@ -365,6 +386,8 @@ export class GameScene extends Phaser.Scene {
     // Keyboard shortcuts
     const kb = this.input.keyboard!;
     kb.on('keydown-N', () => this.waveManager.sendEarlyWave());
+    kb.on('keydown-SPACE', () => this.waveManager.sendEarlyWave());
+    kb.on('keydown-P', () => this.togglePause());
     kb.on('keydown-ESC', () => {
       this.cancelPlacing();
       this.deselectTower();
@@ -521,6 +544,8 @@ export class GameScene extends Phaser.Scene {
         });
       });
     });
+
+    this.events.on('toggle_pause', () => this.togglePause());
   }
 
   // ─── Input handlers ──────────────────────────────────────────────────────
@@ -545,12 +570,15 @@ export class GameScene extends Phaser.Scene {
       const pad = 10;
       if (wx >= heroBounds.left - pad && wx <= heroBounds.right + pad &&
           wy >= heroBounds.top  - pad && wy <= heroBounds.bottom + pad) {
+        // Toggle hero selection.  Clicking the hero a second time deselects it.
         this.heroSelected = !this.heroSelected;
         this.hero.setSelected(this.heroSelected);
-        // Deselect any tower
-        this.selectedTower?.showRange(false);
-        this.selectedTower = null;
-        this.bottomBar.showBuildMode();
+        // Deselect any tower when selecting the hero
+        if (this.heroSelected) {
+          this.selectedTower?.showRange(false);
+          this.selectedTower = null;
+          this.bottomBar.showBuildMode();
+        }
         return;
       }
     }
@@ -578,13 +606,16 @@ export class GameScene extends Phaser.Scene {
         return;
       }
 
-      // Hero movement (only when selected, can walk on paths & grass, not on water)
+      // Hero movement (only when selected; hero stays selected after moving)
       if (this.heroSelected) {
         if (tile.type !== 'ground') {
           this.hero.moveTo(wx, wy);
         }
-      } else if (tile.type !== 'buildable') {
-        // Clicking empty non-buildable space with no hero selected = deselect everything
+        return;
+      }
+
+      if (tile.type !== 'buildable') {
+        // Clicking empty non-buildable space = deselect everything
         this.deselectTower();
       }
       return;
@@ -597,6 +628,9 @@ export class GameScene extends Phaser.Scene {
       const def = TOWER_DEFS[this.placingTower];
       if (!this.economy.spend(def.baseCost)) return;
       this.placeTower(this.placingTower, col, row);
+      // Deselect hero when placing a tower
+      this.heroSelected = false;
+      this.hero.setSelected(false);
       if (!this.input.keyboard?.addKey('SHIFT').isDown) this.placingTower = null;
       return;
     }
@@ -891,6 +925,121 @@ export class GameScene extends Phaser.Scene {
     this.time.delayedCall(600, () => em.destroy());
   }
 
+  // ─── Pause ───────────────────────────────────────────────────────────────
+  private togglePause() {
+    this.isPaused = !this.isPaused;
+    if (this.isPaused) {
+      this.physics.pause();
+    } else {
+      this.physics.resume();
+    }
+    this.hud.setPaused(this.isPaused);
+  }
+
+  // ─── Minimap ─────────────────────────────────────────────────────────────
+  private createMinimap() {
+    const MM_X = this.minimapX;
+    const MM_Y = this.minimapY;
+    const MM_W = this.minimapW;
+    const MM_H = this.minimapH;
+    const MM_PAD = 2;
+
+    // Background panel
+    this.minimapBg = this.add.graphics().setScrollFactor(0).setDepth(60);
+    this.minimapBg.fillStyle(0x000811, 0.88);
+    this.minimapBg.fillRect(MM_X - MM_PAD, MM_Y - MM_PAD, MM_W + MM_PAD * 2, MM_H + MM_PAD * 2);
+    this.minimapBg.lineStyle(1, 0x3a5a6a, 0.9);
+    this.minimapBg.strokeRect(MM_X - MM_PAD, MM_Y - MM_PAD, MM_W + MM_PAD * 2, MM_H + MM_PAD * 2);
+    this.uiGroup.add(this.minimapBg);
+
+    // Pre-render map tiles to a static texture
+    const mmG = this.add.graphics();
+    const tileW = MM_W / GRID_COLS;
+    const tileH = MM_H / GRID_ROWS;
+    const TYPE_COLORS: Record<string, number> = {
+      ground:    0x0b1628,
+      path:      0x4a3c2a,
+      buildable: 0x1a3018,
+      spawn:     0x6a1e1e,
+      goal:      0x1e5a1e,
+    };
+    for (let r = 0; r < GRID_ROWS; r++) {
+      for (let c = 0; c < GRID_COLS; c++) {
+        const tile = this.mapData.grid[r][c];
+        mmG.fillStyle(TYPE_COLORS[tile.type] ?? 0x0b1628, 1);
+        mmG.fillRect(c * tileW, r * tileH, tileW + 0.5, tileH + 0.5);
+      }
+    }
+    mmG.generateTexture('__minimap_static__', MM_W, MM_H);
+    mmG.destroy();
+
+    this.minimapMapImg = this.add.image(MM_X, MM_Y, '__minimap_static__')
+      .setOrigin(0, 0).setScrollFactor(0).setDepth(61);
+    this.uiGroup.add(this.minimapMapImg);
+
+    // Viewport indicator (redrawn every frame)
+    this.minimapViewport = this.add.graphics().setScrollFactor(0).setDepth(62);
+    this.uiGroup.add(this.minimapViewport);
+
+    // Invisible hit area for click-to-pan
+    this.minimapHitArea = this.add.rectangle(
+      MM_X + MM_W / 2, MM_Y + MM_H / 2, MM_W, MM_H, 0, 0,
+    ).setScrollFactor(0).setDepth(63).setInteractive({ useHandCursor: true });
+    this.minimapHitArea.on('pointerdown', (p: Phaser.Input.Pointer) => this.onMinimapClick(p.x, p.y));
+    this.minimapHitArea.on('pointermove', (p: Phaser.Input.Pointer) => {
+      if (p.isDown) this.onMinimapClick(p.x, p.y);
+    });
+    this.uiGroup.add(this.minimapHitArea);
+  }
+
+  private updateMinimap() {
+    const cam = this.cameras.main;
+    const mapW = GRID_COLS * TILE_SIZE;
+    const mapH = GRID_ROWS * TILE_SIZE;
+    const vpW  = GAME_WIDTH;
+    const vpH  = GAME_HEIGHT - UI_TOP_HEIGHT - UI_BOTTOM_HEIGHT;
+
+    // Show minimap only when the map doesn't fully fit in the viewport
+    const mmFitZoom = Math.min(vpW / mapW, vpH / mapH);
+    const show = cam.zoom > mmFitZoom * 1.02;
+
+    this.minimapBg.setVisible(show);
+    this.minimapMapImg.setVisible(show);
+    this.minimapViewport.setVisible(show);
+    this.minimapHitArea.setVisible(show);
+
+    if (!show) return;
+
+    const scaleX = this.minimapW / mapW;
+    const scaleY = this.minimapH / mapH;
+
+    // Use cam.worldView for accurate clamped viewport bounds
+    const wv = cam.worldView;
+    const rx = this.minimapX + wv.left * scaleX;
+    const ry = this.minimapY + wv.top  * scaleY;
+    const rw = Math.min(wv.width  * scaleX, this.minimapW);
+    const rh = Math.min(wv.height * scaleY, this.minimapH);
+
+    this.minimapViewport.clear();
+    this.minimapViewport.fillStyle(0xffffff, 0.08);
+    this.minimapViewport.fillRect(rx, ry, rw, rh);
+    this.minimapViewport.lineStyle(1, 0xffffff, 0.85);
+    this.minimapViewport.strokeRect(rx, ry, rw, rh);
+  }
+
+  private onMinimapClick(screenX: number, screenY: number) {
+    const mmRelX = Phaser.Math.Clamp(screenX - this.minimapX, 0, this.minimapW);
+    const mmRelY = Phaser.Math.Clamp(screenY - this.minimapY, 0, this.minimapH);
+    const mapW = GRID_COLS * TILE_SIZE;
+    const mapH = GRID_ROWS * TILE_SIZE;
+    const worldX = (mmRelX / this.minimapW) * mapW;
+    const worldY = (mmRelY / this.minimapH) * mapH;
+    const cam = this.cameras.main;
+    // Center camera on clicked world position using worldView for accurate half-sizes
+    cam.scrollX = worldX - cam.worldView.width  / 2;
+    cam.scrollY = worldY - cam.worldView.height / 2;
+  }
+
   // ─── Aura towers ────────────────────────────────────────────────────────
   private processAuraTowers() {
     const now = this.time.now;
@@ -945,6 +1094,8 @@ export class GameScene extends Phaser.Scene {
 
   // ─── Update ──────────────────────────────────────────────────────────────
   update(time: number, delta: number) {
+    if (this.isPaused) return;
+
     this.economy.update(delta);
     this.waveManager.update(delta);
     this.abilitySystem.update(delta);
@@ -970,5 +1121,7 @@ export class GameScene extends Phaser.Scene {
       this.hero.maxHp,
       this.hero.level,
     );
+
+    this.updateMinimap();
   }
 }

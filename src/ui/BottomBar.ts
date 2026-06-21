@@ -180,8 +180,8 @@ export class BottomBar {
 
     // ── Wave button ─────────────────────────────────────────────────────────
     this.waveBg  = scene.add.graphics().setScrollFactor(0).setDepth(D + 1);
-    this.waveLabel = scene.add.text(WAVE_CX, ABILITY_CY - 10, '▶▶ SEND\nNEXT WAVE', {
-      fontSize: '13px', fontFamily: 'monospace', color: '#44ff88', align: 'center', lineSpacing: 2,
+    this.waveLabel = scene.add.text(WAVE_CX, ABILITY_CY - 10, '▶▶ SEND NEXT WAVE\n[SPACE]', {
+      fontSize: '12px', fontFamily: 'monospace', color: '#44ff88', align: 'center', lineSpacing: 2,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 2);
     this.drawWaveBtn(false);
 

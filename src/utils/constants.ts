@@ -1,9 +1,9 @@
 // ─── Grid ───────────────────────────────────────────────────────────────────
 export const TILE_SIZE = 48;
-export const GRID_COLS = 24;
-export const GRID_ROWS = 15;
-export const GAME_WIDTH = TILE_SIZE * GRID_COLS;  // 1152
-export const GAME_HEIGHT = TILE_SIZE * GRID_ROWS; // 720
+export const GRID_COLS = 37;
+export const GRID_ROWS = 19;
+export const GAME_WIDTH = TILE_SIZE * GRID_COLS;  // 1776
+export const GAME_HEIGHT = TILE_SIZE * GRID_ROWS; // 912
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
 export const COLORS = {
@@ -86,8 +86,8 @@ export const SELL_REFUND_RATIO = 0.6;
 export const MAX_TOWER_LEVEL   = 3; // then evolve
 
 // ─── Map generation ──────────────────────────────────────────────────────────
-export const MIN_PATH_LENGTH = 28;
-export const MAX_PATH_LENGTH = 50;
+export const MIN_PATH_LENGTH = 45;
+export const MAX_PATH_LENGTH = 80;
 export const BUILDABLE_RADIUS = 2; // tiles around path that are buildable
 
 // ─── Abilities ───────────────────────────────────────────────────────────────

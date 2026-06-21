@@ -327,6 +327,13 @@ export class BootScene extends Phaser.Scene {
     // pass its key as the source so it gets baked into the transition polygons.
     const grassSource = this.textures.exists('tile_grass') ? 'tile_grass' : undefined;
     generateTransitionTextures(this, 'grass', grassSource);
+
+    // Spawn and goal tiles get the same SDF-based corner blending so their
+    // water-facing edges blend organically instead of showing hard squares.
+    const spawnSource = this.textures.exists('tile_spawn') ? 'tile_spawn' : undefined;
+    generateTransitionTextures(this, 'spawn', spawnSource);
+    const goalSource = this.textures.exists('tile_goal') ? 'tile_goal' : undefined;
+    generateTransitionTextures(this, 'goal', goalSource);
   }
 
   // ─── Towers ───────────────────────────────────────────────────────────────
