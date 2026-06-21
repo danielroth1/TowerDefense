@@ -1,19 +1,21 @@
 import Phaser from 'phaser';
 import { TILE_SIZE, GRID_COLS, GRID_ROWS } from '../utils/constants';
+import { createPRNG } from '../utils/helpers';
 
 /*
  * ─── Terrain Auto-Tiling: Blob-Based Transition ──────────────────────────
  *
  * Each terrain cell uses a 4-bit cardinal-neighbor mask (0–15) to select
- * one of 16 transition textures. The terrain is drawn as a rounded blob
- * with rectangular arms + circular end caps, matching the path blob system.
+ * one of 16 transition textures. The terrain blob shape is defined by
+ * rectangular arms + circular end caps, but the visible edge is derived
+ * from a signed distance field (SDF) perturbed by multi-octave value noise.
+ *
+ * This removes all visible banding (the old stepped-alpha approach) and
+ * gives an organic, coastline-like edge between grass and water.
  *
  * Bit weights (cardinal neighbors):
  *   North (N) = 1     East (E) = 2
  *   South (S) = 4     West (W) = 8
- *
- * Smooth grass-to-water blending is achieved via expanding alpha bands
- * (outer → inner), identical in approach to BlobTileset.
  */
 
 // ─── Terrain layer definitions ────────────────────────────────────────────
@@ -101,28 +103,27 @@ export function generateTransitionTextures(
   sourceTextureKey?: string,
   halfWidth: number = 24,
 ): void {
+  const noise = getTransitionNoise();
+
   for (let mask = 0; mask < 16; mask++) {
     const key = transitionTileKey(terrainId, mask);
     if (scene.textures.exists(key)) continue;
 
+    const ct = scene.textures.createCanvas(key, TS, TS);
+    if (!ct) continue;
+    const ctx = ct.getContext();
+
     if (sourceTextureKey && scene.textures.exists(sourceTextureKey)) {
-      // ── AI-source: draw blob-shaped grass with smooth transition bands ──
+      // ── AI-source path: bake source texture through SDF+noise mask ──
       const srcTex = scene.textures.get(sourceTextureKey);
       const srcImg = srcTex.getSourceImage() as HTMLImageElement | HTMLCanvasElement;
-
-      const ct = scene.textures.createCanvas(key, TS, TS);
-      if (!ct) continue;
-      const ctx = ct.getContext();
-
-      drawTransitionBlobSource(ctx, mask, srcImg, halfWidth);
-      ct.refresh();
+      drawTransitionSDF(ctx, mask, srcImg, noise, halfWidth);
     } else {
-      // ── Procedural: draw gradient-filled blob ──
-      const g = scene.add.graphics();
-      drawTransitionBlobProc(g, mask, terrainId, halfWidth);
-      g.generateTexture(key, TS, TS);
-      g.destroy();
+      // ── Procedural path: compute gradient colour per pixel ──
+      drawTransitionSDFProc(ctx, mask, terrainId, noise, halfWidth);
     }
+
+    ct.refresh();
   }
 }
 
@@ -131,20 +132,18 @@ export function generateTransitionTextures(
 /** Build the arm rectangles for a given blob mask and half-width. */
 function blobArms(mask: number, hw: number): { x: number; y: number; w: number; h: number }[] {
   const rects: { x: number; y: number; w: number; h: number }[] = [];
-  if (mask & B_N) rects.push({ x: C - hw, y: 0,     w: hw * 2, h: C });
-  if (mask & B_S) rects.push({ x: C - hw, y: C,     w: hw * 2, h: C });
+  if (mask & B_N) rects.push({ x: C - hw, y: 0,      w: hw * 2, h: C });
+  if (mask & B_S) rects.push({ x: C - hw, y: C,      w: hw * 2, h: C });
   if (mask & B_W) rects.push({ x: 0,      y: C - hw, w: C,      h: hw * 2 });
   if (mask & B_E) rects.push({ x: C,      y: C - hw, w: C,      h: hw * 2 });
 
-  const popcount = (mask & B_N ? 1 : 0) + (mask & B_S ? 1 : 0) +
-                   (mask & B_W ? 1 : 0) + (mask & B_E ? 1 : 0);
-
+  const popcount = blobPopcount(mask);
   if (popcount === 1) {
     const shortLen = C - hw * 0.6;
-    if (mask & B_N) rects[0] = { x: C - hw, y: 0, w: hw * 2, h: shortLen };
-    if (mask & B_S) rects[0] = { x: C - hw, y: C, w: hw * 2, h: shortLen };
-    if (mask & B_W) rects[0] = { x: 0, y: C - hw, w: shortLen, h: hw * 2 };
-    if (mask & B_E) rects[0] = { x: C, y: C - hw, w: shortLen, h: hw * 2 };
+    if (mask & B_N) rects[0] = { x: C - hw, y: 0,      w: hw * 2,  h: shortLen };
+    if (mask & B_S) rects[0] = { x: C - hw, y: C,      w: hw * 2,  h: shortLen };
+    if (mask & B_W) rects[0] = { x: 0,      y: C - hw, w: shortLen, h: hw * 2 };
+    if (mask & B_E) rects[0] = { x: C,      y: C - hw, w: shortLen, h: hw * 2 };
   }
   return rects;
 }
@@ -154,176 +153,259 @@ function blobPopcount(mask: number): number {
          (mask & B_W ? 1 : 0) + (mask & B_E ? 1 : 0);
 }
 
-// ─── Canvas drawing (AI-source) ──────────────────────────────────────────
+// ─── Multi-octave value noise ─────────────────────────────────────────────
+
+const NOISE_SIZE = 64;
+let _noiseCache: Float32Array | null = null;
+
+/** Return a cached 64×64 seamlessly-tiling multi-octave value noise (0..1). */
+function getTransitionNoise(): Float32Array {
+  if (_noiseCache) return _noiseCache;
+  const rng = createPRNG(0xF7A3B5C1); // fixed seed — always deterministic
+  const out = new Float32Array(NOISE_SIZE * NOISE_SIZE);
+  const octaves = [
+    { freq: 4,  amp: 1.00 },
+    { freq: 8,  amp: 0.50 },
+    { freq: 16, amp: 0.25 },
+  ];
+  let maxAmp = 0;
+  for (const oct of octaves) maxAmp += oct.amp;
+
+  for (const { freq, amp } of octaves) {
+    const grid = new Float32Array(freq * freq);
+    for (let i = 0; i < grid.length; i++) grid[i] = rng();
+
+    for (let y = 0; y < NOISE_SIZE; y++) {
+      for (let x = 0; x < NOISE_SIZE; x++) {
+        const gx = (x / NOISE_SIZE) * freq;
+        const gy = (y / NOISE_SIZE) * freq;
+        const ix = Math.floor(gx) % freq;
+        const iy = Math.floor(gy) % freq;
+        const fx = gx - Math.floor(gx);
+        const fy = gy - Math.floor(gy);
+        // Smoothstep interpolation (removes bilinear grid artefacts)
+        const sx = fx * fx * (3 - 2 * fx);
+        const sy = fy * fy * (3 - 2 * fy);
+        const v00 = grid[iy * freq + ix];
+        const v10 = grid[iy * freq + (ix + 1) % freq];
+        const v01 = grid[((iy + 1) % freq) * freq + ix];
+        const v11 = grid[((iy + 1) % freq) * freq + (ix + 1) % freq];
+        out[y * NOISE_SIZE + x] += amp * (
+          v00 * (1 - sx) * (1 - sy) +
+          v10 * sx * (1 - sy) +
+          v01 * (1 - sx) * sy +
+          v11 * sx * sy
+        );
+      }
+    }
+  }
+  for (let i = 0; i < out.length; i++) out[i] /= maxAmp;
+  _noiseCache = out;
+  return out;
+}
+
+// ─── SDF helpers ─────────────────────────────────────────────────────────
+
+/** Signed distance to a circle. Negative = inside. */
+function sdCircle(px: number, py: number, cx: number, cy: number, r: number): number {
+  const dx = px - cx, dy = py - cy;
+  return Math.sqrt(dx * dx + dy * dy) - r;
+}
+
+/** Signed distance to an axis-aligned rectangle. Negative = inside. */
+function sdRect(px: number, py: number, rx: number, ry: number, rw: number, rh: number): number {
+  const cx = rx + rw * 0.5, cy = ry + rh * 0.5;
+  const dx = Math.abs(px - cx) - rw * 0.5;
+  const dy = Math.abs(py - cy) - rh * 0.5;
+  // Outside: Euclidean to nearest corner; inside: max penetration depth (negative)
+  return Math.sqrt(
+    Math.max(dx, 0) * Math.max(dx, 0) + Math.max(dy, 0) * Math.max(dy, 0),
+  ) + Math.min(Math.max(dx, dy), 0);
+}
 
 /**
- * Draw a blob-shaped terrain transition onto a canvas context using an
- * AI source texture. Expanding alpha bands create a smooth grass→water edge.
+ * Signed distance to the terrain blob shape for a given mask.
+ * Negative = inside the terrain region, positive = outside (water).
  */
-function drawTransitionBlobSource(
+function signedDistanceToBlob(px: number, py: number, mask: number, hw: number): number {
+  const popcount = blobPopcount(mask);
+
+  if (popcount === 0) {
+    return sdCircle(px, py, C, C, hw * 0.7);
+  }
+
+  const rects = blobArms(mask, hw);
+  let d = Infinity;
+
+  // Centre circle blends multi-arm junctions
+  if (popcount >= 2) {
+    d = Math.min(d, sdCircle(px, py, C, C, hw));
+  }
+
+  // End-cap circle caps the single arm
+  if (popcount === 1) {
+    const r = rects[0];
+    if (mask & B_N) d = Math.min(d, sdCircle(px, py, C,       r.y + r.h, hw));
+    if (mask & B_S) d = Math.min(d, sdCircle(px, py, C,       r.y,       hw));
+    if (mask & B_W) d = Math.min(d, sdCircle(px, py, r.x + r.w, C,       hw));
+    if (mask & B_E) d = Math.min(d, sdCircle(px, py, r.x,       C,       hw));
+  }
+
+  for (const r of rects) {
+    d = Math.min(d, sdRect(px, py, r.x, r.y, r.w, r.h));
+  }
+
+  return d;
+}
+
+/** Cubic smooth-step: 0 at edge0, 1 at edge1. */
+function smoothstepFn(edge0: number, edge1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+// ─── SDF + noise drawing ─────────────────────────────────────────────────
+
+/**
+ * Noise amplitude in pixels — how far the edge can waver from the geometric
+ * blob boundary. Larger values = more organic/jagged coast.
+ */
+const NOISE_AMP   = 6;
+/**
+ * Smooth fade half-width (px) on water-facing sides.
+ * The visible blend zone is 2× this wide (feather px of grass fades into water).
+ */
+const FEATHER_WATER = 7;
+/**
+ * Sharp-edge half-width (px) on grass-connecting sides.
+ * Kept small so the arm connection is effectively solid.
+ */
+const FEATHER_CONN  = 0.5;
+/**
+ * Zone (px) near a connected tile edge where noise is suppressed to 0.
+ * Must be ≥ NOISE_AMP/2 so noise can never create gaps at connections.
+ */
+const CONN_ZONE = NOISE_AMP;
+
+/**
+ * Returns a 0→1 weight that suppresses noise near any tile edge that has a
+ * connected grass arm (bit set in mask).  1 = full noise (water-facing side);
+ * 0 = no noise (grass-connecting side, clean hard edge).
+ */
+function connectedEdgeNoiseWeight(px: number, py: number, mask: number): number {
+  let w = 1.0;
+  if (mask & B_N) w = Math.min(w, smoothstepFn(0, CONN_ZONE, py));
+  if (mask & B_S) w = Math.min(w, smoothstepFn(0, CONN_ZONE, TS - 1 - py));
+  if (mask & B_W) w = Math.min(w, smoothstepFn(0, CONN_ZONE, px));
+  if (mask & B_E) w = Math.min(w, smoothstepFn(0, CONN_ZONE, TS - 1 - px));
+  return w;
+}
+
+/**
+ * Draw a transition tile onto ctx by combining an AI source texture with
+ * the blob SDF perturbed by noise.  No banding — fully smooth alpha.
+ */
+function drawTransitionSDF(
   ctx: CanvasRenderingContext2D,
   mask: number,
   srcImg: HTMLImageElement | HTMLCanvasElement,
+  noise: Float32Array,
   hw: number,
 ): void {
-  const rects = blobArms(mask, hw);
-  const popcount = blobPopcount(mask);
+  // Read source pixels via a temporary canvas (safe for same-origin assets)
+  const tmp = document.createElement('canvas');
+  tmp.width = TS;
+  tmp.height = TS;
+  const tmpCtx = tmp.getContext('2d')!;
+  tmpCtx.drawImage(srcImg, 0, 0, TS, TS);
+  const src = tmpCtx.getImageData(0, 0, TS, TS).data;
 
-  if (popcount === 0) {
-    // Isolated — small rounded blob at centre
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(C, C, hw * 0.7, 0, Math.PI * 2);
-    ctx.clip();
-    ctx.drawImage(srcImg, 0, 0, TS, TS);
-    ctx.restore();
-    drawBorder(ctx);
-    return;
+  const out = ctx.createImageData(TS, TS);
+  const od  = out.data;
+
+  for (let py = 0; py < TS; py++) {
+    for (let px = 0; px < TS; px++) {
+      const sdf = signedDistanceToBlob(px, py, mask, hw);
+      const n   = noise[(py % NOISE_SIZE) * NOISE_SIZE + (px % NOISE_SIZE)] - 0.5;
+      const nw  = connectedEdgeNoiseWeight(px, py, mask);
+      // Water-facing: wide smooth fade + organic noise.
+      // Connected side: sharp edge pushed inward so sdf=0 at tile boundary → alpha=1.
+      const feather = FEATHER_CONN + (FEATHER_WATER - FEATHER_CONN) * nw;
+      const bias    = FEATHER_WATER * (1.0 - nw);
+      const d       = sdf - bias + n * NOISE_AMP * nw;
+      const alpha   = 1 - smoothstepFn(-feather, feather, d);
+      if (alpha <= 0) continue;
+
+      const i = (py * TS + px) * 4;
+      od[i]     = src[i];
+      od[i + 1] = src[i + 1];
+      od[i + 2] = src[i + 2];
+      od[i + 3] = Math.round(alpha * 255);
+    }
   }
 
-  // Transition bands (outer → inner, same pattern as BlobTileset)
-  const bands = [
-    { alpha: 0.12, expand: 5 },
-    { alpha: 0.35, expand: 2 },
-    { alpha: 0.70, expand: 0 },
-    { alpha: 1.00, expand: 0 },
-  ];
-
-  for (const band of bands) {
-    const e = band.expand;
-    ctx.save();
-    ctx.globalAlpha = band.alpha;
-    ctx.beginPath();
-    clipBlobShape(ctx, mask, rects, popcount, e, hw);
-    ctx.drawImage(srcImg, 0, 0, TS, TS);
-    ctx.restore();
-  }
-
-  drawBorder(ctx);
+  ctx.putImageData(out, 0, 0);
 }
-
-/** Add the blob path (rects + circles) to the canvas context and clip. */
-function clipBlobShape(
-  ctx: CanvasRenderingContext2D,
-  mask: number,
-  rects: { x: number; y: number; w: number; h: number }[],
-  popcount: number,
-  expand: number,
-  hw: number,
-): void {
-  for (const r of rects) {
-    ctx.rect(r.x - expand, r.y - expand, r.w + expand * 2, r.h + expand * 2);
-  }
-
-  if (popcount >= 2) {
-    const circleR = hw + (expand === 5 ? 0 : expand);
-    ctx.moveTo(C + circleR, C);
-    ctx.arc(C, C, circleR, 0, Math.PI * 2);
-  }
-
-  if (popcount === 1) {
-    if (mask & B_N)
-      ctx.arc(C, rects[0].y + rects[0].h + expand, hw + expand, 0, Math.PI * 2);
-    if (mask & B_S)
-      ctx.arc(C, rects[0].y - expand, hw + expand, 0, Math.PI * 2);
-    if (mask & B_W)
-      ctx.arc(rects[0].x + rects[0].w + expand, C, hw + expand, 0, Math.PI * 2);
-    if (mask & B_E)
-      ctx.arc(rects[0].x - expand, C, hw + expand, 0, Math.PI * 2);
-  }
-
-  ctx.clip();
-}
-
-function drawBorder(ctx: CanvasRenderingContext2D): void {
-  ctx.strokeStyle = 'rgba(10,10,10,0.08)';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(0, 0, TS, TS);
-}
-
-// ─── Graphics drawing (procedural) ───────────────────────────────────────
 
 /**
- * Draw a blob-shaped terrain transition using Phaser Graphics (procedural
- * fallback when no AI source texture is available).
+ * Draw a procedural transition tile onto ctx using per-pixel gradient colour
+ * and the same SDF+noise alpha as the AI-source path.
  */
-function drawTransitionBlobProc(
-  g: Phaser.GameObjects.Graphics,
+function drawTransitionSDFProc(
+  ctx: CanvasRenderingContext2D,
   mask: number,
   terrainId: string,
+  noise: Float32Array,
   hw: number,
 ): void {
-  const rects = blobArms(mask, hw);
-  const popcount = blobPopcount(mask);
+  const out = ctx.createImageData(TS, TS);
+  const od  = out.data;
 
-  if (popcount === 0) {
-    // Isolated — small rounded blob at centre
-    const col = gradientColor(TS / 2, terrainId);
-    g.fillStyle(col, 1);
-    g.fillCircle(C, C, hw * 0.7);
-    g.lineStyle(1, 0x0a0a0a, 0.08);
-    g.strokeRect(0, 0, TS, TS);
-    return;
-  }
+  for (let py = 0; py < TS; py++) {
+    const col = terrainColorAt(py, terrainId);
+    for (let px = 0; px < TS; px++) {
+      const sdf = signedDistanceToBlob(px, py, mask, hw);
+      const n   = noise[(py % NOISE_SIZE) * NOISE_SIZE + (px % NOISE_SIZE)] - 0.5;
+      const nw  = connectedEdgeNoiseWeight(px, py, mask);
+      const feather = FEATHER_CONN + (FEATHER_WATER - FEATHER_CONN) * nw;
+      const bias    = FEATHER_WATER * (1.0 - nw);
+      const d       = sdf - bias + n * NOISE_AMP * nw;
+      const alpha   = 1 - smoothstepFn(-feather, feather, d);
+      if (alpha <= 0) continue;
 
-  const bands = [
-    { alpha: 0.12, expand: 5 },
-    { alpha: 0.35, expand: 2 },
-    { alpha: 0.70, expand: 0 },
-    { alpha: 1.00, expand: 0 },
-  ];
-
-  for (const band of bands) {
-    const e = band.expand;
-    const col = gradientColor(C, terrainId);
-    g.fillStyle(col, band.alpha);
-
-    for (const r of rects) {
-      g.fillRect(r.x - e, r.y - e, r.w + e * 2, r.h + e * 2);
-    }
-
-    if (popcount >= 2) {
-      const circleR = hw + (band.expand === 5 ? 0 : e);
-      g.fillCircle(C, C, circleR);
-    }
-
-    if (popcount === 1) {
-      if (mask & B_N)
-        g.fillCircle(C, rects[0].y + rects[0].h + e, hw + e);
-      if (mask & B_S)
-        g.fillCircle(C, rects[0].y - e, hw + e);
-      if (mask & B_W)
-        g.fillCircle(rects[0].x + rects[0].w + e, C, hw + e);
-      if (mask & B_E)
-        g.fillCircle(rects[0].x - e, C, hw + e);
+      const i = (py * TS + px) * 4;
+      od[i]     = col.r;
+      od[i + 1] = col.g;
+      od[i + 2] = col.b;
+      od[i + 3] = Math.round(alpha * 255);
     }
   }
 
-  g.lineStyle(1, 0x0a0a0a, 0.08);
-  g.strokeRect(0, 0, TS, TS);
+  ctx.putImageData(out, 0, 0);
 }
 
-/** Single-column gradient colour matching the given terrain at height t (0–1). */
-function gradientColor(y: number, terrainId: string): number {
-  const t = y / TS;
+/** Per-row gradient colour for procedural terrain (returned as {r,g,b}). */
+function terrainColorAt(py: number, terrainId: string): { r: number; g: number; b: number } {
+  const t   = py / TS;
+  const osc = 0.5 + 0.5 * Math.sin(t * Math.PI * 2 - Math.PI / 2);
   if (terrainId === 'grass') {
-    const osc = 0.5 + 0.5 * Math.sin(t * Math.PI * 2 - Math.PI / 2);
-    const r = Math.floor((0.14 + 0.04 * osc) * 255);
-    const gr = Math.floor((0.34 + 0.10 * osc) * 255);
-    const b = Math.floor((0.10 + 0.03 * osc) * 255);
-    return Phaser.Display.Color.GetColor(r, gr, b);
+    return {
+      r: Math.floor((0.14 + 0.04 * osc) * 255),
+      g: Math.floor((0.34 + 0.10 * osc) * 255),
+      b: Math.floor((0.10 + 0.03 * osc) * 255),
+    };
   }
   if (terrainId === 'sand') {
-    const osc = 0.5 + 0.5 * Math.sin(t * Math.PI * 2 - Math.PI / 2);
-    const r = Math.floor((0.58 + 0.08 * osc) * 255);
-    const gr = Math.floor((0.50 + 0.06 * osc) * 255);
-    const b = Math.floor((0.30 + 0.04 * osc) * 255);
-    return Phaser.Display.Color.GetColor(r, gr, b);
+    return {
+      r: Math.floor((0.58 + 0.08 * osc) * 255),
+      g: Math.floor((0.50 + 0.06 * osc) * 255),
+      b: Math.floor((0.30 + 0.04 * osc) * 255),
+    };
   }
-  // Water
-  const r = 0.12 + 0.02 * Math.sin(t * Math.PI);
-  const gr2 = 0.22 + 0.06 * Math.sin(t * Math.PI);
-  const b2 = 0.48 + 0.07 * Math.sin(t * Math.PI);
-  return Phaser.Display.Color.GetColor(
-    Math.floor(r * 255), Math.floor(gr2 * 255), Math.floor(b2 * 255));
+  // Water fallback
+  return {
+    r: Math.floor((0.12 + 0.02 * Math.sin(t * Math.PI)) * 255),
+    g: Math.floor((0.22 + 0.06 * Math.sin(t * Math.PI)) * 255),
+    b: Math.floor((0.48 + 0.07 * Math.sin(t * Math.PI)) * 255),
+  };
 }
