@@ -177,6 +177,55 @@ const server = createServer(async (req, res) => {
     }
   }
 
+  // ─── API: remove background ─────────────────────────────────────────
+  if (pathname === '/api/remove-bg' && req.method === 'POST') {
+    if (!FAL_KEY) return json(res, { error: 'FAL_AI_KEY not set in environment. Export it: export FAL_AI_KEY=your-key' }, 500);
+
+    const body = await readBody(req);
+    let params;
+    try { params = JSON.parse(body); } catch {
+      return json(res, { error: 'Invalid JSON' }, 400);
+    }
+
+    const { tileName, bgModel } = params;
+    if (!tileName) return json(res, { error: 'Missing tileName' }, 400);
+
+    // Validate model against allowlist
+    const ALLOWED_BG_MODELS = ['fal-ai/imageutils/rembg', 'fal-ai/bria/background/remove'];
+    const resolvedBgModel = ALLOWED_BG_MODELS.includes(bgModel) ? bgModel : ALLOWED_BG_MODELS[0];
+
+    // Sanitize — no path separators allowed
+    const fname = tileName.replace(/[^a-z0-9_.-]/gi, '_');
+    const filePath = join(OUTPUT_DIR, fname);
+    if (!filePath.startsWith(OUTPUT_DIR)) { res.writeHead(403); return res.end('Forbidden'); }
+
+    if (!existsSync(filePath)) {
+      return json(res, { error: `File not found: ${fname}` }, 404);
+    }
+
+    try {
+      const fileBuffer = readFileSync(filePath);
+      // Detect JPEG vs PNG from magic bytes
+      const mime = (fileBuffer[0] === 0xFF && fileBuffer[1] === 0xD8) ? 'image/jpeg' : 'image/png';
+      const dataUri = `data:${mime};base64,${fileBuffer.toString('base64')}`;
+
+      console.log(`[bg-remove] Processing "${fname}" (${fileBuffer.length} bytes, ${mime}) via ${resolvedBgModel}...`);
+      const result = await callFalBgRemove(dataUri, resolvedBgModel);
+
+      const imgResp = await fetch(result.imageUrl);
+      const outBuffer = Buffer.from(await imgResp.arrayBuffer());
+
+      // Overwrite in place — result is always PNG with alpha channel
+      writeFileSync(filePath, outBuffer);
+      console.log(`[bg-remove] Saved "${fname}" with background removed (${outBuffer.length} bytes)`);
+
+      return json(res, { ok: true, name: fname, size: outBuffer.length });
+    } catch (err) {
+      console.error('[bg-remove] Error:', err);
+      return json(res, { error: String(err) }, 500);
+    }
+  }
+
   // ─── API: test/health check ──────────────────────────────────────────
   if (pathname === '/api/test' && req.method === 'GET') {
     return json(res, {
@@ -191,6 +240,10 @@ const server = createServer(async (req, res) => {
   }
 
   // ─── Static files ───────────────────────────────────────────────────
+  // API routes return JSON 404 for debugging; everything else returns text
+  if (pathname.startsWith('/api/')) {
+    return json(res, { error: 'Not found', path: pathname, method: req.method }, 404);
+  }
   res.writeHead(404);
   res.end('Not found');
 });
@@ -276,6 +329,55 @@ async function callFalAI(model, prompt, width, height) {
   }
 
   throw new Error('fal.ai generation timed out (120s)');
+}
+
+async function callFalBgRemove(imageDataUri, model = 'fal-ai/imageutils/rembg') {
+  console.log(`[fal.ai] Submitting background removal to ${model}...`);
+
+  async function fetchJSON(url, opts) {
+    const resp = await fetch(url, opts);
+    const text = await resp.text();
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${url}: ${text.slice(0, 300)}`);
+    try { return JSON.parse(text); }
+    catch { throw new Error(`Invalid JSON from ${url}: ${text.slice(0, 200)}`); }
+  }
+
+  const submitData = await fetchJSON(`https://queue.fal.run/${model}`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Key ${FAL_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ image_url: imageDataUri }),
+  });
+
+  const statusUrl = submitData.status_url;
+  const resultUrl = submitData.response_url;
+  if (!statusUrl || !resultUrl) {
+    throw new Error('Missing status_url or response_url in bg-remove response: ' + JSON.stringify(submitData).slice(0, 200));
+  }
+  console.log(`[fal.ai bg-remove] request_id: ${submitData.request_id}`);
+
+  for (let attempt = 1; attempt <= 60; attempt++) {
+    await new Promise((r) => setTimeout(r, 1000));
+
+    const statusData = await fetchJSON(statusUrl, { headers: { 'Authorization': `Key ${FAL_KEY}` } });
+    console.log(`[fal.ai bg-remove] Poll #${attempt}: ${statusData.status}`);
+
+    if (statusData.status === 'COMPLETED') {
+      const resultData = await fetchJSON(resultUrl, { headers: { 'Authorization': `Key ${FAL_KEY}` } });
+      const imageUrl = resultData?.image?.url;
+      if (!imageUrl) throw new Error('No image URL in bg-remove result: ' + JSON.stringify(resultData).slice(0, 300));
+      console.log(`[fal.ai bg-remove] Done — ${imageUrl.slice(0, 80)}...`);
+      return { imageUrl };
+    }
+
+    if (statusData.status === 'FAILED') {
+      throw new Error(`fal.ai bg-remove failed: ${JSON.stringify(statusData).slice(0, 300)}`);
+    }
+  }
+
+  throw new Error('fal.ai bg-remove timed out (60s)');
 }
 
 server.listen(PORT, () => {

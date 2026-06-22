@@ -329,7 +329,7 @@
 
     <!-- Tile presets -->
     <div class="sidebar-section">
-      <h3>🧩 Tile Preset</h3>
+      <h3>🧩 Terrain Preset</h3>
       <div class="preset-grid" id="presetGrid">
         <button class="preset-btn active" data-preset="water">
           <span class="preset-dot" style="background:#1e5099"></span> Water
@@ -352,6 +352,35 @@
         <button class="preset-btn" data-preset="custom">
           <span class="preset-dot" style="background:#666"></span> Custom
         </button>
+      </div>
+    </div>
+
+    <!-- Tower presets -->
+    <div class="sidebar-section">
+      <h3>🗼 Tower Preset</h3>
+      <div class="preset-grid" id="towerTypeGrid">
+        <button class="preset-btn" data-tower="arrow">
+          <span class="preset-dot" style="background:#5ab050"></span> Arrow
+        </button>
+        <button class="preset-btn" data-tower="cannon">
+          <span class="preset-dot" style="background:#8899aa"></span> Cannon
+        </button>
+        <button class="preset-btn" data-tower="ice">
+          <span class="preset-dot" style="background:#44aaee"></span> Ice
+        </button>
+        <button class="preset-btn" data-tower="lightning">
+          <span class="preset-dot" style="background:#ffdd22"></span> Lightning
+        </button>
+        <button class="preset-btn" data-tower="poison">
+          <span class="preset-dot" style="background:#66cc33"></span> Poison
+        </button>
+        <button class="preset-btn" data-tower="boomerang">
+          <span class="preset-dot" style="background:#cc88ff"></span> Boomerang
+        </button>
+      </div>
+      <div id="towerVariantRow" style="display:none; margin-top:10px;">
+        <div style="font-size:11px; color:var(--muted); margin-bottom:6px;" id="towerVariantLabel">Level / Evolution</div>
+        <div class="preset-grid" id="towerVariantGrid"></div>
       </div>
     </div>
 
@@ -385,6 +414,17 @@
 
     <!-- Generate -->
     <div class="sidebar-section">
+      <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; margin-bottom:6px; color:var(--text);">
+        <input type="checkbox" id="autoRemoveBg" style="width:14px; height:14px; cursor:pointer;" />
+        Remove background after generation
+      </label>
+      <div style="display:flex; align-items:center; gap:6px; margin-bottom:10px; padding-left:22px;">
+        <span style="font-size:11px; color:var(--muted);">Model:</span>
+        <select id="bgModelSelect" class="model-select" style="flex:1; padding:4px 8px; font-size:11px;">
+          <option value="fal-ai/imageutils/rembg" selected>rembg — Fast &amp; Cheap ⚡</option>
+          <option value="fal-ai/bria/background/remove">BRIA — Higher Quality</option>
+        </select>
+      </div>
       <button class="generate-btn" id="generateBtn" disabled>✨ Generate Tile</button>
       <div class="status" id="status"></div>
     </div>
@@ -409,6 +449,71 @@
 
   <script>
     // ─── Constants ──────────────────────────────────────────────
+    const STYLE_SUFFIX = 'top-down 2D cartoon fantasy tower defense game sprite, viewed directly from above, flat orthographic perspective, no 3D, clean crisp pixel art style, isolated on square canvas, dark circular stone base platform, subtle drop shadow';
+
+    const TOWER_PRESETS = {
+      arrow: {
+        label: 'Arrow Tower', color: '#5ab050',
+        variants: [
+          { label: 'Mk I',  file: 'tower_arrow_0', prompt: `Simple wooden arrow tower, green wood triangle arrowhead shape, rough timber construction, single straight arrow barrel pointing upward (12 o'clock), Mk I basic level, ${STYLE_SUFFIX}` },
+          { label: 'Mk II', file: 'tower_arrow_1', prompt: `Reinforced arrow tower, iron-banded green wood triangle, sharper arrowhead shape, two arrow barrels pointing upward, battle-worn iron tip, Mk II upgraded, ${STYLE_SUFFIX}` },
+          { label: 'Mk III',file: 'tower_arrow_2', prompt: `Master archer tower, ornate deep green gilded triangle arrowhead, golden trim, long polished barrel pointing upward, three arrow slots, Mk III elite, ${STYLE_SUFFIX}` },
+          { label: 'Crossbow', file: 'tower_crossbow', color: '#aaccff', prompt: `Crossbow evolution tower, light blue steel mechanical crossbow launcher, wide spread triple-bolt arm mechanism, three arrow barrels fanned out pointing upward, pale blue metallic glow, gold rim base, evolved tower, ${STYLE_SUFFIX}` },
+          { label: 'Sniper',   file: 'tower_sniper',   color: '#3355ff', prompt: `Sniper evolution tower, dark royal blue precision rifle nest, single very long thin barrel pointing straight upward (12 o'clock), scope glint, extreme-range marksman platform, midnight blue with silver accents, gold rim base, evolved tower, ${STYLE_SUFFIX}` },
+        ],
+      },
+      cannon: {
+        label: 'Cannon Tower', color: '#8899aa',
+        variants: [
+          { label: 'Mk I',  file: 'tower_cannon_0', prompt: `Stone cannon tower, grey circular fortress base, short iron cannon barrel pointing upward (12 o'clock) for rotation, Mk I basic heavy cannon, rotatable turret design, ${STYLE_SUFFIX}` },
+          { label: 'Mk II', file: 'tower_cannon_1', prompt: `Iron cannon tower, dark grey reinforced circular fortress, medium-length cannon barrel pointing upward (12 o'clock), cannonball slots on sides, Mk II upgraded, rotatable turret, ${STYLE_SUFFIX}` },
+          { label: 'Mk III',file: 'tower_cannon_2', prompt: `Heavy fortress cannon, massive dark iron circular fortress, thick wide barrel pointing upward (12 o'clock), smoke rings, imposing war machine, Mk III elite, rotatable turret, ${STYLE_SUFFIX}` },
+          { label: 'Railgun', file: 'tower_railgun', color: '#ff9955', prompt: `Railgun evolution tower, orange electromagnetic barrel pointing upward (12 o'clock), glowing magnetic coils along the barrel, orange plasma energy glow, sci-fi cannon on circular fortress base, gold rim base, evolved tower, rotatable barrel, ${STYLE_SUFFIX}` },
+          { label: 'Mortar',  file: 'tower_mortar',  color: '#ff3300', prompt: `Mortar evolution tower, red large-bore mortar launcher, wide short stubby barrel pointing upward (12 o'clock), red-orange blast plate, circular base with explosion crater marks, gold rim, evolved tower, ${STYLE_SUFFIX}` },
+        ],
+      },
+      ice: {
+        label: 'Ice Tower', color: '#44aaee',
+        variants: [
+          { label: 'Mk I',  file: 'tower_ice_0', prompt: `Ice crystal tower, pale blue diamond-shaped ice spire, four-pointed symmetrical diamond cross, thin frost crystals at tips, Mk I basic cold, ${STYLE_SUFFIX}` },
+          { label: 'Mk II', file: 'tower_ice_1', prompt: `Frost tower, mid blue diamond spire with jagged ice shards at tips, snowflake pattern on surface, cold blue glow, Mk II upgraded, ${STYLE_SUFFIX}` },
+          { label: 'Mk III',file: 'tower_ice_2', prompt: `Arctic ice spire, brilliant deep blue diamond tower, large sharp ice shard tips, frozen aura shimmer, frost particle field, Mk III elite, ${STYLE_SUFFIX}` },
+          { label: 'Blizzard',   file: 'tower_blizzard',   color: '#99eeff', prompt: `Blizzard evolution tower, pale cyan ice diamond center with large circular swirling snowflake frost aura ring around it, constant slow field emitter, light blue vortex, gold rim base, evolved tower, ${STYLE_SUFFIX}` },
+          { label: 'Permafrost', file: 'tower_permafrost', color: '#2299cc', prompt: `Permafrost evolution tower, deep ocean blue diamond tower, dark runic engravings on surface, heavy permafrost rune circle at base, solid dark blue frozen platform, gold rim, evolved tower, ${STYLE_SUFFIX}` },
+        ],
+      },
+      lightning: {
+        label: 'Lightning Tower', color: '#ffdd22',
+        variants: [
+          { label: 'Mk I',  file: 'tower_lightning_0', prompt: `Lightning rod tower, yellow 5-pointed star shape, small electric sparks at each tip, lightning rod spike pointing upward, Mk I basic electric, ${STYLE_SUFFIX}` },
+          { label: 'Mk II', file: 'tower_lightning_1', prompt: `Tesla coil tower, golden yellow star shape with electric arcs between tips, glowing orange orb center, visible energy coil, Mk II upgraded, ${STYLE_SUFFIX}` },
+          { label: 'Mk III',file: 'tower_lightning_2', prompt: `Storm tower, brilliant yellow-white star with dramatic lightning arc bolts extending from each of 5 tips, charged plasma core, intense electric glow, Mk III elite, ${STYLE_SUFFIX}` },
+          { label: 'Tesla',    file: 'tower_tesla',    color: '#ffff88', prompt: `Tesla evolution tower, bright yellow tesla coil star with 5 long chain lightning arcs extending outward from each tip, electric orb core, chain lightning visible, gold rim base, evolved tower, ${STYLE_SUFFIX}` },
+          { label: 'Overload', file: 'tower_overload', color: '#ff8800', prompt: `Overload evolution tower, orange lightning star with AoE death-pulse shock ring visible as concentric circles around it, overcharged fiery orange-yellow core, power surge effect, gold rim base, evolved tower, ${STYLE_SUFFIX}` },
+        ],
+      },
+      poison: {
+        label: 'Poison Tower', color: '#66cc33',
+        variants: [
+          { label: 'Mk I',  file: 'tower_poison_0', prompt: `Poison cauldron tower, lime green hexagonal alchemist tower, 6-sided hex shape, small green bubbles rising, Mk I basic toxic, ${STYLE_SUFFIX}` },
+          { label: 'Mk II', file: 'tower_poison_1', prompt: `Poison vat tower, medium green hexagon with toxic fume wisps and spore particles swirling around it, green glow, Mk II upgraded, ${STYLE_SUFFIX}` },
+          { label: 'Mk III',file: 'tower_poison_2', prompt: `Plague lab tower, deep toxic green hexagon with visible poison spore cloud puffing out, skull rune center, Mk III elite, ${STYLE_SUFFIX}` },
+          { label: 'Plague', file: 'tower_plague', color: '#99ff44', prompt: `Plague evolution tower, bright neon green hexagon with spreading spore cloud aura ring, bio-hazard symbol center, death-spore emitter particles around it, acid green glow, gold rim base, evolved tower, ${STYLE_SUFFIX}` },
+          { label: 'Acid',   file: 'tower_acid',   color: '#ccff00', prompt: `Acid evolution tower, yellow-green hexagon with corrosive acid drip effects on the sides, armor-dissolving rune etched on surface, caustic yellow-green fume cloud, dissolving base edges, gold rim, evolved tower, ${STYLE_SUFFIX}` },
+        ],
+      },
+      boomerang: {
+        label: 'Boomerang Tower', color: '#cc88ff',
+        variants: [
+          { label: 'Mk I',  file: 'tower_boomerang_0', prompt: `Boomerang throwing platform, purple square base tower, single curved boomerang visible on the platform ready to throw, wooden throwing station, Mk I basic, ${STYLE_SUFFIX}` },
+          { label: 'Mk II', file: 'tower_boomerang_1', prompt: `Reinforced boomerang station, deep purple square platform with decorative carvings, two boomerangs crossed on the platform, Mk II upgraded, ${STYLE_SUFFIX}` },
+          { label: 'Mk III',file: 'tower_boomerang_2', prompt: `Advanced boomerang launcher, ornate purple square platform with gold inlays, three boomerangs arranged in flight-pattern on platform, Mk III elite, ${STYLE_SUFFIX}` },
+          { label: 'Hurricane', file: 'tower_hurricane', color: '#ff99dd', prompt: `Hurricane evolution tower, pink square tower base with 4 boomerangs actively spinning in orbit around it, wind vortex spiral effect, pink motion blur arcs, gold rim base, evolved tower, ${STYLE_SUFFIX}` },
+          { label: 'Ricochet',  file: 'tower_ricochet',  color: '#ff44aa', prompt: `Ricochet evolution tower, deep pink square tower with angular bounce-trajectory arrows drawn around it showing 8-bounce ricochet pattern, deflection angle lines, magenta glow, gold rim base, evolved tower, ${STYLE_SUFFIX}` },
+        ],
+      },
+    };
+
     const PRESETS = {
       water: {
         name: 'Water',
@@ -463,6 +568,7 @@
 
     // ─── State ──────────────────────────────────────────────────
     let currentPreset = 'water';
+    let currentTowerType = null;
     let isGenerating = false;
 
     // ─── DOM refs ───────────────────────────────────────────────
@@ -478,12 +584,22 @@
     const $tileGrid = document.getElementById('tileGrid');
     const $empty = document.getElementById('previewContent').querySelector('.empty-state');
     const $tooltip = document.getElementById('tooltip');
+    const $towerVariantRow = document.getElementById('towerVariantRow');
+    const $towerVariantGrid = document.getElementById('towerVariantGrid');
+    const $autoRemoveBg = document.getElementById('autoRemoveBg');
+    const $bgModelSelect = document.getElementById('bgModelSelect');
 
     // ─── Init ───────────────────────────────────────────────────
     function init() {
       applyPreset('water');
-      document.querySelectorAll('.preset-btn').forEach((btn) => {
-        btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
+      document.querySelectorAll('.preset-btn[data-preset]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          clearTowerSelection();
+          applyPreset(btn.dataset.preset);
+        });
+      });
+      document.querySelectorAll('.preset-btn[data-tower]').forEach((btn) => {
+        btn.addEventListener('click', () => applyTowerType(btn.dataset.tower));
       });
       $model.addEventListener('change', updateModelInfo);
       $generateBtn.addEventListener('click', generateTile);
@@ -491,12 +607,67 @@
       loadTileList();
     }
 
+    function clearTowerSelection() {
+      currentTowerType = null;
+      document.querySelectorAll('.preset-btn[data-tower]').forEach(b => b.classList.remove('active'));
+      $towerVariantRow.style.display = 'none';
+    }
+
+    function applyTowerType(type) {
+      currentTowerType = type;
+      currentPreset = null;
+      // Deactivate terrain presets
+      document.querySelectorAll('.preset-btn[data-preset]').forEach(b => b.classList.remove('active'));
+      // Activate tower type button
+      document.querySelectorAll('.preset-btn[data-tower]').forEach(b =>
+        b.classList.toggle('active', b.dataset.tower === type)
+      );
+
+      const tower = TOWER_PRESETS[type];
+      $towerVariantRow.style.display = '';
+
+      // Render variant buttons
+      $towerVariantGrid.innerHTML = tower.variants.map((v, i) =>
+        `<button class="preset-btn" data-tower-variant="${i}" style="font-size:11px">
+           <span class="preset-dot" style="background:${v.color || tower.color}"></span>
+           ${v.label}
+         </button>`
+      ).join('');
+
+      document.querySelectorAll('.preset-btn[data-tower-variant]').forEach(btn => {
+        btn.addEventListener('click', () => applyTowerVariant(type, parseInt(btn.dataset.towerVariant)));
+      });
+
+      // Auto-select first variant
+      applyTowerVariant(type, 0);
+    }
+
+    function applyTowerVariant(type, index) {
+      const tower = TOWER_PRESETS[type];
+      const variant = tower.variants[index];
+      $prompt.value = variant.prompt;
+      $filename.value = variant.file;
+      // Tower sprites are 512×512 (not the 1024×1024 used for terrain crop variation)
+      $width.value = 512;
+      $height.value = 512;
+      $generateBtn.disabled = false;
+
+      document.querySelectorAll('.preset-btn[data-tower-variant]').forEach(b =>
+        b.classList.toggle('active', parseInt(b.dataset.towerVariant) === index)
+      );
+    }
+
     function applyPreset(name) {
       currentPreset = name;
       const preset = PRESETS[name];
       $prompt.value = preset.prompt;
       $filename.value = preset.file;
-      document.querySelectorAll('.preset-btn').forEach((b) => b.classList.toggle('active', b.dataset.preset === name));
+      // Terrain tiles use 1024×1024 for crop-variation; restore if coming from tower presets
+      $width.value = 1024;
+      $height.value = 1024;
+      // Terrain tiles are full-bleed — background removal not needed
+      $autoRemoveBg.checked = false;
+      document.querySelectorAll('.preset-btn[data-preset]').forEach((b) => b.classList.toggle('active', b.dataset.preset === name));
       $generateBtn.disabled = false;
     }
 
@@ -530,7 +701,33 @@
         });
         const data = await resp.json();
         if (data.ok) {
-          setStatus(`✅ Saved as ${data.name} (${formatSize(data.size)})`, 'success');
+          if ($autoRemoveBg.checked) {
+            $generateBtn.textContent = 'Removing background...';
+            setStatus('✂️ Removing background...');
+            try {
+              const bgResp = await fetch('/api/remove-bg', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tileName: data.name, bgModel: $bgModelSelect.value }),
+              });
+              const rawText = await bgResp.text();
+              let bgData;
+              try {
+                bgData = JSON.parse(rawText);
+              } catch {
+                throw new Error(`Server returned HTTP ${bgResp.status}: "${rawText.slice(0, 500)}"`);
+              }
+              if (bgData.ok) {
+                setStatus(`✅ Generated + background removed: ${data.name} (${formatSize(bgData.size)})`, 'success');
+              } else {
+                setStatus(`⚠️ Saved but bg-remove failed: ${bgData.error}`, 'error');
+              }
+            } catch (bgErr) {
+              setStatus(`⚠️ Saved but bg-remove failed: ${bgErr.message}`, 'error');
+            }
+          } else {
+            setStatus(`✅ Saved as ${data.name} (${formatSize(data.size)})`, 'success');
+          }
           loadTileList();
         } else {
           setStatus(`❌ ${data.error}`, 'error');
@@ -579,6 +776,7 @@
               <span class="name" title="${t.name}">${t.name}</span>
               <span class="size">${formatSize(t.size)}</span>
               <div class="actions">
+                <button class="btn-icon" onclick="removeBg(event, '${t.name}')" title="Remove background">✂️</button>
                 <button class="btn-icon" onclick="copyToClipboard('${t.name}')" title="Copy name">📋</button>
                 <button class="btn-icon delete" onclick="deleteTile('${t.name}')" title="Delete">🗑</button>
               </div>
@@ -587,6 +785,39 @@
         `
         )
         .join('');
+    }
+
+    async function removeBg(event, name) {
+      const btn = event.currentTarget;
+      btn.disabled = true;
+      btn.textContent = '⏳';
+      setStatus(`✂️ Removing background from ${name}...`);
+      try {
+        const resp = await fetch('/api/remove-bg', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tileName: name, bgModel: document.getElementById('bgModelSelect').value }),
+        });
+        const rawText = await resp.text();
+        let data;
+        try {
+          data = JSON.parse(rawText);
+        } catch {
+          throw new Error(`Invalid JSON response: "${rawText.slice(0, 500)}"`);
+        }
+        if (data.ok) {
+          setStatus(`✅ Background removed from ${name} (${formatSize(data.size)})`, 'success');
+          loadTileList();
+        } else {
+          setStatus(`❌ ${data.error}`, 'error');
+          btn.disabled = false;
+          btn.textContent = '✂️';
+        }
+      } catch (err) {
+        setStatus(`❌ ${err.message}`, 'error');
+        btn.disabled = false;
+        btn.textContent = '✂️';
+      }
     }
 
     async function deleteTile(name) {
