@@ -28,6 +28,49 @@ const MIME = {
   '.svg': 'image/svg+xml',
 };
 
+// Known pricing for fal.ai text-to-image models (per megapixel or per image).
+// Sources: official fal.ai pricing page, individual model pages, and docs.
+// Models not listed here use GPU-based (per-second) pricing or vary.
+const MODEL_PRICING = {
+  'fal-ai/fast-sdxl':                     { cost: 'GPU per-sec', unit: '', note: 'GPU-based pricing' },
+  'fal-ai/flux/schnell':                  { cost: '$0.003',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/flux-1/schnell':                { cost: '$0.003',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/flux/dev':                      { cost: '$0.025',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/flux-lora':                     { cost: '$0.025',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/flux-pro/v1.1':                 { cost: '$0.045',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/flux-pro/v1.1-ultra':           { cost: '$0.065',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/flux-pro/kontext/text-to-image':{ cost: '$0.040',     unit: '/img', note: 'per image' },
+  'fal-ai/flux-2':                        { cost: '$0.030',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/flux-2/turbo':                  { cost: '$0.015',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/flux-2/flash':                  { cost: '$0.005',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/flux-2/klein/9b':               { cost: '$0.015',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/flux-2-pro':                    { cost: '$0.050',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/flux-2-max':                    { cost: '$0.080',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/flux-2-flex':                   { cost: '$0.020',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/nano-banana':                   { cost: '$0.005',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/nano-banana-2':                 { cost: '$0.005',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/nano-banana-pro':               { cost: '$0.040',     unit: '/img', note: 'per image' },
+  'fal-ai/gemini-25-flash-image':         { cost: '$0.002',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/gemini-3-pro-image-preview':    { cost: '$0.005',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/gemini-3.1-flash-image-preview':{ cost: '$0.003',     unit: '/MP', note: 'per megapixel' },
+  'openai/gpt-image-2':                   { cost: '$0.040',     unit: '/img', note: 'per image (1MP)' },
+  'fal-ai/gpt-image-1.5':                 { cost: '$0.030',     unit: '/img', note: 'per image (1MP)' },
+  'fal-ai/gpt-image-1/text-to-image':     { cost: '$0.020',     unit: '/img', note: 'per image (1MP)' },
+  'xai/grok-imagine-image':               { cost: '$0.003',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/bytedance/seedream/v4/text-to-image':   { cost: '$0.030', unit: '/img', note: 'per image (1MP)' },
+  'fal-ai/bytedance/seedream/v4.5/text-to-image': { cost: '$0.030', unit: '/img', note: 'per image (1MP)' },
+  'fal-ai/bytedance/seedream/v5/lite/text-to-image':{ cost:'$0.020', unit:'/img', note:'per image (1MP)' },
+  'fal-ai/ideogram/v3':                   { cost: '$0.003',     unit: '/MP', note: 'per megapixel' },
+  'ideogram/v4':                          { cost: '$0.004',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/recraft/v3/text-to-image':      { cost: '$0.004',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/recraft/v4/text-to-image':      { cost: '$0.006',     unit: '/MP', note: 'per megapixel' },
+  'krea/v2/large/text-to-image':          { cost: '$0.004',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/z-image/turbo':                 { cost: '$0.002',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/z-image/turbo/lora':            { cost: '$0.002',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/qwen-image':                    { cost: '$0.020',     unit: '/MP', note: 'per megapixel' },
+  'fal-ai/flux-2/lora':                   { cost: '$0.030',     unit: '/MP', note: 'per megapixel' },
+};
+
 function serveFile(res, path, mime) {
   try {
     const data = readFileSync(path);
@@ -222,6 +265,39 @@ const server = createServer(async (req, res) => {
       return json(res, { ok: true, name: fname, size: outBuffer.length });
     } catch (err) {
       console.error('[bg-remove] Error:', err);
+      return json(res, { error: String(err) }, 500);
+    }
+  }
+
+  // ─── API: list text-to-image models from fal.ai ──────────────────────
+  if (pathname === '/api/models' && req.method === 'GET') {
+    if (!FAL_KEY) return json(res, { error: 'FAL_AI_KEY not set' }, 500);
+    try {
+      const resp = await fetch('https://api.fal.ai/v1/models?limit=200', {
+        headers: { 'Authorization': `Key ${FAL_KEY}` },
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status} from fal.ai`);
+      const data = await resp.json();
+      const t2i = (data.models || [])
+        .filter(m => m.metadata?.category === 'text-to-image' && m.metadata?.status === 'active')
+        .map(m => {
+          const eid = m.endpoint_id;
+          const price = MODEL_PRICING[eid] || { cost: '—', unit: '', note: '' };
+          // Shorten display name: remove "Text To Image", "API" suffix
+          let dn = m.metadata.display_name
+            .replace(/ Text To Image$/, '')
+            .replace(/ API$/, '');
+          return {
+            id: eid,
+            name: dn,
+            description: (m.metadata.description || '').split('\n')[0].slice(0, 200),
+            pricing: price,
+          };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name));
+      return json(res, { models: t2i });
+    } catch (err) {
+      console.error('[models] Error:', err);
       return json(res, { error: String(err) }, 500);
     }
   }

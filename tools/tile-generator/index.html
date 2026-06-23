@@ -305,6 +305,161 @@
       transition: opacity 0.15s;
     }
     .tooltip.visible { opacity: 1; }
+
+    /* ─── Modal dialog ──────────────────────────────────────────── */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      width: 100%;
+      max-width: 720px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .modal-header h2 {
+      font-size: 16px;
+      margin: 0;
+    }
+    .modal-close {
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-size: 24px;
+      cursor: pointer;
+      padding: 0 4px;
+      line-height: 1;
+    }
+    .modal-close:hover { color: var(--text); }
+    .modal-search-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .modal-search {
+      flex: 1;
+      padding: 8px 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 13px;
+    }
+    .modal-search:focus {
+      border-color: var(--accent);
+      outline: none;
+    }
+    .modal-count {
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .sort-group {
+      display: flex;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .sort-btn {
+      padding: 4px 8px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.12s;
+      line-height: 1.2;
+    }
+    .sort-btn:hover {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+    .sort-btn.active {
+      border-color: var(--accent);
+      background: rgba(88,166,255,0.15);
+      color: var(--accent);
+    }
+    .modal-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 0;
+    }
+    .model-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 20px;
+      cursor: pointer;
+      transition: background 0.12s;
+      border-bottom: 1px solid rgba(48,54,61,0.4);
+    }
+    .model-row:hover { background: rgba(88,166,255,0.08); }
+    .model-row.selected { background: rgba(88,166,255,0.15); }
+    .model-row .model-name {
+      flex: 1;
+      font-size: 13px;
+      font-weight: 500;
+      min-width: 0;
+    }
+    .model-row .model-id {
+      font-size: 10px;
+      color: var(--muted);
+      font-family: monospace;
+      max-width: 260px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .model-row .model-price {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--green);
+      white-space: nowrap;
+      text-align: right;
+    }
+    .model-row .model-price .note {
+      font-size: 10px;
+      font-weight: 400;
+      color: var(--muted);
+    }
+    .model-row .model-select-btn {
+      padding: 4px 12px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .model-row .model-select-btn:hover { opacity: 0.85; }
+    .model-row .check-mark {
+      color: var(--green);
+      font-size: 16px;
+      margin-left: 4px;
+    }
   </style>
 </head>
 <body>
@@ -318,12 +473,16 @@
     <!-- Model -->
     <div class="sidebar-section">
       <h3>🤖 Model</h3>
-      <select class="model-select" id="modelSelect">
-        <option value="fal-ai/fast-sdxl" selected>Fast SDXL — Cheap & Fast ⚡</option>
-        <option value="fal-ai/flux/schnell">Flux Schnell — Good & Fast</option>
-        <option value="fal-ai/flux/dev">Flux Dev — Best Quality</option>
-        <option value="fal-ai/stable-diffusion-v3.5">SD 3.5 — Great Quality</option>
-      </select>
+      <div style="display:flex; gap:6px;">
+        <select class="model-select" id="modelSelect" style="flex:1;">
+          <option value="fal-ai/fast-sdxl" selected>Fast SDXL ⚡</option>
+          <option value="fal-ai/flux/schnell">Flux Schnell</option>
+          <option value="fal-ai/flux/dev">Flux Dev</option>
+          <option value="fal-ai/stable-diffusion-v3.5">SD 3.5</option>
+        </select>
+        <button class="preset-btn" id="browseModelsBtn" title="Browse all fal.ai text-to-image models"
+                style="padding:6px 10px; font-size:12px; white-space:nowrap;">🔍 Browse</button>
+      </div>
       <div class="model-info" id="modelInfo">Cost: <span class="price">~$0.001/img</span> &bull; Speed: ~2s</div>
     </div>
 
@@ -447,6 +606,26 @@
 
   <div class="tooltip" id="tooltip"></div>
 
+  <!-- ─── Model Browser Dialog ────────────────────────────────────── -->
+  <div class="modal-overlay" id="modelModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>🧠 Choose a fal.ai Model</h2>
+        <button class="modal-close" id="modelModalClose">&times;</button>
+      </div>
+      <div class="modal-search-wrap">
+        <input type="text" class="modal-search" id="modelSearch" placeholder="Search models..." />
+        <div class="sort-group">
+          <button class="sort-btn active" data-sort="name" title="Sort by name">Name ↑</button>
+          <button class="sort-btn" data-sort="cost-asc" title="Sort by cost (cheapest first)">$ ↑</button>
+          <button class="sort-btn" data-sort="cost-desc" title="Sort by cost (most expensive first)">$ ↓</button>
+        </div>
+        <span class="modal-count" id="modelCount">0 models</span>
+      </div>
+      <div class="modal-body" id="modelList"></div>
+    </div>
+  </div>
+
   <script>
     // ─── Constants ──────────────────────────────────────────────
     const STYLE_SUFFIX = 'top-down 2D cartoon fantasy tower defense game sprite, viewed directly from above, flat orthographic perspective, no 3D, clean crisp pixel art style, isolated on square canvas, dark circular stone base platform, subtle drop shadow';
@@ -560,9 +739,9 @@
     };
 
     const MODEL_INFO = {
-      'fal-ai/fast-sdxl': { cost: '~$0.001/img', speed: '~2s' },
-      'fal-ai/flux/schnell': { cost: '~$0.003/img', speed: '~3s' },
-      'fal-ai/flux/dev': { cost: '~$0.005/img', speed: '~5s' },
+      'fal-ai/fast-sdxl': { cost: 'GPU per-sec', speed: '~2s' },
+      'fal-ai/flux/schnell': { cost: '$0.003/MP', speed: '~3s' },
+      'fal-ai/flux/dev': { cost: '$0.025/MP', speed: '~5s' },
       'fal-ai/stable-diffusion-v3.5': { cost: '~$0.004/img', speed: '~4s' },
     };
 
@@ -588,6 +767,15 @@
     const $towerVariantGrid = document.getElementById('towerVariantGrid');
     const $autoRemoveBg = document.getElementById('autoRemoveBg');
     const $bgModelSelect = document.getElementById('bgModelSelect');
+    const $browseModelsBtn = document.getElementById('browseModelsBtn');
+    const $modelModal = document.getElementById('modelModal');
+    const $modelModalClose = document.getElementById('modelModalClose');
+    const $modelSearch = document.getElementById('modelSearch');
+    const $modelList = document.getElementById('modelList');
+    const $modelCount = document.getElementById('modelCount');
+
+    let allModels = []; // cached from /api/models
+    let currentSort = 'name'; // 'name' | 'cost-asc' | 'cost-desc'
 
     // ─── Init ───────────────────────────────────────────────────
     function init() {
@@ -603,6 +791,15 @@
       });
       $model.addEventListener('change', updateModelInfo);
       $generateBtn.addEventListener('click', generateTile);
+      $browseModelsBtn.addEventListener('click', openModelBrowser);
+      $modelModalClose.addEventListener('click', closeModelBrowser);
+      $modelModal.addEventListener('click', (e) => {
+        if (e.target === $modelModal) closeModelBrowser();
+      });
+      $modelSearch.addEventListener('input', filterModelList);
+      document.querySelectorAll('.sort-btn').forEach(btn => {
+        btn.addEventListener('click', () => setSort(btn.dataset.sort));
+      });
       updateModelInfo();
       loadTileList();
     }
@@ -672,8 +869,152 @@
     }
 
     function updateModelInfo() {
-      const info = MODEL_INFO[$model.value] || {};
-      $modelInfo.innerHTML = `Cost: <span class="price">${info.cost || '?'}</span> &bull; Speed: ${info.speed || '?'}`;
+      const modelId = $model.value;
+      let info = MODEL_INFO[modelId];
+      if (!info) {
+        // Look up from allModels pricing
+        const m = allModels.find(x => x.id === modelId);
+        const p = m?.pricing;
+        if (p && p.cost && p.cost !== '—') {
+          info = { cost: `${p.cost}${p.unit || ''}`, speed: '?' };
+        } else {
+          info = { cost: '?', speed: '?' };
+        }
+      }
+      $modelInfo.innerHTML = `Cost: <span class="price">${info.cost}</span> &bull; Speed: ${info.speed}`;
+    }
+
+    // ─── Model Browser ──────────────────────────────────────────
+    async function openModelBrowser() {
+      $modelModal.classList.add('open');
+      if (allModels.length === 0) {
+        $modelList.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted);font-size:13px;">Loading models…</div>';
+        await fetchModels();
+      }
+      renderModelList(sortModels(allModels, currentSort));
+    }
+
+    function closeModelBrowser() {
+      $modelModal.classList.remove('open');
+    }
+
+    async function fetchModels() {
+      try {
+        const resp = await fetch('/api/models');
+        const data = await resp.json();
+        allModels = data.models || [];
+      } catch (err) {
+        console.error('Failed to fetch models', err);
+        $modelList.innerHTML = `<div style="padding:40px;text-align:center;color:var(--red);font-size:13px;">❌ Failed to load models: ${err.message}</div>`;
+      }
+    }
+
+    function parseCost(model) {
+      // Returns a numeric value for sorting by cost.
+      // Unknown/GPU models get null — they always sort to the bottom.
+      const p = model.pricing || {};
+      const raw = (p.cost || '—').replace('$', '');
+      if (raw === '—' || raw === 'GPU per-sec') return null;
+      const num = parseFloat(raw);
+      return isNaN(num) ? null : num;
+    }
+
+    function sortModels(models, sortKey) {
+      const sorted = [...models];
+      if (sortKey === 'name') {
+        sorted.sort((a, b) => a.name.localeCompare(b.name));
+      } else if (sortKey === 'cost-asc' || sortKey === 'cost-desc') {
+        sorted.sort((a, b) => {
+          const ca = parseCost(a);
+          const cb = parseCost(b);
+          // Unknown/null costs always sort to the end
+          if (ca === null && cb === null) return a.name.localeCompare(b.name);
+          if (ca === null) return 1;
+          if (cb === null) return -1;
+          return sortKey === 'cost-asc' ? ca - cb : cb - ca;
+        });
+      }
+      return sorted;
+    }
+
+    function setSort(sortKey) {
+      currentSort = sortKey;
+      document.querySelectorAll('.sort-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.sort === sortKey)
+      );
+      // Re-render with current filtered + sorted list
+      const q = $modelSearch.value.toLowerCase().trim();
+      const source = q ? allModels.filter(m =>
+        m.name.toLowerCase().includes(q) ||
+        m.id.toLowerCase().includes(q) ||
+        (m.description && m.description.toLowerCase().includes(q))
+      ) : allModels;
+      renderModelList(sortModels(source, currentSort));
+    }
+
+    function renderModelList(models) {
+      const selectedId = $model.value;
+      $modelCount.textContent = `${models.length} model${models.length !== 1 ? 's' : ''}`;
+      if (models.length === 0) {
+        $modelList.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted);font-size:13px;">No models match your search.</div>';
+        return;
+      }
+      $modelList.innerHTML = models.map(m => {
+        const isSelected = m.id === selectedId;
+        const p = m.pricing || {};
+        const priceStr = p.cost && p.cost !== '—' ? `${p.cost}${p.unit || ''}` : '—';
+        const noteStr = p.note ? ` <span class="note">${p.note}</span>` : '';
+        return `<div class="model-row${isSelected ? ' selected' : ''}" data-model-id="${m.id}">
+          <div style="flex:1;min-width:0;">
+            <div class="model-name">${m.name}</div>
+            <div class="model-id">${m.id}</div>
+          </div>
+          <div class="model-price">${priceStr}${noteStr}</div>
+          ${isSelected ? '<span class="check-mark">✓</span>' : `<button class="model-select-btn">Select</button>`}
+        </div>`;
+      }).join('');
+
+      // Click handling
+      $modelList.querySelectorAll('.model-row').forEach(row => {
+        row.addEventListener('click', () => {
+          const id = row.dataset.modelId;
+          selectModel(id);
+          closeModelBrowser();
+        });
+      });
+    }
+
+    function filterModelList() {
+      const q = $modelSearch.value.toLowerCase().trim();
+      const source = q ? allModels.filter(m =>
+        m.name.toLowerCase().includes(q) ||
+        m.id.toLowerCase().includes(q) ||
+        (m.description && m.description.toLowerCase().includes(q))
+      ) : allModels;
+      renderModelList(sortModels(source, currentSort));
+    }
+
+    function selectModel(modelId) {
+      // Check if it exists in the quick-select dropdown
+      let found = false;
+      for (const opt of $model.options) {
+        if (opt.value === modelId) {
+          $model.value = modelId;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        // Add it dynamically
+        const opt = document.createElement('option');
+        opt.value = modelId;
+        // Try to find the display name from allModels
+        const m = allModels.find(x => x.id === modelId);
+        opt.textContent = m ? m.name : modelId;
+        $model.appendChild(opt);
+        $model.value = modelId;
+      }
+      updateModelInfo();
     }
 
     // ─── Generate ───────────────────────────────────────────────
