@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { generateMap, type MapData, type GridTile } from '../systems/MapGenerator';
-import { computePathVisualMask, blobTileKey } from '../systems/BlobTileset';
+import { computeBlobMask, blobTileKey } from '../systems/BlobTileset';
 import { computeTerrainBlobMask, transitionTileKey } from '../systems/TerrainTransition';
 import { Tower } from '../entities/Tower';
 import { Enemy } from '../entities/Enemy';
@@ -19,11 +19,11 @@ import { SoundSystem } from '../systems/SoundSystem';
 import {
   TILE_SIZE, GRID_COLS, GRID_ROWS, COLORS,
   MAX_BARRICADES, BARRICADE_COST, TOTAL_WAVES,
-  GAME_WIDTH, GAME_HEIGHT,
   UI_TOP_HEIGHT, UI_BOTTOM_HEIGHT,
 } from '../utils/constants';
 import type { TowerType } from '../data/towers';
 import { TOWER_DEFS, TOWER_TYPES_ORDERED } from '../data/towers';
+import { ABILITY_DEFS, type AbilityType } from '../data/abilities';
 
 export class GameScene extends Phaser.Scene {
   // Map
@@ -73,12 +73,22 @@ export class GameScene extends Phaser.Scene {
   // Pause
   private isPaused: boolean = false;
 
+  // Floating ability buttons
+  private abilityFloating: Map<AbilityType, {
+    bg: Phaser.GameObjects.Graphics;
+    icon: Phaser.GameObjects.Graphics;
+    cdOvl: Phaser.GameObjects.Graphics;
+    cdTxt: Phaser.GameObjects.Text;
+    cost: Phaser.GameObjects.Text;
+    hit: Phaser.GameObjects.Rectangle;
+  }> = new Map();
+
   // Minimap
   private minimapBg!: Phaser.GameObjects.Graphics;
   private minimapMapImg!: Phaser.GameObjects.Image;
   private minimapViewport!: Phaser.GameObjects.Graphics;
   private minimapHitArea!: Phaser.GameObjects.Rectangle;
-  private readonly minimapX = GAME_WIDTH - 208;
+  private minimapX = 0;
   private readonly minimapY = UI_TOP_HEIGHT + 6;
   private readonly minimapW = 200;
   private readonly minimapH = 103;
@@ -99,6 +109,7 @@ export class GameScene extends Phaser.Scene {
     this.setupCamera();
     this.setupInput();
     this.registerEvents();
+    this.initResizeHandler();
 
     // Sound init on first interaction
     this.sfx.init();
@@ -150,7 +161,7 @@ export class GameScene extends Phaser.Scene {
       return { key: mask === 15 ? 'tile_goal' : transitionTileKey('goal', mask), depth: 0.15 };
     }
     if (tile.type === 'path') {
-      const mask = computePathVisualMask(this.mapData.grid, tile.row, tile.col);
+      const mask = computeBlobMask(this.mapData.grid, tile.row, tile.col);
       const blobAITileKey = `tile_path_blob_${mask}`;
       const key = this.textures.exists(blobAITileKey) ? blobAITileKey
         : this.textures.exists('tile_path') ? 'tile_path'
@@ -250,7 +261,8 @@ export class GameScene extends Phaser.Scene {
     };
 
     this.hud = new HUD(this);
-    this.bottomBar = new BottomBar(this, this.economy, this.abilitySystem);
+    this.bottomBar = new BottomBar(this, this.economy);
+    this.createFloatingAbilities();
 
     // Register all UI objects with the UI group for camera ignoring
     for (const obj of this.hud.getAllObjects()) {
@@ -258,6 +270,14 @@ export class GameScene extends Phaser.Scene {
     }
     for (const obj of this.bottomBar.getAllObjects()) {
       this.uiGroup.add(obj);
+    }
+    for (const abtn of this.abilityFloating.values()) {
+      this.uiGroup.add(abtn.bg);
+      this.uiGroup.add(abtn.icon);
+      this.uiGroup.add(abtn.cdOvl);
+      this.uiGroup.add(abtn.cdTxt);
+      this.uiGroup.add(abtn.cost);
+      this.uiGroup.add(abtn.hit);
     }
 
     // Weather system screen-fixed FX also render on the UI camera
@@ -314,13 +334,13 @@ export class GameScene extends Phaser.Scene {
 
     // ── Main camera: renders the game world in the viewport between UI bars ──
     this.cameras.main.setBounds(0, 0, W, H);
-    this.cameras.main.setZoom(1);
-    this.cameras.main.setViewport(0, UI_TOP_HEIGHT, GAME_WIDTH, GAME_HEIGHT - UI_TOP_HEIGHT - UI_BOTTOM_HEIGHT);
+    this.cameras.main.setZoom(0.85);
+    this.cameras.main.setViewport(0, UI_TOP_HEIGHT, this.scale.width, this.scale.height - UI_TOP_HEIGHT - UI_BOTTOM_HEIGHT);
     // Main camera ignores UI objects
     this.cameras.main.ignore(this.uiGroup);
 
     // ── UI camera: renders UI over the full canvas, no scroll/zoom ──────────
-    this.uiCam = this.cameras.add(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    this.uiCam = this.cameras.add(0, 0, this.scale.width, this.scale.height);
     this.uiCam.setScroll(0, 0);
     this.uiCam.setZoom(1);
 
@@ -561,7 +581,7 @@ export class GameScene extends Phaser.Scene {
     const wy = p.worldY;
 
     // Ignore clicks in the top HUD bar or bottom UI bar area
-    if (p.y < UI_TOP_HEIGHT || p.y >= GAME_HEIGHT - UI_BOTTOM_HEIGHT) return;
+    if (p.y < UI_TOP_HEIGHT || p.y >= this.scale.height - UI_BOTTOM_HEIGHT) return;
 
     // ── HERO SELECTION: highest priority ──────────────────────────────────
     if (!this.placingTower && !this.placingBarricade) {
@@ -654,7 +674,7 @@ export class GameScene extends Phaser.Scene {
 
   private updateHoverTile(p: Phaser.Input.Pointer) {
     // Only hover over the game viewport area (between UI bars)
-    if (p.y < UI_TOP_HEIGHT || p.y >= GAME_HEIGHT - UI_BOTTOM_HEIGHT) {
+    if (p.y < UI_TOP_HEIGHT || p.y >= this.scale.height - UI_BOTTOM_HEIGHT) {
       this.hoverOverlay.setAlpha(0);
       return;
     }
@@ -937,18 +957,44 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ─── Minimap ─────────────────────────────────────────────────────────────
+  private initResizeHandler() {
+    const applyLayout = (W: number, H: number) => {
+      // Update camera viewport
+      this.cameras.main.setViewport(0, UI_TOP_HEIGHT, W, H - UI_TOP_HEIGHT - UI_BOTTOM_HEIGHT);
+
+      // Update UI camera
+      this.uiCam.setSize(W, H);
+
+      // Update minimap position (right edge)
+      this.minimapX = W - 208;
+
+      // Redraw HUD and bottom bar
+      this.hud.resize(W, H);
+      this.bottomBar.resize(W, H);
+    };
+
+    this.scale.on('resize', (size: Phaser.Structs.Size) => {
+      applyLayout(size.width, size.height);
+    });
+
+    // Apply initial layout directly (don't emit through scale — would confuse WebGLRenderer)
+    applyLayout(this.scale.width, this.scale.height);
+  }
+
   private createMinimap() {
+    // Position at top-right (will be updated on resize)
+    this.minimapX = this.scale.width - 208;
     const MM_X = this.minimapX;
     const MM_Y = this.minimapY;
     const MM_W = this.minimapW;
     const MM_H = this.minimapH;
     const MM_PAD = 2;
 
-    // Background panel
+    // Background panel (transparent, brighter)
     this.minimapBg = this.add.graphics().setScrollFactor(0).setDepth(60);
-    this.minimapBg.fillStyle(0x000811, 0.88);
+    this.minimapBg.fillStyle(0x0a1a2a, 0.35);
     this.minimapBg.fillRect(MM_X - MM_PAD, MM_Y - MM_PAD, MM_W + MM_PAD * 2, MM_H + MM_PAD * 2);
-    this.minimapBg.lineStyle(1, 0x3a5a6a, 0.9);
+    this.minimapBg.lineStyle(1, 0x5a8aaa, 0.6);
     this.minimapBg.strokeRect(MM_X - MM_PAD, MM_Y - MM_PAD, MM_W + MM_PAD * 2, MM_H + MM_PAD * 2);
     this.uiGroup.add(this.minimapBg);
 
@@ -957,11 +1003,11 @@ export class GameScene extends Phaser.Scene {
     const tileW = MM_W / GRID_COLS;
     const tileH = MM_H / GRID_ROWS;
     const TYPE_COLORS: Record<string, number> = {
-      ground:    0x0b1628,
-      path:      0x4a3c2a,
-      buildable: 0x1a3018,
-      spawn:     0x6a1e1e,
-      goal:      0x1e5a1e,
+      ground:    0x142a4a,
+      path:      0x6a5a3a,
+      buildable: 0x2a5030,
+      spawn:     0x8a2e2e,
+      goal:      0x2e7a2e,
     };
     for (let r = 0; r < GRID_ROWS; r++) {
       for (let c = 0; c < GRID_COLS; c++) {
@@ -992,12 +1038,160 @@ export class GameScene extends Phaser.Scene {
     this.uiGroup.add(this.minimapHitArea);
   }
 
+  // ─── Floating Ability Buttons (top-left) ─────────────────────────────
+  private createFloatingAbilities() {
+    const BTN_SIZE = 44;
+    const GAP = 6;
+    const startX = 8;
+    const startY = UI_TOP_HEIGHT + 8;
+    const D = 60;
+    const r = 10; // icon radius
+
+    ABILITY_DEFS.forEach((def, i) => {
+      const cx = startX + BTN_SIZE / 2;
+      const cy = startY + i * (BTN_SIZE + GAP) + BTN_SIZE / 2;
+
+      const bg = this.add.graphics().setScrollFactor(0).setDepth(D);
+      const icon = this.add.graphics().setScrollFactor(0).setDepth(D + 1);
+      const cdOvl = this.add.graphics().setScrollFactor(0).setDepth(D + 2);
+      const cdTxt = this.add.text(cx, cy, '', {
+        fontSize: '14px', fontFamily: 'monospace', color: '#ffffff', align: 'center',
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 3);
+      const cost = this.add.text(cx, cy + BTN_SIZE / 2 + 4, `${def.cost}g`, {
+        fontSize: '9px', fontFamily: 'monospace', color: '#ffd700', align: 'center',
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1);
+
+      // Draw button background
+      const drawBtn = (hover: boolean, selected: boolean) => {
+        bg.clear();
+        const fill = selected ? 0x2a4a6a : hover ? 0x2a5080 : 0x1a2a3a;
+        bg.fillStyle(fill, 0.85);
+        bg.fillRoundedRect(cx - BTN_SIZE / 2, cy - BTN_SIZE / 2, BTN_SIZE, BTN_SIZE, 5);
+        bg.lineStyle(selected ? 2 : 1, def.color, selected ? 1 : 0.5);
+        bg.strokeRoundedRect(cx - BTN_SIZE / 2, cy - BTN_SIZE / 2, BTN_SIZE, BTN_SIZE, 5);
+
+        icon.clear();
+        this.drawAbilityFloatingIcon(icon, cx, cy, def.color, def.type, r);
+      };
+
+      drawBtn(false, false);
+
+      const hit = this.add.rectangle(cx, cy, BTN_SIZE, BTN_SIZE, 0, 0)
+        .setScrollFactor(0).setInteractive({ useHandCursor: true }).setDepth(D + 4);
+      hit.on('pointerover', () => drawBtn(true, this.abilitySystem.pendingCast === def.type));
+      hit.on('pointerout', () => drawBtn(false, this.abilitySystem.pendingCast === def.type));
+      hit.on('pointerup', () => this.abilitySystem.selectAbility(def.type));
+
+      this.abilityFloating.set(def.type, { bg, icon, cdOvl, cdTxt, cost, hit });
+    });
+
+    // Listen for selection changes to update border
+    this.events.on('ability_selected', (type: AbilityType | null) => {
+      ABILITY_DEFS.forEach((def, i) => {
+        const btn = this.abilityFloating.get(def.type);
+        if (!btn) return;
+        const isSelected = def.type === type;
+        const cx = startX + BTN_SIZE / 2;
+        const cy = startY + i * (BTN_SIZE + GAP) + BTN_SIZE / 2;
+
+        btn.bg.clear();
+        btn.bg.fillStyle(isSelected ? 0x2a4a6a : 0x1a2a3a, 0.85);
+        btn.bg.fillRoundedRect(cx - BTN_SIZE / 2, cy - BTN_SIZE / 2, BTN_SIZE, BTN_SIZE, 5);
+        btn.bg.lineStyle(isSelected ? 2 : 1, def.color, isSelected ? 1 : 0.5);
+        btn.bg.strokeRoundedRect(cx - BTN_SIZE / 2, cy - BTN_SIZE / 2, BTN_SIZE, BTN_SIZE, 5);
+
+        btn.icon.clear();
+        this.drawAbilityFloatingIcon(btn.icon, cx, cy, def.color, def.type, r);
+      });
+    });
+  }
+
+  /** Draw the icon symbol for a floating ability button (copied from BottomBar). */
+  private drawAbilityFloatingIcon(g: Phaser.GameObjects.Graphics, cx: number, cy: number, color: number, type: AbilityType, r: number) {
+    g.fillStyle(color, 0.9);
+    g.lineStyle(1.5, 0xffffff, 0.4);
+    switch (type) {
+      case 'freeze': {
+        for (let a = 0; a < 6; a++) {
+          const angle = (a * Math.PI) / 3;
+          g.lineBetween(cx, cy, cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
+          const mx = cx + Math.cos(angle) * r * 0.6;
+          const my = cy + Math.sin(angle) * r * 0.6;
+          g.lineBetween(mx, my, mx + Math.cos(angle + 1) * r * 0.3, my + Math.sin(angle + 1) * r * 0.3);
+        }
+        g.fillCircle(cx, cy, 3);
+        break;
+      }
+      case 'meteor': {
+        const ax = Math.PI * 0.75;
+        g.fillTriangle(
+          cx + Math.cos(ax) * r * 1.4, cy + Math.sin(ax) * r * 1.4,
+          cx + Math.cos(ax + 2.4) * r * 0.5, cy + Math.sin(ax + 2.4) * r * 0.5,
+          cx + Math.cos(ax - 2.4) * r * 0.5, cy + Math.sin(ax - 2.4) * r * 0.5,
+        );
+        g.fillStyle(0xffcc44, 0.9);
+        g.fillCircle(cx, cy, r * 0.55);
+        g.fillStyle(0xffffff, 0.5);
+        g.fillCircle(cx - 3, cy - 3, r * 0.2);
+        break;
+      }
+      case 'lightning_storm': {
+        const pts = [
+          { x: cx + 4, y: cy - r }, { x: cx - 2, y: cy - 3 },
+          { x: cx + 3, y: cy - 3 }, { x: cx - 5, y: cy + r },
+          { x: cx + 1, y: cy + 2 }, { x: cx - 3, y: cy + 2 },
+        ];
+        g.fillPoints(pts, true);
+        g.fillStyle(0xffffff, 0.4);
+        g.fillTriangle(cx + 4, cy - r, cx - 2, cy - 3, cx + 1, cy - 4);
+        break;
+      }
+      case 'heal_aura': {
+        g.strokeCircle(cx, cy, r);
+        g.lineStyle(2, color, 0.7);
+        g.lineBetween(cx - r * 0.7, cy - r * 0.7, cx + r * 0.7, cy + r * 0.7);
+        g.lineBetween(cx + r * 0.7, cy - r * 0.7, cx - r * 0.7, cy + r * 0.7);
+        g.fillStyle(color, 0.3);
+        g.fillCircle(cx, cy, r * 0.5);
+        g.lineStyle(2, 0xffffff, 0.8);
+        g.lineBetween(cx, cy, cx + r * 0.5, cy - r * 0.3);
+        g.lineBetween(cx, cy, cx, cy + r * 0.6);
+        break;
+      }
+    }
+  }
+
+  private updateFloatingAbilities() {
+    const BTN_SIZE = 44;
+    const GAP = 6;
+    const startX = 8;
+    const startY = UI_TOP_HEIGHT + 8;
+
+    ABILITY_DEFS.forEach((def, i) => {
+      const btn = this.abilityFloating.get(def.type);
+      if (!btn) return;
+      const cx = startX + BTN_SIZE / 2;
+      const cy = startY + i * (BTN_SIZE + GAP) + BTN_SIZE / 2;
+
+      const cd = this.abilitySystem.getCooldown(def.type);
+      btn.cdOvl.clear();
+      if (cd.remaining > 0) {
+        const frac = cd.remaining / cd.total;
+        btn.cdOvl.fillStyle(0x000000, 0.65 * frac);
+        btn.cdOvl.fillRoundedRect(cx - BTN_SIZE / 2 + 2, cy - BTN_SIZE / 2 + 2, BTN_SIZE - 4, (BTN_SIZE - 4) * frac, 4);
+        btn.cdTxt.setText(`${Math.ceil(cd.remaining / 1000)}s`);
+      } else {
+        btn.cdTxt.setText('');
+      }
+    });
+  }
+
   private updateMinimap() {
     const cam = this.cameras.main;
     const mapW = GRID_COLS * TILE_SIZE;
     const mapH = GRID_ROWS * TILE_SIZE;
-    const vpW  = GAME_WIDTH;
-    const vpH  = GAME_HEIGHT - UI_TOP_HEIGHT - UI_BOTTOM_HEIGHT;
+    const vpW  = this.scale.width;
+    const vpH  = this.scale.height - UI_TOP_HEIGHT - UI_BOTTOM_HEIGHT;
 
     // Show minimap only when the map doesn't fully fit in the viewport
     const mmFitZoom = Math.min(vpW / mapW, vpH / mapH);
@@ -1108,6 +1302,7 @@ export class GameScene extends Phaser.Scene {
     this.processHealerAura(delta);
     this.updateBossBar();
     this.bottomBar.update();
+    this.updateFloatingAbilities();
 
     // Update HUD
     this.hud.update(

@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { COLORS, GAME_WIDTH, COMBO_MULTIPLIERS } from '../utils/constants';
+import { COLORS, COMBO_MULTIPLIERS } from '../utils/constants';
 import type { WeatherState } from '../systems/WeatherSystem';
 import { SoundSystem } from '../systems/SoundSystem';
 
@@ -22,6 +22,7 @@ export class HUD {
   private comboText:   Phaser.GameObjects.Text;
   private weatherText: Phaser.GameObjects.Text;
   private weatherTimer:Phaser.GameObjects.Text;
+  private bossBg:      Phaser.GameObjects.Graphics;
   private bossBarContainer: Phaser.GameObjects.Container;
   private bossBarFg:   Phaser.GameObjects.Graphics;
   private bossLabel:   Phaser.GameObjects.Text;
@@ -35,7 +36,7 @@ export class HUD {
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
     this.sound = SoundSystem.instance;
-    const W = GAME_WIDTH, H = scene.scale.height;
+    const W = scene.scale.width, H = scene.scale.height;
     const DEPTH = 50;
 
     this.bar = scene.add.graphics().setScrollFactor(0).setDepth(DEPTH);
@@ -99,16 +100,16 @@ export class HUD {
       fontSize: '12px', fontFamily: 'monospace', color: '#ffdd44',
     }).setScrollFactor(0).setDepth(DEPTH + 1);
 
-    const bossBg = scene.add.graphics().setScrollFactor(0);
-    bossBg.fillStyle(COLORS.PANEL_BG, 0.9);
-    bossBg.fillRect(W / 2 - 200, 39, 400, 16);
-    bossBg.lineStyle(1, 0xff2200, 0.8);
-    bossBg.strokeRect(W / 2 - 200, 39, 400, 16);
+    this.bossBg = scene.add.graphics().setScrollFactor(0);
+    this.bossBg.fillStyle(COLORS.PANEL_BG, 0.9);
+    this.bossBg.fillRect(W / 2 - 200, 39, 400, 16);
+    this.bossBg.lineStyle(1, 0xff2200, 0.8);
+    this.bossBg.strokeRect(W / 2 - 200, 39, 400, 16);
     this.bossBarFg = scene.add.graphics().setScrollFactor(0);
     this.bossLabel = scene.add.text(W / 2, 47, '', {
       fontSize: '11px', fontFamily: 'monospace', color: '#ffaaaa', align: 'center',
     }).setOrigin(0.5).setScrollFactor(0);
-    this.bossBarContainer = scene.add.container(0, 0, [bossBg, this.bossBarFg, this.bossLabel])
+    this.bossBarContainer = scene.add.container(0, 0, [this.bossBg, this.bossBarFg, this.bossLabel])
       .setDepth(DEPTH + 3).setScrollFactor(0).setVisible(false);
 
     this.fpsText = scene.add.text(W - 6, H - 96, '', {
@@ -149,6 +150,37 @@ export class HUD {
   }
 
   /** Update pause button appearance when pause state changes. */
+  /** Re-layout all elements for a new screen size. */
+  resize(W: number, H: number) {
+    const DEPTH = 50;
+
+    // Background bar
+    this.bar.clear();
+    this.bar.fillStyle(COLORS.PANEL_BG, 0.92);
+    this.bar.fillRect(0, 0, W, 34);
+    this.bar.lineStyle(1, COLORS.PANEL_BORDER, 1);
+    this.bar.lineBetween(0, 34, W, 34);
+
+    this.waveText.setPosition(W / 2, 5);
+    this.sfxBtn.setPosition(W - 165, 5);
+    this.bgmBtn.setPosition(W - 63, 5);
+    this.pauseBtn.setPosition(W - 260, 5);
+    this.weatherText.setPosition(W - 450, 5);
+    this.weatherTimer.setPosition(W - 520, 5);
+    this.comboText.setPosition(W - 315, 5);
+    this.countdownText.setPosition(W / 2, 44);
+    this.heroText.setPosition(12, H - 96);
+    this.fpsText.setPosition(W - 6, H - 96);
+
+    // Boss bar
+    this.bossBg.clear();
+    this.bossBg.fillStyle(COLORS.PANEL_BG, 0.9);
+    this.bossBg.fillRect(W / 2 - 200, 39, 400, 16);
+    this.bossBg.lineStyle(1, 0xff2200, 0.8);
+    this.bossBg.strokeRect(W / 2 - 200, 39, 400, 16);
+    this.bossLabel.setPosition(W / 2, 47);
+  }
+
   setPaused(paused: boolean) {
     this.pauseBtn.setText(paused ? '▶ [P]' : '⏸ [P]');
     this.pauseBtn.setColor(paused ? '#ff8844' : '#aabbcc');
@@ -209,7 +241,7 @@ export class HUD {
     const frac = Math.max(0, hp / maxHp);
     this.bossBarFg.clear();
     this.bossBarFg.fillStyle(0xff2200, 1);
-    this.bossBarFg.fillRect(GAME_WIDTH / 2 - 199, 40, 398 * frac, 14);
+    this.bossBarFg.fillRect(this.scene.scale.width / 2 - 199, 40, 398 * frac, 14);
     this.bossLabel.setText(label + '  ' + Math.ceil(hp) + ' / ' + maxHp);
   }
 

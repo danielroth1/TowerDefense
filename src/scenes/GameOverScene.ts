@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { COLORS, GAME_WIDTH, GAME_HEIGHT } from '../utils/constants';
+import { COLORS } from '../utils/constants';
 
 export class GameOverScene extends Phaser.Scene {
   constructor() { super('GameOverScene'); }
@@ -10,8 +10,8 @@ export class GameOverScene extends Phaser.Scene {
 
   create() {
     const { wave, kills, gold, won } = this.registry.get('stats');
-    const W = GAME_WIDTH;
-    const H = GAME_HEIGHT;
+    const W = this.scale.width;
+    const H = this.scale.height;
 
     // Background
     const bg = this.add.graphics();

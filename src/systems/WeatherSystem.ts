@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { WEATHER_CHANGE_INTERVAL, GAME_WIDTH, GAME_HEIGHT } from '../utils/constants';
+import { WEATHER_CHANGE_INTERVAL, GRID_COLS, GRID_ROWS, TILE_SIZE } from '../utils/constants';
 
 export type WeatherState = 'sunny' | 'rain' | 'wind' | 'eclipse';
 
@@ -82,8 +82,8 @@ export class WeatherSystem {
     this.overlay.clear();
     this.overlay.setAlpha(1);
 
-    const W = GAME_WIDTH;
-    const H = GAME_HEIGHT;
+    const W = GRID_COLS * TILE_SIZE;
+    const H = GRID_ROWS * TILE_SIZE;
 
     // Helper to add to UI group if set
     const reg = (obj: Phaser.GameObjects.GameObject) => {
@@ -184,7 +184,7 @@ export class WeatherSystem {
     const colors: Record<WeatherState, number> = {
       sunny: 0xffffaa, rain: 0x88aaff, wind: 0xaabbcc, eclipse: 0xaa88ff,
     };
-    const W = GAME_WIDTH;
+    const W = this.scene.scale.width;
     const bg  = this.scene.add.graphics();
     bg.fillStyle(0x000000, 0.7);
     bg.fillRoundedRect(-200, -18, 400, 36, 6);

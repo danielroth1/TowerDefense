@@ -61,8 +61,11 @@ export class Tower extends Phaser.GameObjects.Container {
   // ─── Visual ─────────────────────────────────────────────────────────────
   redraw() {
     this.removeAll(true);
-    const levelKey = Math.min(this.level - 1, 3);
-    const sprite = this.scene.add.image(0, 0, `tower_${this.towerType}_${levelKey}`);
+    const textureKey = (this.evolved && this.evolutionType)
+      ? `tower_${this.evolutionType}`
+      : `tower_${this.towerType}_${Math.min(this.level - 1, 2)}`;
+    const sprite = this.scene.add.image(0, 0, textureKey);
+    sprite.setDisplaySize(44, 44);
     this.add(sprite);
   }
 

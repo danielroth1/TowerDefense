@@ -36,6 +36,16 @@ export class BootScene extends Phaser.Scene {
     // Special tiles
     this.load.image('tile_spawn',    'assets/tiles/tile_spawn.png');
     this.load.image('tile_goal',     'assets/tiles/tile_goal.png');
+
+    // Tower textures (AI-generated, optional — procedural fallback in create())
+    for (const type of TOWER_TYPES_ORDERED) {
+      for (let level = 0; level <= 2; level++) {
+        this.load.image(`tower_${type}_${level}`, `assets/tiles/tower_${type}_${level}.png`);
+      }
+      for (const evo of TOWER_DEFS[type].evolutions) {
+        this.load.image(`tower_${evo.type}`, `assets/tiles/tower_${evo.type}.png`);
+      }
+    }
   }
 
   create() {
@@ -344,11 +354,15 @@ export class BootScene extends Phaser.Scene {
 
     for (const type of TOWER_TYPES_ORDERED) {
       const def = TOWER_DEFS[type];
-      [0, 1, 2, 3].forEach(level => {
+
+      // ── Base levels 0–2 ─────────────────────────────────────────────────
+      [0, 1, 2].forEach(level => {
         const key = `tower_${type}_${level}`;
+        if (this.aiLoadedTiles.has(key)) return; // AI texture loaded successfully
+
         const scale = 1 + level * 0.10;
         const R = Math.round(13 * scale);
-        const color = level === 3 ? def.evolutions[0].color : def.color;
+        const color = def.color;
         g.clear();
 
         // Ground plate
@@ -396,7 +410,7 @@ export class BootScene extends Phaser.Scene {
           case 'square':
             g.fillRoundedRect(C - R + 2, C - R + 2, R * 2 - 4, R * 2 - 4, 3);
             g.strokeRoundedRect(C - R + 2, C - R + 2, R * 2 - 4, R * 2 - 4, 3);
-            // X cross rivet  
+            // X cross rivet
             g.lineStyle(2, Phaser.Display.Color.IntegerToColor(color).darken(20).color, 1);
             g.lineBetween(C - R + 5, C, C + R - 5, C);
             g.lineBetween(C, C - R + 5, C, C + R - 5);
@@ -427,6 +441,88 @@ export class BootScene extends Phaser.Scene {
           g.fillStyle(0xffd700, 0.95);
           g.fillCircle(C - (level - 1) * 4 + i * 8, C + R + 6, 3);
         }
+
+        g.generateTexture(key, S, S);
+      });
+
+      // ── Evolution textures ──────────────────────────────────────────────
+      def.evolutions.forEach((evo) => {
+        const key = `tower_${evo.type}`;
+        if (this.aiLoadedTiles.has(key)) return; // AI texture loaded successfully
+
+        const R = Math.round(13 * 1.30);
+        const color = evo.color;
+        g.clear();
+
+        // Ground plate (amber-tinted for evolved)
+        g.fillStyle(0x332200, 1);
+        g.fillCircle(C, C + 2, R + 5);
+        // Shadow
+        g.fillStyle(0x000000, 0.3);
+        g.fillEllipse(C, C + R + 3, R * 2, 6);
+        // Base with gold rim to signal evolution
+        g.fillStyle(COLORS.TOWER_BASE, 1);
+        g.fillCircle(C, C, R + 4);
+        g.lineStyle(3, 0xffd700, 0.9);
+        g.strokeCircle(C, C, R + 4);
+        // Body
+        g.fillStyle(color, 1);
+        g.lineStyle(2, 0xffffff, 0.4);
+        switch (def.drawShape) {
+          case 'triangle':
+            g.fillTriangle(C, C - R, C + R * 0.9, C + R * 0.7, C - R * 0.9, C + R * 0.7);
+            g.strokeTriangle(C, C - R, C + R * 0.9, C + R * 0.7, C - R * 0.9, C + R * 0.7);
+            g.fillStyle(Phaser.Display.Color.IntegerToColor(color).darken(20).color, 1);
+            g.fillRect(C - 3, C - R, 6, R * 0.6);
+            break;
+          case 'circle':
+            g.fillCircle(C, C, R);
+            g.strokeCircle(C, C, R);
+            g.fillStyle(0xffffff, 0.15);
+            g.fillCircle(C - R * 0.25, C - R * 0.25, R * 0.4);
+            g.fillStyle(Phaser.Display.Color.IntegerToColor(color).darken(30).color, 1);
+            g.fillRect(C - 4, C - R - 6, 8, R * 0.7);
+            break;
+          case 'diamond':
+            g.fillPoints([
+              { x: C, y: C - R }, { x: C + R, y: C },
+              { x: C, y: C + R }, { x: C - R, y: C },
+            ], true);
+            g.lineStyle(1, 0xffffff, 0.4);
+            g.lineBetween(C, C - R, C + R, C);
+            g.lineBetween(C, C - R, C - R, C);
+            break;
+          case 'square':
+            g.fillRoundedRect(C - R + 2, C - R + 2, R * 2 - 4, R * 2 - 4, 3);
+            g.strokeRoundedRect(C - R + 2, C - R + 2, R * 2 - 4, R * 2 - 4, 3);
+            g.lineStyle(2, Phaser.Display.Color.IntegerToColor(color).darken(20).color, 1);
+            g.lineBetween(C - R + 5, C, C + R - 5, C);
+            g.lineBetween(C, C - R + 5, C, C + R - 5);
+            break;
+          case 'star': {
+            const pts = this.starPoints(C, C, R, R * 0.5, 5);
+            g.fillPoints(pts, true);
+            g.strokePoints(pts, true);
+            g.fillStyle(0xffffff, 0.2);
+            g.fillCircle(C, C, R * 0.3);
+            break;
+          }
+          case 'hex': {
+            const pts = this.hexPoints(C, C, R);
+            g.fillPoints(pts, true);
+            g.strokePoints(pts, true);
+            g.fillStyle(Phaser.Display.Color.IntegerToColor(color).darken(25).color, 0.8);
+            const inner = this.hexPoints(C, C, R * 0.55);
+            g.fillPoints(inner, true);
+            break;
+          }
+        }
+
+        // 3 gold pips — evolution marker
+        g.fillStyle(0xffd700, 0.95);
+        g.fillCircle(C - 8, C + R + 6, 3.5);
+        g.fillCircle(C,     C + R + 6, 3.5);
+        g.fillCircle(C + 8, C + R + 6, 3.5);
 
         g.generateTexture(key, S, S);
       });

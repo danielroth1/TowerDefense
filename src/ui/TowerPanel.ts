@@ -51,7 +51,7 @@ export class TowerPanel {
       const BTN_W = 96, BTN_H = 80;
 
       const btnBg  = this.scene.add.graphics();
-      const icon   = this.scene.add.image(bx + BTN_W / 2, by + 28, `tower_${type}_0`).setScale(0.7);
+      const icon   = this.scene.add.image(bx + BTN_W / 2, by + 28, `tower_${type}_0`).setDisplaySize(30, 30);
       const lbl    = this.scene.add.text(bx + BTN_W / 2, by + 54, def.label.split(' ')[0], {
         fontSize: '11px', fontFamily: 'monospace', color: '#eef0f4', align: 'center',
       }).setOrigin(0.5, 0);

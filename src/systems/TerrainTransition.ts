@@ -79,8 +79,12 @@ export function transitionTileKey(terrainId: string, mask: number): string {
 
 // ─── Texture generation ───────────────────────────────────────────────────
 
-const TS = TILE_SIZE;   // 48
-const C  = TS / 2;       // 24 (centre)
+/** Internal generation resolution scale. Higher = sharper AI source sampling
+ *  in transition textures. Textures are generated at TILE_SIZE × GEN_SCALE and
+ *  displayed at TILE_SIZE via Phaser's smooth bilinear downscale. */
+const GEN_SCALE = 4;
+const TS = TILE_SIZE * GEN_SCALE;  // 192
+const C  = TS / 2;                 // 96 (centre)
 
 /**
  * Generate all 16 transition tile textures for a given terrain type and
@@ -101,7 +105,7 @@ export function generateTransitionTextures(
   scene: Phaser.Scene,
   terrainId: string,
   sourceTextureKey?: string,
-  halfWidth: number = 24,
+  halfWidth: number = C,  // centre → full tile coverage at gen resolution
 ): void {
   const noise = getTransitionNoise();
 
@@ -273,17 +277,17 @@ function smoothstepFn(edge0: number, edge1: number, x: number): number {
  * Noise amplitude in pixels — how far the edge can waver from the geometric
  * blob boundary. Larger values = more organic/jagged coast.
  */
-const NOISE_AMP   = 9;
+const NOISE_AMP   = 3 * GEN_SCALE;   // 36
 /**
  * Smooth fade half-width (px) on water-facing sides.
  * The visible blend zone is 2× this wide (feather px of grass fades into water).
  */
-const FEATHER_WATER = 7;
+const FEATHER_WATER = 4 * GEN_SCALE; // 28
 /**
  * Sharp-edge half-width (px) on grass-connecting sides.
  * Kept small so the arm connection is effectively solid.
  */
-const FEATHER_CONN  = 0.5;
+const FEATHER_CONN  = 0.5 * GEN_SCALE; // 2
 /**
  * Zone (px) near a connected tile edge where noise is suppressed to 0.
  * Must be ≥ NOISE_AMP/2 so noise can never create gaps at connections.

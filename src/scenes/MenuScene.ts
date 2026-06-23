@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { COLORS, GAME_WIDTH, GAME_HEIGHT } from '../utils/constants';
+import { COLORS } from '../utils/constants';
 import { hashSeed } from '../utils/helpers';
 
 export class MenuScene extends Phaser.Scene {
@@ -8,8 +8,8 @@ export class MenuScene extends Phaser.Scene {
   constructor() { super('MenuScene'); }
 
   create() {
-    const W = GAME_WIDTH;
-    const H = GAME_HEIGHT;
+    const W = this.scale.width;
+    const H = this.scale.height;
 
     // Dark gradient background
     const bg = this.add.graphics();
@@ -136,8 +136,8 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private showHelp() {
-    const W = GAME_WIDTH;
-    const H = GAME_HEIGHT;
+    const W = this.scale.width;
+    const H = this.scale.height;
 
     // Overlay
     const overlay = this.add.graphics();
@@ -183,8 +183,8 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private drawCornerDecor() {
-    const W = GAME_WIDTH;
-    const H = GAME_HEIGHT;
+    const W = this.scale.width;
+    const H = this.scale.height;
     const g = this.add.graphics();
     const towerColor = COLORS.TOWER_CANNON;
     const baseColor  = COLORS.TOWER_BASE;
