@@ -85,6 +85,21 @@
     .model-info .price {
       color: var(--green);
     }
+    .pricing-badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 3px;
+      margin-left: 6px;
+      vertical-align: middle;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .pricing-badge.megapixel { background: rgba(63,185,80,0.15); color: var(--green); }
+    .pricing-badge.image     { background: rgba(88,166,255,0.15); color: var(--accent); }
+    .pricing-badge.gpu       { background: rgba(210,153,29,0.15); color: var(--yellow); }
+    .pricing-badge.unknown   { background: rgba(139,148,158,0.12); color: var(--muted); }
 
     /* Tile presets */
     .preset-grid {
@@ -586,6 +601,10 @@
       </div>
       <button class="generate-btn" id="generateBtn" disabled>✨ Generate Tile</button>
       <div class="status" id="status"></div>
+      <div class="model-info" id="estimateLine" style="margin-top:6px;">
+        Est. cost: <span class="price" id="estimateDisplay">—</span>
+        <span style="font-size:10px;color:var(--muted);margin-left:2px;">(via fal.ai)</span>
+      </div>
     </div>
   </aside>
 
@@ -738,12 +757,67 @@
       },
     };
 
-    const MODEL_INFO = {
-      'fal-ai/fast-sdxl': { cost: 'GPU per-sec', speed: '~2s' },
-      'fal-ai/flux/schnell': { cost: '$0.003/MP', speed: '~3s' },
-      'fal-ai/flux/dev': { cost: '$0.025/MP', speed: '~5s' },
-      'fal-ai/stable-diffusion-v3.5': { cost: '~$0.004/img', speed: '~4s' },
-    };
+    // Pricing cache — populated from /api/pricing (fal.ai Platform API)
+    const modelPricingCache = {};
+
+    function pricingBadge(type) {
+      const labels = { image: 'per img', video: 'per vid', megapixel: 'per MP', gpu: 'GPU', unknown: 'no info' };
+      const t = type || 'unknown';
+      return `<span class="pricing-badge ${t}">${labels[t] || labels.unknown}</span>`;
+    }
+
+    async function fetchPricing(ids) {
+      if (ids.length === 0) return;
+      const uncached = ids.filter(id => !modelPricingCache[id]);
+      if (uncached.length === 0) return; // All cached
+
+      try {
+        const resp = await fetch(`/api/pricing?ids=${encodeURIComponent(uncached.join(','))}`);
+        const data = await resp.json();
+        if (data.prices) {
+          Object.assign(modelPricingCache, data.prices);
+        }
+      } catch (err) {
+        console.error('Failed to fetch pricing', err);
+      }
+    }
+
+    async function fetchEstimate() {
+      const model = $model.value;
+      const width = parseInt($width.value) || 512;
+      const height = parseInt($height.value) || 512;
+      if (!model) return;
+
+      try {
+        const resp = await fetch('/api/estimate-cost', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, width, height }),
+        });
+        if (!resp.ok) {
+          $estimateDisplay.textContent = '—';
+          return;
+        }
+        const data = await resp.json();
+        if (data.estimatedCost != null) {
+          const localNote = data.local ? ' <span style="font-size:9px;color:var(--yellow)">(est)</span>' : '';
+          $estimateDisplay.innerHTML = `~$${data.estimatedCost.toFixed(4)} <span style="font-size:10px;color:var(--muted)">${data.currency}</span>${localNote}`;
+        } else if (data.estimatedCost === 0 && !data.local) {
+          // Pricing not available yet, don't show zero
+          $estimateDisplay.textContent = 'loading…';
+        } else {
+          $estimateDisplay.textContent = '—';
+        }
+      } catch {
+        $estimateDisplay.textContent = '—';
+      }
+    }
+
+    let _estimateDebounceTimer = null;
+    function scheduleEstimate() {
+      clearTimeout(_estimateDebounceTimer);
+      _estimateDebounceTimer = setTimeout(fetchEstimate, 600);
+    }
 
     // ─── State ──────────────────────────────────────────────────
     let currentPreset = 'water';
@@ -773,6 +847,7 @@
     const $modelSearch = document.getElementById('modelSearch');
     const $modelList = document.getElementById('modelList');
     const $modelCount = document.getElementById('modelCount');
+    const $estimateDisplay = document.getElementById('estimateDisplay');
 
     let allModels = []; // cached from /api/models
     let currentSort = 'name'; // 'name' | 'cost-asc' | 'cost-desc'
@@ -789,7 +864,7 @@
       document.querySelectorAll('.preset-btn[data-tower]').forEach((btn) => {
         btn.addEventListener('click', () => applyTowerType(btn.dataset.tower));
       });
-      $model.addEventListener('change', updateModelInfo);
+      $model.addEventListener('change', () => { updateModelInfo(); scheduleEstimate(); });
       $generateBtn.addEventListener('click', generateTile);
       $browseModelsBtn.addEventListener('click', openModelBrowser);
       $modelModalClose.addEventListener('click', closeModelBrowser);
@@ -800,7 +875,11 @@
       document.querySelectorAll('.sort-btn').forEach(btn => {
         btn.addEventListener('click', () => setSort(btn.dataset.sort));
       });
+      // Debounced estimate on dimension changes
+      $width.addEventListener('input', scheduleEstimate);
+      $height.addEventListener('input', scheduleEstimate);
       updateModelInfo();
+      // Don't call estimate on init — wait for user to open model browser
       loadTileList();
     }
 
@@ -848,6 +927,7 @@
       $width.value = 512;
       $height.value = 512;
       $generateBtn.disabled = false;
+      scheduleEstimate();
 
       document.querySelectorAll('.preset-btn[data-tower-variant]').forEach(b =>
         b.classList.toggle('active', parseInt(b.dataset.towerVariant) === index)
@@ -866,22 +946,26 @@
       $autoRemoveBg.checked = false;
       document.querySelectorAll('.preset-btn[data-preset]').forEach((b) => b.classList.toggle('active', b.dataset.preset === name));
       $generateBtn.disabled = false;
+      scheduleEstimate();
     }
 
     function updateModelInfo() {
       const modelId = $model.value;
-      let info = MODEL_INFO[modelId];
-      if (!info) {
-        // Look up from allModels pricing
-        const m = allModels.find(x => x.id === modelId);
-        const p = m?.pricing;
-        if (p && p.cost && p.cost !== '—') {
-          info = { cost: `${p.cost}${p.unit || ''}`, speed: '?' };
-        } else {
-          info = { cost: '?', speed: '?' };
-        }
+      const p = modelPricingCache[modelId];
+      let costStr, badge, type;
+      if (p && p.cost && p.cost !== '—') {
+        costStr = `${p.cost}${p.unit || ''}`;
+        type = p.type || 'unknown';
+        badge = pricingBadge(type);
+      } else {
+        costStr = '?';
+        type = 'unknown';
+        badge = pricingBadge('unknown');
+        // Lazy-fetch pricing for unknown models
+        fetchPricing([modelId]).then(() => updateModelInfo());
       }
-      $modelInfo.innerHTML = `Cost: <span class="price">${info.cost}</span> &bull; Speed: ${info.speed}`;
+      $modelInfo.innerHTML = `Cost: <span class="price">${costStr}</span>${badge} &bull; Speed: ?`;
+      // Don't auto-estimate here — caller decides
     }
 
     // ─── Model Browser ──────────────────────────────────────────
@@ -890,6 +974,13 @@
       if (allModels.length === 0) {
         $modelList.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted);font-size:13px;">Loading models…</div>';
         await fetchModels();
+      }
+      // Fetch pricing for all models (cached, so fast on subsequent opens)
+      const ids = allModels.map(m => m.id);
+      await fetchPricing(ids);
+      // Merge pricing into model objects for rendering
+      for (const m of allModels) {
+        m.pricing = modelPricingCache[m.id] || { cost: '—', unit: '', type: 'unknown', note: 'No price info' };
       }
       renderModelList(sortModels(allModels, currentSort));
     }
@@ -942,7 +1033,10 @@
       document.querySelectorAll('.sort-btn').forEach(b =>
         b.classList.toggle('active', b.dataset.sort === sortKey)
       );
-      // Re-render with current filtered + sorted list
+      // Merge cached pricing then re-render
+      for (const m of allModels) {
+        m.pricing = modelPricingCache[m.id] || { cost: '—', unit: '', type: 'unknown', note: 'No price info' };
+      }
       const q = $modelSearch.value.toLowerCase().trim();
       const source = q ? allModels.filter(m =>
         m.name.toLowerCase().includes(q) ||
@@ -961,15 +1055,16 @@
       }
       $modelList.innerHTML = models.map(m => {
         const isSelected = m.id === selectedId;
-        const p = m.pricing || {};
+        const p = m.pricing || { cost: '—', unit: '', type: 'unknown', note: 'No price info' };
         const priceStr = p.cost && p.cost !== '—' ? `${p.cost}${p.unit || ''}` : '—';
-        const noteStr = p.note ? ` <span class="note">${p.note}</span>` : '';
+        const badge = pricingBadge(p.type || 'unknown');
+        const noteStr = p.note && p.note !== 'No price info' ? ` <span class="note">${p.note}</span>` : '';
         return `<div class="model-row${isSelected ? ' selected' : ''}" data-model-id="${m.id}">
           <div style="flex:1;min-width:0;">
             <div class="model-name">${m.name}</div>
             <div class="model-id">${m.id}</div>
           </div>
-          <div class="model-price">${priceStr}${noteStr}</div>
+          <div class="model-price">${priceStr}${badge}${noteStr}</div>
           ${isSelected ? '<span class="check-mark">✓</span>' : `<button class="model-select-btn">Select</button>`}
         </div>`;
       }).join('');
@@ -991,6 +1086,9 @@
         m.id.toLowerCase().includes(q) ||
         (m.description && m.description.toLowerCase().includes(q))
       ) : allModels;
+      for (const m of source) {
+        m.pricing = modelPricingCache[m.id] || { cost: '—', unit: '', type: 'unknown', note: 'No price info' };
+      }
       renderModelList(sortModels(source, currentSort));
     }
 
@@ -1008,13 +1106,15 @@
         // Add it dynamically
         const opt = document.createElement('option');
         opt.value = modelId;
-        // Try to find the display name from allModels
         const m = allModels.find(x => x.id === modelId);
         opt.textContent = m ? m.name : modelId;
         $model.appendChild(opt);
         $model.value = modelId;
       }
       updateModelInfo();
+      scheduleEstimate();
+      // Ensure pricing is cached for the selected model
+      fetchPricing([modelId]).then(() => updateModelInfo());
     }
 
     // ─── Generate ───────────────────────────────────────────────

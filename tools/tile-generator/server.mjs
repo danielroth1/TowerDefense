@@ -28,48 +28,70 @@ const MIME = {
   '.svg': 'image/svg+xml',
 };
 
-// Known pricing for fal.ai text-to-image models (per megapixel or per image).
-// Sources: official fal.ai pricing page, individual model pages, and docs.
-// Models not listed here use GPU-based (per-second) pricing or vary.
-const MODEL_PRICING = {
-  'fal-ai/fast-sdxl':                     { cost: 'GPU per-sec', unit: '', note: 'GPU-based pricing' },
-  'fal-ai/flux/schnell':                  { cost: '$0.003',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/flux-1/schnell':                { cost: '$0.003',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/flux/dev':                      { cost: '$0.025',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/flux-lora':                     { cost: '$0.025',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/flux-pro/v1.1':                 { cost: '$0.045',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/flux-pro/v1.1-ultra':           { cost: '$0.065',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/flux-pro/kontext/text-to-image':{ cost: '$0.040',     unit: '/img', note: 'per image' },
-  'fal-ai/flux-2':                        { cost: '$0.030',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/flux-2/turbo':                  { cost: '$0.015',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/flux-2/flash':                  { cost: '$0.005',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/flux-2/klein/9b':               { cost: '$0.015',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/flux-2-pro':                    { cost: '$0.050',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/flux-2-max':                    { cost: '$0.080',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/flux-2-flex':                   { cost: '$0.020',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/nano-banana':                   { cost: '$0.005',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/nano-banana-2':                 { cost: '$0.005',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/nano-banana-pro':               { cost: '$0.040',     unit: '/img', note: 'per image' },
-  'fal-ai/gemini-25-flash-image':         { cost: '$0.002',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/gemini-3-pro-image-preview':    { cost: '$0.005',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/gemini-3.1-flash-image-preview':{ cost: '$0.003',     unit: '/MP', note: 'per megapixel' },
-  'openai/gpt-image-2':                   { cost: '$0.040',     unit: '/img', note: 'per image (1MP)' },
-  'fal-ai/gpt-image-1.5':                 { cost: '$0.030',     unit: '/img', note: 'per image (1MP)' },
-  'fal-ai/gpt-image-1/text-to-image':     { cost: '$0.020',     unit: '/img', note: 'per image (1MP)' },
-  'xai/grok-imagine-image':               { cost: '$0.003',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/bytedance/seedream/v4/text-to-image':   { cost: '$0.030', unit: '/img', note: 'per image (1MP)' },
-  'fal-ai/bytedance/seedream/v4.5/text-to-image': { cost: '$0.030', unit: '/img', note: 'per image (1MP)' },
-  'fal-ai/bytedance/seedream/v5/lite/text-to-image':{ cost:'$0.020', unit:'/img', note:'per image (1MP)' },
-  'fal-ai/ideogram/v3':                   { cost: '$0.003',     unit: '/MP', note: 'per megapixel' },
-  'ideogram/v4':                          { cost: '$0.004',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/recraft/v3/text-to-image':      { cost: '$0.004',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/recraft/v4/text-to-image':      { cost: '$0.006',     unit: '/MP', note: 'per megapixel' },
-  'krea/v2/large/text-to-image':          { cost: '$0.004',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/z-image/turbo':                 { cost: '$0.002',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/z-image/turbo/lora':            { cost: '$0.002',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/qwen-image':                    { cost: '$0.020',     unit: '/MP', note: 'per megapixel' },
-  'fal-ai/flux-2/lora':                   { cost: '$0.030',     unit: '/MP', note: 'per megapixel' },
-};
+// Pricing cache — fetched live from fal.ai's Platform API.
+// Cache TTL: 1 hour (pricing doesn't change frequently).
+const _pricingCache = new Map(); // endpoint_id → { unit_price, unit, currency, fetched_at }
+
+async function fetchPricingFromFal(endpointIds) {
+  if (!FAL_KEY) return {};
+  // Filter out cached entries (fetched within the last hour)
+  const now = Date.now();
+  const toFetch = endpointIds.filter(id => {
+    const cached = _pricingCache.get(id);
+    return !cached || (now - cached.fetched_at) > 3_600_000;
+  });
+
+  if (toFetch.length === 0) {
+    // All cached — return from cache
+    const result = {};
+    for (const id of endpointIds) result[id] = _pricingCache.get(id);
+    return result;
+  }
+
+  // Fetch in batches of 50 (API limit)
+  const results = {};
+  for (let i = 0; i < toFetch.length; i += 50) {
+    const batch = toFetch.slice(i, i + 50);
+    const url = `https://api.fal.ai/v1/models/pricing?${batch.map(id => `endpoint_id=${encodeURIComponent(id)}`).join('&')}`;
+    try {
+      const resp = await fetch(url, { headers: { 'Authorization': `Key ${FAL_KEY}` } });
+      if (!resp.ok) {
+        console.error(`[pricing] HTTP ${resp.status} fetching batch of ${batch.length} IDs`);
+        continue;
+      }
+      const data = await resp.json();
+      for (const p of (data.prices || [])) {
+        const entry = { ...p, fetched_at: now };
+        _pricingCache.set(p.endpoint_id, entry);
+        results[p.endpoint_id] = entry;
+      }
+    } catch (err) {
+      console.error(`[pricing] Error fetching batch:`, err.message);
+    }
+  }
+
+  // Merge with cache for any IDs that weren't in the fetch batches
+  for (const id of endpointIds) {
+    if (!results[id]) results[id] = _pricingCache.get(id) || null;
+  }
+
+  return results;
+}
+
+function classifyPricing(p) {
+  if (!p || p.unit_price == null) return { cost: '—', unit: '', type: 'unknown', note: 'No price info' };
+  const price = `$${p.unit_price.toFixed(p.unit_price < 0.01 ? 4 : 3)}`;
+  // Real fal.ai unit values: "megapixels", "images", "units", "compute seconds"
+  let unitLabel, type;
+  switch (p.unit) {
+    case 'megapixels':     unitLabel = '/MP';  type = 'megapixel'; break;
+    case 'images':         unitLabel = '/img'; type = 'image';     break;
+    case 'units':          unitLabel = '/unit';type = 'image';     break; // treat like per-image
+    case 'compute seconds':unitLabel = '/sec'; type = 'gpu';       break;
+    default:               unitLabel = `/${p.unit || 'unit'}`; type = 'unknown'; break;
+  }
+  return { cost: price, unit: unitLabel, type, note: `per ${p.unit || 'unit'}` };
+}
 
 function serveFile(res, path, mime) {
   try {
@@ -282,8 +304,7 @@ const server = createServer(async (req, res) => {
         .filter(m => m.metadata?.category === 'text-to-image' && m.metadata?.status === 'active')
         .map(m => {
           const eid = m.endpoint_id;
-          const price = MODEL_PRICING[eid] || { cost: '—', unit: '', note: '' };
-          // Shorten display name: remove "Text To Image", "API" suffix
+          // Pricing is fetched separately via /api/pricing — stub with unknown
           let dn = m.metadata.display_name
             .replace(/ Text To Image$/, '')
             .replace(/ API$/, '');
@@ -291,7 +312,7 @@ const server = createServer(async (req, res) => {
             id: eid,
             name: dn,
             description: (m.metadata.description || '').split('\n')[0].slice(0, 200),
-            pricing: price,
+            pricing: null, // filled by client via /api/pricing
           };
         })
         .sort((a, b) => a.name.localeCompare(b.name));
@@ -301,6 +322,129 @@ const server = createServer(async (req, res) => {
       return json(res, { error: String(err) }, 500);
     }
   }
+
+  // ─── API: fetch live pricing from fal.ai Platform API ────────────────
+  if (pathname === '/api/pricing' && req.method === 'GET') {
+    if (!FAL_KEY) return json(res, { error: 'FAL_AI_KEY not set' }, 500);
+    const idsParam = url.searchParams.get('ids');
+    if (!idsParam) return json(res, { error: 'Missing ?ids= comma-separated endpoint IDs' }, 400);
+    const ids = [...new Set(idsParam.split(',').map(s => s.trim()).filter(Boolean))];
+    if (ids.length === 0) return json(res, { error: 'No valid IDs' }, 400);
+    if (ids.length > 200) return json(res, { error: 'Too many IDs (max 200)' }, 400);
+
+    try {
+      const raw = await fetchPricingFromFal(ids);
+      const prices = {};
+      for (const id of ids) {
+        prices[id] = raw[id] ? classifyPricing(raw[id]) : { cost: '—', unit: '', type: 'unknown', note: 'No price info' };
+      }
+      return json(res, { prices });
+    } catch (err) {
+      console.error('[pricing] Error:', err);
+      return json(res, { error: String(err) }, 500);
+    }
+  }
+
+// Estimate cache — short-lived (30s) to avoid hammering fal.ai on every keystroke
+const _estimateCache = new Map(); // key: "model:w:h" → { estimatedCost, currency, ... }
+
+  // ─── API: estimate generation cost ───────────────────────────────────
+  if (pathname === '/api/estimate-cost' && req.method === 'POST') {
+    if (!FAL_KEY) return json(res, { error: 'FAL_AI_KEY not set' }, 500);
+
+    const body = await readBody(req);
+    let params;
+    try { params = JSON.parse(body); } catch {
+      return json(res, { error: 'Invalid JSON' }, 400);
+    }
+
+    const { model, width, height } = params;
+    if (!model) return json(res, { error: 'Missing model' }, 400);
+
+    const w = parseInt(width) || 512;
+    const h = parseInt(height) || 512;
+    const megapixels = (w * h) / 1_000_000;
+
+    // Check short-lived cache (30s TTL)
+    const cacheKey = `${model}:${w}:${h}`;
+    const cached = _estimateCache.get(cacheKey);
+    if (cached && (Date.now() - cached.ts) < 30_000) {
+      return json(res, cached.data);
+    }
+
+    try {
+      // First get pricing to determine the unit type
+      const raw = await fetchPricingFromFal([model]);
+      const priceInfo = raw[model];
+
+      // Determine unit_quantity based on the billing unit
+      let unitQuantity;
+      if (priceInfo?.unit === 'megapixels') {
+        unitQuantity = Math.max(0.001, megapixels);
+      } else if (priceInfo?.unit === 'images' || priceInfo?.unit === 'units') {
+        unitQuantity = 1;
+      } else if (priceInfo?.unit === 'compute seconds') {
+        unitQuantity = 1;
+      } else {
+        unitQuantity = Math.max(0.001, megapixels);
+      }
+
+      const resp = await fetch('https://api.fal.ai/v1/models/pricing/estimate', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Key ${FAL_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          estimate_type: 'unit_price',
+          endpoints: { [model]: { unit_quantity: parseFloat(unitQuantity.toFixed(6)) } },
+        }),
+      });
+
+      if (!resp.ok) {
+        const errText = await resp.text();
+        // Rate limited — return a rough local estimate and cache it too
+        if (resp.status === 429) {
+          console.warn(`[estimate] Rate limited, using local estimate for ${model}`);
+          const fallback = computeLocalEstimate(priceInfo, unitQuantity);
+          _estimateCache.set(cacheKey, { data: fallback, ts: Date.now() });
+          return json(res, fallback);
+        }
+        console.error(`[estimate] HTTP ${resp.status}: ${errText.slice(0, 300)}`);
+        return json(res, { error: `Estimate failed: HTTP ${resp.status}` }, 500);
+      }
+
+      const data = await resp.json();
+      const result = {
+        estimatedCost: data.total_cost,
+        currency: data.currency || 'USD',
+        megapixels: parseFloat(megapixels.toFixed(4)),
+        unitQuantity: parseFloat(unitQuantity.toFixed(6)),
+        unit: priceInfo?.unit || 'unknown',
+      };
+      // Cache the result
+      _estimateCache.set(cacheKey, { data: result, ts: Date.now() });
+      return json(res, result);
+    } catch (err) {
+      console.error('[estimate] Error:', err);
+      return json(res, { error: String(err) }, 500);
+    }
+  }
+
+/** Compute a rough local estimate when the fal.ai estimate API is unavailable. */
+function computeLocalEstimate(priceInfo, unitQuantity) {
+  if (!priceInfo || priceInfo.unit_price == null) {
+    return { estimatedCost: 0, currency: 'USD', megapixels: 0, unitQuantity, unit: 'unknown', local: true };
+  }
+  return {
+    estimatedCost: parseFloat((priceInfo.unit_price * unitQuantity).toFixed(6)),
+    currency: priceInfo.currency || 'USD',
+    megapixels: 0,
+    unitQuantity: parseFloat(unitQuantity.toFixed(6)),
+    unit: priceInfo.unit || 'unknown',
+    local: true,
+  };
+}
 
   // ─── API: test/health check ──────────────────────────────────────────
   if (pathname === '/api/test' && req.method === 'GET') {
