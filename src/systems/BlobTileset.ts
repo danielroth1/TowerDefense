@@ -24,16 +24,26 @@ const B_N = 0x1, B_E = 0x2, B_S = 0x4, B_W = 0x8;
 
 /** Return the blob bitmask for a grid cell (0-15). */
 export function computeBlobMask(grid: GridTile[][], row: number, col: number): number {
+  const tile = grid[row][col];
+  const pi = tile.pathIndex;
+  if (pi < 0) return 0; // Not a path cell
   let mask = 0;
-  if (row > 0            && isPath(grid[row - 1][col])) mask |= B_N;
-  if (row < GRID_ROWS - 1 && isPath(grid[row + 1][col])) mask |= B_S;
-  if (col > 0            && isPath(grid[row][col - 1])) mask |= B_W;
-  if (col < GRID_COLS - 1 && isPath(grid[row][col + 1])) mask |= B_E;
+  if (row > 0            && isPathConnected(grid[row - 1][col], pi)) mask |= B_N;
+  if (row < GRID_ROWS - 1 && isPathConnected(grid[row + 1][col], pi)) mask |= B_S;
+  if (col > 0            && isPathConnected(grid[row][col - 1], pi)) mask |= B_W;
+  if (col < GRID_COLS - 1 && isPathConnected(grid[row][col + 1], pi)) mask |= B_E;
   return mask;
 }
 
-function isPath(t: GridTile): boolean {
-  return t.type === 'path' || t.type === 'spawn' || t.type === 'goal';
+/**
+ * Two path cells should only be visually connected if they are consecutive
+ * along the path. Without this check, path cells that are cardinally adjacent
+ * but not consecutive (e.g. when the path loops back near itself) would
+ * incorrectly show a blob connection.
+ */
+function isPathConnected(t: GridTile, fromIndex: number): boolean {
+  return (t.type === 'path' || t.type === 'spawn' || t.type === 'goal')
+    && Math.abs(t.pathIndex - fromIndex) === 1;
 }
 
 /** Texture key for a given blob mask. */
