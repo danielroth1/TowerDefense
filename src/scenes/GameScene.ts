@@ -637,10 +637,8 @@ export class GameScene extends Phaser.Scene {
         return;
       }
 
-      if (tile.type !== 'buildable') {
-        // Clicking empty non-buildable space = deselect everything
-        this.deselectTower();
-      }
+      // Clicking any empty tile deselects the tower
+      this.deselectTower();
       return;
     }
 
