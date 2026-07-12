@@ -648,67 +648,67 @@
 
   <script>
     // ─── Constants ──────────────────────────────────────────────
-    const STYLE_SUFFIX = 'top-down 2D cartoon fantasy tower defense game sprite, viewed directly from above, flat orthographic perspective, no 3D, clean crisp pixel art style, isolated on square canvas, dark circular stone base platform, subtle drop shadow';
+    const STYLE_SUFFIX = 'completely flat 2D icon viewed from absolute 90-degree vertical top-down perspective, looking straight down from the sky, perfectly flat with zero depth, no side walls visible, no perspective lines, crisp clean 16-bit pixel art style, solid colors, sharp outlines, absolutely no 3D shading, no gradients, no depth, looks like a flat UI element or 2D map texture or floor emblem, isolated on a solid neutral background';
 
     const TOWER_PRESETS = {
       arrow: {
         label: 'Arrow Tower', color: '#5ab050',
         variants: [
-          { label: 'Mk I',  file: 'tower_arrow_0', prompt: `Simple wooden arrow tower, green wood triangle arrowhead shape, rough timber construction, single straight arrow barrel pointing upward (12 o'clock), Mk I basic level, ${STYLE_SUFFIX}` },
-          { label: 'Mk II', file: 'tower_arrow_1', prompt: `Reinforced arrow tower, iron-banded green wood triangle, sharper arrowhead shape, two arrow barrels pointing upward, battle-worn iron tip, Mk II upgraded, ${STYLE_SUFFIX}` },
-          { label: 'Mk III',file: 'tower_arrow_2', prompt: `Master archer tower, ornate deep green gilded triangle arrowhead, golden trim, long polished barrel pointing upward, three arrow slots, Mk III elite, ${STYLE_SUFFIX}` },
-          { label: 'Crossbow', file: 'tower_crossbow', color: '#aaccff', prompt: `Crossbow evolution tower, light blue steel mechanical crossbow launcher, wide spread triple-bolt arm mechanism, three arrow barrels fanned out pointing upward, pale blue metallic glow, gold rim base, evolved tower, ${STYLE_SUFFIX}` },
-          { label: 'Sniper',   file: 'tower_sniper',   color: '#3355ff', prompt: `Sniper evolution tower, dark royal blue precision rifle nest, single very long thin barrel pointing straight upward (12 o'clock), scope glint, extreme-range marksman platform, midnight blue with silver accents, gold rim base, evolved tower, ${STYLE_SUFFIX}` },
+          { label: 'Mk I',  file: 'tower_arrow_0', prompt: `A completely flat 2D pixel art icon of a basic arrow tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a flat green triangle arrowhead shape, with a single straight arrow barrel graphic pointing directly to the top of the frame (12 o\'clock). Rough timber construction, basic level. ${STYLE_SUFFIX}` },
+          { label: 'Mk II', file: 'tower_arrow_1', prompt: `A completely flat 2D pixel art icon of a reinforced arrow tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a flat green triangle shape, two arrow barrel graphics pointing upward (12 o\'clock), battle-worn iron tip details. Mk II upgraded. ${STYLE_SUFFIX}` },
+          { label: 'Mk III',file: 'tower_arrow_2', prompt: `A completely flat 2D pixel art icon of a master archer tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it an ornate deep green flat triangle shape with golden trim edges, long polished barrel graphic pointing to 12 o\'clock, three arrow slot graphics. Mk III elite. ${STYLE_SUFFIX}` },
+          { label: 'Crossbow', file: 'tower_crossbow', color: '#aaccff', prompt: `A completely flat 2D pixel art icon of a crossbow tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a light blue steel mechanical crossbow shape, wide triple-bolt arm mechanism graphic, three arrow barrels fanned upward from center. Pale blue metallic, gold rim base. ${STYLE_SUFFIX}` },
+          { label: 'Sniper',   file: 'tower_sniper',   color: '#3355ff', prompt: `A completely flat 2D pixel art icon of a sniper tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a dark royal blue precision rifle design, single very long thin barrel graphic pointing straight upward (12 o\'clock), scope glint detail, midnight blue with silver accents, gold rim base. ${STYLE_SUFFIX}` },
         ],
       },
       cannon: {
         label: 'Cannon Tower', color: '#8899aa',
         variants: [
-          { label: 'Mk I',  file: 'tower_cannon_0', prompt: `Stone cannon tower, grey circular fortress base, short iron cannon barrel pointing upward (12 o'clock) for rotation, Mk I basic heavy cannon, rotatable turret design, ${STYLE_SUFFIX}` },
-          { label: 'Mk II', file: 'tower_cannon_1', prompt: `Iron cannon tower, dark grey reinforced circular fortress, medium-length cannon barrel pointing upward (12 o'clock), cannonball slots on sides, Mk II upgraded, rotatable turret, ${STYLE_SUFFIX}` },
-          { label: 'Mk III',file: 'tower_cannon_2', prompt: `Heavy fortress cannon, massive dark iron circular fortress, thick wide barrel pointing upward (12 o'clock), smoke rings, imposing war machine, Mk III elite, rotatable turret, ${STYLE_SUFFIX}` },
-          { label: 'Railgun', file: 'tower_railgun', color: '#ff9955', prompt: `Railgun evolution tower, orange electromagnetic barrel pointing upward (12 o'clock), glowing magnetic coils along the barrel, orange plasma energy glow, sci-fi cannon on circular fortress base, gold rim base, evolved tower, rotatable barrel, ${STYLE_SUFFIX}` },
-          { label: 'Mortar',  file: 'tower_mortar',  color: '#ff3300', prompt: `Mortar evolution tower, red large-bore mortar launcher, wide short stubby barrel pointing upward (12 o'clock), red-orange blast plate, circular base with explosion crater marks, gold rim, evolved tower, ${STYLE_SUFFIX}` },
+          { label: 'Mk I',  file: 'tower_cannon_0', prompt: `A completely flat 2D pixel art icon of a basic cannon tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a flat grey circular fortress shape, short iron cannon barrel graphic pointing to the top of the frame (12 o\'clock). Mk I basic heavy cannon. ${STYLE_SUFFIX}` },
+          { label: 'Mk II', file: 'tower_cannon_1', prompt: `A completely flat 2D pixel art icon of an iron cannon tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a dark grey flat circular fortress shape, medium-length cannon barrel graphic pointing to 12 o\'clock, cannonball slot graphics on sides. Mk II upgraded. ${STYLE_SUFFIX}` },
+          { label: 'Mk III',file: 'tower_cannon_2', prompt: `A completely flat 2D pixel art icon of a heavy fortress cannon, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a massive dark iron flat circular shape, thick wide barrel graphic pointing to 12 o\'clock, smoke ring graphics around the barrel. Mk III elite. ${STYLE_SUFFIX}` },
+          { label: 'Railgun', file: 'tower_railgun', color: '#ff9955', prompt: `A completely flat 2D pixel art icon of a railgun tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it an orange electromagnetic barrel graphic pointing to 12 o\'clock, glowing magnetic coil rings along the barrel, orange plasma energy glow. Sci-fi, gold rim base. ${STYLE_SUFFIX}` },
+          { label: 'Mortar',  file: 'tower_mortar',  color: '#ff3300', prompt: `A completely flat 2D pixel art icon of a mortar tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a red large-bore mortar shape, wide short stubby barrel graphic pointing to 12 o\'clock, red-orange blast plate graphic, explosion crater marks around the edge. Gold rim base. ${STYLE_SUFFIX}` },
         ],
       },
       ice: {
         label: 'Ice Tower', color: '#44aaee',
         variants: [
-          { label: 'Mk I',  file: 'tower_ice_0', prompt: `Ice crystal tower, pale blue diamond-shaped ice spire, four-pointed symmetrical diamond cross, thin frost crystals at tips, Mk I basic cold, ${STYLE_SUFFIX}` },
-          { label: 'Mk II', file: 'tower_ice_1', prompt: `Frost tower, mid blue diamond spire with jagged ice shards at tips, snowflake pattern on surface, cold blue glow, Mk II upgraded, ${STYLE_SUFFIX}` },
-          { label: 'Mk III',file: 'tower_ice_2', prompt: `Arctic ice spire, brilliant deep blue diamond tower, large sharp ice shard tips, frozen aura shimmer, frost particle field, Mk III elite, ${STYLE_SUFFIX}` },
-          { label: 'Blizzard',   file: 'tower_blizzard',   color: '#99eeff', prompt: `Blizzard evolution tower, pale cyan ice diamond center with large circular swirling snowflake frost aura ring around it, constant slow field emitter, light blue vortex, gold rim base, evolved tower, ${STYLE_SUFFIX}` },
-          { label: 'Permafrost', file: 'tower_permafrost', color: '#2299cc', prompt: `Permafrost evolution tower, deep ocean blue diamond tower, dark runic engravings on surface, heavy permafrost rune circle at base, solid dark blue frozen platform, gold rim, evolved tower, ${STYLE_SUFFIX}` },
+          { label: 'Mk I',  file: 'tower_ice_0', prompt: `A completely flat 2D pixel art icon of an ice tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a pale blue flat 4-pointed diamond cross shape, thin frost crystal tip graphics at the four points. Mk I basic cold. ${STYLE_SUFFIX}` },
+          { label: 'Mk II', file: 'tower_ice_1', prompt: `A completely flat 2D pixel art icon of a frost tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a mid blue flat diamond shape with jagged ice shard tip graphics, snowflake pattern graphic on the surface, cold blue glow. Mk II upgraded. ${STYLE_SUFFIX}` },
+          { label: 'Mk III',file: 'tower_ice_2', prompt: `A completely flat 2D pixel art icon of an arctic ice spire, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a brilliant deep blue flat diamond shape, large sharp ice shard tip graphics, frozen aura shimmer rings. Mk III elite. ${STYLE_SUFFIX}` },
+          { label: 'Blizzard',   file: 'tower_blizzard',   color: '#99eeff', prompt: `A completely flat 2D pixel art icon of a blizzard tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a pale cyan ice diamond center with a large circular swirling snowflake frost aura ring graphic around it, light blue vortex spiral. Gold rim base. ${STYLE_SUFFIX}` },
+          { label: 'Permafrost', file: 'tower_permafrost', color: '#2299cc', prompt: `A completely flat 2D pixel art icon of a permafrost tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a deep ocean blue flat diamond shape, dark runic engraving graphics on the surface, permafrost rune circle graphic at the edge. Gold rim base. ${STYLE_SUFFIX}` },
         ],
       },
       lightning: {
         label: 'Lightning Tower', color: '#ffdd22',
         variants: [
-          { label: 'Mk I',  file: 'tower_lightning_0', prompt: `Lightning rod tower, yellow 5-pointed star shape, small electric sparks at each tip, lightning rod spike pointing upward, Mk I basic electric, ${STYLE_SUFFIX}` },
-          { label: 'Mk II', file: 'tower_lightning_1', prompt: `Tesla coil tower, golden yellow star shape with electric arcs between tips, glowing orange orb center, visible energy coil, Mk II upgraded, ${STYLE_SUFFIX}` },
-          { label: 'Mk III',file: 'tower_lightning_2', prompt: `Storm tower, brilliant yellow-white star with dramatic lightning arc bolts extending from each of 5 tips, charged plasma core, intense electric glow, Mk III elite, ${STYLE_SUFFIX}` },
-          { label: 'Tesla',    file: 'tower_tesla',    color: '#ffff88', prompt: `Tesla evolution tower, bright yellow tesla coil star with 5 long chain lightning arcs extending outward from each tip, electric orb core, chain lightning visible, gold rim base, evolved tower, ${STYLE_SUFFIX}` },
-          { label: 'Overload', file: 'tower_overload', color: '#ff8800', prompt: `Overload evolution tower, orange lightning star with AoE death-pulse shock ring visible as concentric circles around it, overcharged fiery orange-yellow core, power surge effect, gold rim base, evolved tower, ${STYLE_SUFFIX}` },
+          { label: 'Mk I',  file: 'tower_lightning_0', prompt: `A completely flat 2D pixel art icon of a lightning rod tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a yellow flat 5-pointed star shape, small electric spark graphics at each tip, lightning rod spike graphic pointing upward (12 o\'clock). Mk I basic electric. ${STYLE_SUFFIX}` },
+          { label: 'Mk II', file: 'tower_lightning_1', prompt: `A completely flat 2D pixel art icon of a tesla coil tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a golden yellow flat star shape with electric arc graphics between each tip, glowing orange orb graphic at center. Mk II upgraded. ${STYLE_SUFFIX}` },
+          { label: 'Mk III',file: 'tower_lightning_2', prompt: `A completely flat 2D pixel art icon of a storm tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a brilliant yellow-white flat star shape with dramatic lightning arc bolt graphics extending from each of 5 tips, charged plasma core graphic at center. Mk III elite. ${STYLE_SUFFIX}` },
+          { label: 'Tesla',    file: 'tower_tesla',    color: '#ffff88', prompt: `A completely flat 2D pixel art icon of a tesla tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a bright yellow flat star shape with 5 long chain lightning arc graphics extending outward from each tip, electric orb core graphic. Gold rim base. ${STYLE_SUFFIX}` },
+          { label: 'Overload', file: 'tower_overload', color: '#ff8800', prompt: `A completely flat 2D pixel art icon of an overload tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it an orange flat star shape with AoE death-pulse shock ring graphics visible as concentric circles around it, overcharged fiery orange-yellow core graphic. Gold rim base. ${STYLE_SUFFIX}` },
         ],
       },
       poison: {
         label: 'Poison Tower', color: '#66cc33',
         variants: [
-          { label: 'Mk I',  file: 'tower_poison_0', prompt: `Poison cauldron tower, lime green hexagonal alchemist tower, 6-sided hex shape, small green bubbles rising, Mk I basic toxic, ${STYLE_SUFFIX}` },
-          { label: 'Mk II', file: 'tower_poison_1', prompt: `Poison vat tower, medium green hexagon with toxic fume wisps and spore particles swirling around it, green glow, Mk II upgraded, ${STYLE_SUFFIX}` },
-          { label: 'Mk III',file: 'tower_poison_2', prompt: `Plague lab tower, deep toxic green hexagon with visible poison spore cloud puffing out, skull rune center, Mk III elite, ${STYLE_SUFFIX}` },
-          { label: 'Plague', file: 'tower_plague', color: '#99ff44', prompt: `Plague evolution tower, bright neon green hexagon with spreading spore cloud aura ring, bio-hazard symbol center, death-spore emitter particles around it, acid green glow, gold rim base, evolved tower, ${STYLE_SUFFIX}` },
-          { label: 'Acid',   file: 'tower_acid',   color: '#ccff00', prompt: `Acid evolution tower, yellow-green hexagon with corrosive acid drip effects on the sides, armor-dissolving rune etched on surface, caustic yellow-green fume cloud, dissolving base edges, gold rim, evolved tower, ${STYLE_SUFFIX}` },
+          { label: 'Mk I',  file: 'tower_poison_0', prompt: `A completely flat 2D pixel art icon of a poison cauldron tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a lime green flat hexagonal shape (6-sided), small green bubble graphics on the surface. Mk I basic toxic. ${STYLE_SUFFIX}` },
+          { label: 'Mk II', file: 'tower_poison_1', prompt: `A completely flat 2D pixel art icon of a poison vat tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a medium green flat hexagon shape with toxic fume wisp graphics and spore particle graphics swirling around it, green glow. Mk II upgraded. ${STYLE_SUFFIX}` },
+          { label: 'Mk III',file: 'tower_poison_2', prompt: `A completely flat 2D pixel art icon of a plague lab tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a deep toxic green flat hexagon shape with poison spore cloud graphics puffing outward, skull rune graphic at center. Mk III elite. ${STYLE_SUFFIX}` },
+          { label: 'Plague', file: 'tower_plague', color: '#99ff44', prompt: `A completely flat 2D pixel art icon of a plague tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a bright neon green flat hexagon shape with a spreading spore cloud aura ring graphic around it, bio-hazard symbol graphic at center, spore particle graphics. Gold rim base. ${STYLE_SUFFIX}` },
+          { label: 'Acid',   file: 'tower_acid',   color: '#ccff00', prompt: `A completely flat 2D pixel art icon of an acid tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a yellow-green flat hexagon shape with corrosive acid drip graphics on the edges, armor-dissolving rune graphic etched on surface, dissolving base edge effect. Gold rim base. ${STYLE_SUFFIX}` },
         ],
       },
       boomerang: {
         label: 'Boomerang Tower', color: '#cc88ff',
         variants: [
-          { label: 'Mk I',  file: 'tower_boomerang_0', prompt: `Boomerang throwing platform, purple square base tower, single curved boomerang visible on the platform ready to throw, wooden throwing station, Mk I basic, ${STYLE_SUFFIX}` },
-          { label: 'Mk II', file: 'tower_boomerang_1', prompt: `Reinforced boomerang station, deep purple square platform with decorative carvings, two boomerangs crossed on the platform, Mk II upgraded, ${STYLE_SUFFIX}` },
-          { label: 'Mk III',file: 'tower_boomerang_2', prompt: `Advanced boomerang launcher, ornate purple square platform with gold inlays, three boomerangs arranged in flight-pattern on platform, Mk III elite, ${STYLE_SUFFIX}` },
-          { label: 'Hurricane', file: 'tower_hurricane', color: '#ff99dd', prompt: `Hurricane evolution tower, pink square tower base with 4 boomerangs actively spinning in orbit around it, wind vortex spiral effect, pink motion blur arcs, gold rim base, evolved tower, ${STYLE_SUFFIX}` },
-          { label: 'Ricochet',  file: 'tower_ricochet',  color: '#ff44aa', prompt: `Ricochet evolution tower, deep pink square tower with angular bounce-trajectory arrows drawn around it showing 8-bounce ricochet pattern, deflection angle lines, magenta glow, gold rim base, evolved tower, ${STYLE_SUFFIX}` },
+          { label: 'Mk I',  file: 'tower_boomerang_0', prompt: `A completely flat 2D pixel art icon of a boomerang throwing platform, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a purple flat square shape, single curved boomerang graphic on the surface ready to throw. Wooden throwing station, Mk I basic. ${STYLE_SUFFIX}` },
+          { label: 'Mk II', file: 'tower_boomerang_1', prompt: `A completely flat 2D pixel art icon of a reinforced boomerang station, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a deep purple flat square shape with decorative carving graphics, two boomerang graphics crossed on the surface. Mk II upgraded. ${STYLE_SUFFIX}` },
+          { label: 'Mk III',file: 'tower_boomerang_2', prompt: `A completely flat 2D pixel art icon of an advanced boomerang launcher, viewed from absolute 90-degree top-down. Dark circular stone base, inside it an ornate purple flat square shape with gold inlay graphics, three boomerang graphics arranged in flight-pattern on the surface. Mk III elite. ${STYLE_SUFFIX}` },
+          { label: 'Hurricane', file: 'tower_hurricane', color: '#ff99dd', prompt: `A completely flat 2D pixel art icon of a hurricane tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a pink flat square shape with 4 boomerang graphics spinning in orbit around it, wind vortex spiral graphic, pink motion blur arc graphics. Gold rim base. ${STYLE_SUFFIX}` },
+          { label: 'Ricochet',  file: 'tower_ricochet',  color: '#ff44aa', prompt: `A completely flat 2D pixel art icon of a ricochet tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a deep pink flat square shape with angular bounce-trajectory arrow graphics drawn around it showing an 8-bounce ricochet pattern, deflection angle line graphics, magenta glow. Gold rim base. ${STYLE_SUFFIX}` },
         ],
       },
     };
@@ -785,8 +785,8 @@
 
     async function fetchEstimate() {
       const model = $model.value;
-      const width = parseInt($width.value) || 512;
-      const height = parseInt($height.value) || 512;
+      const width = parseInt($width.value) || 256;
+      const height = parseInt($height.value) || 256;
       if (!model) return;
 
       try {
@@ -924,9 +924,9 @@
       const variant = tower.variants[index];
       $prompt.value = variant.prompt;
       $filename.value = variant.file;
-      // Tower sprites are 512×512 (not the 1024×1024 used for terrain crop variation)
-      $width.value = 512;
-      $height.value = 512;
+      // Tower sprites are 256x256 (not the 1024×1024 used for terrain crop variation)
+      $width.value = 256;
+      $height.value = 256;
       $generateBtn.disabled = false;
       scheduleEstimate();
 
@@ -1150,8 +1150,8 @@
       const model = $model.value;
       const prompt = $prompt.value.trim();
       const tileName = $filename.value.trim() || 'tile';
-      const width = parseInt($width.value) || 512;
-      const height = parseInt($height.value) || 512;
+      const width = parseInt($width.value) || 256;
+      const height = parseInt($height.value) || 256;
 
       if (!prompt) { setStatus('Please enter a prompt', 'error'); return; }
 
@@ -1239,7 +1239,7 @@
         .map(
           (t) => `
           <div class="tile-card">
-            <img src="${t.path}" alt="${t.name}" loading="lazy" />
+            <img src="${t.path}?v=${t.size}" alt="${t.name}" loading="lazy" />
             <div class="info">
               <span class="name" title="${t.name}">${t.name}</span>
               <span class="size">${formatSize(t.size)}</span>

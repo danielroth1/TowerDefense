@@ -295,16 +295,15 @@ const server = createServer(async (req, res) => {
   if (pathname === '/api/models' && req.method === 'GET') {
     if (!FAL_KEY) return json(res, { error: 'FAL_AI_KEY not set' }, 500);
     try {
-      const resp = await fetch('https://api.fal.ai/v1/models?limit=200', {
+      const resp = await fetch('https://api.fal.ai/v1/models?limit=500', {
         headers: { 'Authorization': `Key ${FAL_KEY}` },
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status} from fal.ai`);
       const data = await resp.json();
       const t2i = (data.models || [])
-        .filter(m => m.metadata?.category === 'text-to-image' && m.metadata?.status === 'active')
+        .filter(m => m.metadata?.category === 'text-to-image')
         .map(m => {
           const eid = m.endpoint_id;
-          // Pricing is fetched separately via /api/pricing — stub with unknown
           let dn = m.metadata.display_name
             .replace(/ Text To Image$/, '')
             .replace(/ API$/, '');
@@ -312,10 +311,36 @@ const server = createServer(async (req, res) => {
             id: eid,
             name: dn,
             description: (m.metadata.description || '').split('\n')[0].slice(0, 200),
-            pricing: null, // filled by client via /api/pricing
+            status: m.metadata?.status || 'unknown',
+            pricing: null,
           };
         })
         .sort((a, b) => a.name.localeCompare(b.name));
+
+      // Ensure the 4 hardcoded quick-select models are always present.
+      // They may be inactive or miscategorized in the API — include them
+      // anyway so the browser list is exhaustive.
+      const QUICK_SELECT_IDS = [
+        'fal-ai/fast-sdxl',
+        'fal-ai/flux/schnell',
+        'fal-ai/flux/dev',
+        'fal-ai/stable-diffusion-v3.5',
+      ];
+      const existingIds = new Set(t2i.map(m => m.id));
+      for (const id of QUICK_SELECT_IDS) {
+        if (!existingIds.has(id)) {
+          const name = id.replace('fal-ai/', '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          t2i.push({
+            id,
+            name,
+            description: 'Quick-select model (not listed as text-to-image by fal.ai API)',
+            status: 'unknown',
+            pricing: null,
+          });
+        }
+      }
+      t2i.sort((a, b) => a.name.localeCompare(b.name));
+
       return json(res, { models: t2i });
     } catch (err) {
       console.error('[models] Error:', err);
@@ -496,7 +521,7 @@ async function callFalAI(model, prompt, width, height) {
     body: JSON.stringify({
       prompt,
       image_size: { width, height },
-      num_inference_steps: falModel.includes('schnell') ? 4 : 28,
+      num_inference_steps: falModel.includes('schnell') ? 4 : falModel.includes('flux-2') ? 8 : 28,
     }),
   });
 
