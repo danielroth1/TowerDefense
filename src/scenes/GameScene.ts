@@ -389,11 +389,24 @@ export class GameScene extends Phaser.Scene {
   }
 
   private setupInput() {
-    // Mouse wheel zoom – UI is on a separate camera so it stays fixed naturally
-    this.input.on('wheel', (_p: unknown, _go: unknown, _dx: number, dy: number) => {
+    // Mouse wheel zoom – zoom toward cursor position
+    this.input.on('wheel', (pointer: Phaser.Input.Pointer, _go: unknown, _dx: number, dy: number) => {
       const cam = this.cameras.main;
-      const zoom = Phaser.Math.Clamp(cam.zoom - dy * 0.001, CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM);
-      cam.setZoom(zoom);
+      const oldZoom = cam.zoom;
+      const newZoom = Phaser.Math.Clamp(oldZoom - dy * 0.001, CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM);
+      if (oldZoom === newZoom) return;
+
+      // Cursor position relative to viewport center
+      // Derived from Camera.preRender: worldX = scrollX + w/2 + (vpX - w/2) / zoom
+      const toCenterX = pointer.x - cam.width / 2;
+      const toCenterY = (pointer.y - UI_TOP_HEIGHT) - cam.height / 2;
+
+      const scaleDiff = (1 / oldZoom) - (1 / newZoom);
+
+      cam.scrollX += toCenterX * scaleDiff;
+      cam.scrollY += toCenterY * scaleDiff;
+
+      cam.setZoom(newZoom);
     });
 
     // Camera drag (middle mouse)
