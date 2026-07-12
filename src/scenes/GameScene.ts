@@ -21,6 +21,7 @@ import {
   MAX_BARRICADES, BARRICADE_COST, TOTAL_WAVES,
   UI_TOP_HEIGHT, UI_BOTTOM_HEIGHT,
   DEBUG_STARTING_GOLD,
+  CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM,
 } from '../utils/constants';
 import type { TowerType } from '../data/towers';
 import { TOWER_DEFS, TOWER_TYPES_ORDERED } from '../data/towers';
@@ -391,7 +392,7 @@ export class GameScene extends Phaser.Scene {
     // Mouse wheel zoom – UI is on a separate camera so it stays fixed naturally
     this.input.on('wheel', (_p: unknown, _go: unknown, _dx: number, dy: number) => {
       const cam = this.cameras.main;
-      const zoom = Phaser.Math.Clamp(cam.zoom - dy * 0.001, 0.5, 2.0);
+      const zoom = Phaser.Math.Clamp(cam.zoom - dy * 0.001, CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM);
       cam.setZoom(zoom);
     });
 

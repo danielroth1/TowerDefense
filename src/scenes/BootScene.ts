@@ -51,6 +51,7 @@ export class BootScene extends Phaser.Scene {
   create() {
     this.fillMissingTileTextures();
     this.generateUITileTextures();
+    this.generateMipmapsForAITiles();
     this.generateBlobTextures();
     // If an AI path tile was loaded, generate masked blob textures from it
     if (this.textures.exists('tile_path')) {
@@ -77,6 +78,50 @@ export class BootScene extends Phaser.Scene {
     if (!this.textures.exists('tile_path')) this.generatePathTile();
     if (!this.textures.exists('tile_spawn')) this.generateSpawnTile();
     if (!this.textures.exists('tile_goal')) this.generateGoalTile();
+  }
+
+  /**
+   * Downscale oversized AI tile textures to reduce aliasing when zoomed out.
+   *
+   * AI tiles are 1024×1024 but displayed at 48×48 (TILE_SIZE). Without mipmaps,
+   * the GPU's bilinear filter samples only 4 texels per fragment, producing
+   * aliasing artefacts that are especially visible when the camera zooms out.
+   *
+   * Instead of touching WebGL internals (which can corrupt Phaser's texture
+   * state), we downscale the source image via a CPU canvas and replace the
+   * texture.  A 4× downscale (1024→256) dramatically reduces the sampling
+   * ratio mismatch while preserving enough detail for close-up views.
+   */
+  private generateMipmapsForAITiles(): void {
+    const MAX_SIZE = 256; // target max dimension after downscale
+
+    for (const key of this.aiLoadedTiles) {
+      const texture = this.textures.get(key);
+      if (!texture) continue;
+
+      const source = texture.source[0];
+      const img = source?.image as HTMLImageElement | undefined;
+      if (!img || img.width <= MAX_SIZE) continue;
+
+      // Downscale via canvas
+      const scale = MAX_SIZE / Math.max(img.width, img.height);
+      const dw = Math.round(img.width * scale);
+      const dh = Math.round(img.height * scale);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = dw;
+      canvas.height = dh;
+      const ctx = canvas.getContext('2d')!;
+      // Use imageSmoothingQuality for a high-quality downscale
+      if ('imageSmoothingQuality' in ctx) {
+        (ctx as any).imageSmoothingQuality = 'high';
+      }
+      ctx.drawImage(img, 0, 0, dw, dh);
+
+      // Remove the huge original and add the downscaled version under the same key
+      this.textures.remove(key);
+      this.textures.addCanvas(key, canvas);
+    }
   }
 
   /** Generate UI tile overlays that are always procedural (never AI). */
