@@ -5,12 +5,12 @@ import type { EconomyManager } from '../systems/EconomyManager';
 import type { Tower } from '../entities/Tower';
 
 // ─── Layout constants ─────────────────────────────────────────────────────
-const BAR_H    = 100;
+const BAR_H    = 120;
 
 // Tower/Upgrade section (left side)
-const TBW = 86, TBH = 80, TGAP = 6, TLEFT = 8;
+const TBW = 86, TBH = 88, TGAP = 6, TLEFT = 8;
 
-const WAVE_H  = 60;
+const WAVE_H  = 64;
 
 // Derived layout constants (independent of browser size)
 const DIV1_X   = TLEFT + 6 * (TBW + TGAP) - TGAP; // right edge of tower section
@@ -224,6 +224,7 @@ export class BottomBar {
   showBuildMode() {
     this.currentUpgradeTower = null;
     this.setBuildVisible(true);
+    this.setBuildInputEnabled(true);
     this.upgRoot.setVisible(false);
     this.clearUpgHits();
     this.refreshBuildAffordability();
@@ -232,6 +233,7 @@ export class BottomBar {
   showUpgradeMode(tower: Tower) {
     this.currentUpgradeTower = tower;
     this.setBuildVisible(false);
+    this.setBuildInputEnabled(false);
     this.clearUpgHits();
     this.rebuildUpgradeSection(tower);
     this.upgRoot.setVisible(true);
@@ -257,6 +259,11 @@ export class BottomBar {
       .forEach(o => o.setVisible(vis));
   }
 
+  /** Disable/enable input on build hit rects so they don't steal clicks in upgrade mode. */
+  private setBuildInputEnabled(enabled: boolean) {
+    this.buildHits.forEach(h => h.input!.enabled = enabled);
+  }
+
   private rebuildUpgradeSection(tower: Tower) {
     // Clear previous
     this.upgRoot.removeAll(true);
@@ -264,99 +271,174 @@ export class BottomBar {
 
     const def  = tower.def;
     const CY   = this._TOWER_CY;
+    const cx0  = towerCX(0);
 
-    // Tower icon
-    const icon = this.scene.add.image(towerCX(0), CY - 14, `tower_${tower.towerType}_${Math.min(tower.level - 1, 3)}`)
-      .setDisplaySize(22, 22);
+    // ═══════════════════════════════════════════════════════════════════════
+    // Position 0 — Info panel: current tower state (not clickable)
+    // ═══════════════════════════════════════════════════════════════════════
+    const infoBg = this.scene.add.graphics();
+    const curImgKey = tower.evolved && tower.evolutionType
+      ? `tower_${tower.evolutionType}`
+      : `tower_${tower.towerType}_${Math.min(tower.level - 1, 2)}`;
+    this.drawTowerBtn(infoBg, cx0, CY, TBW, TBH, def.color, false, false, true);
+    this.upgRoot.add(infoBg);
+
+    // Current tower image
+    const icon = this.scene.add.image(cx0, CY - 16, curImgKey).setDisplaySize(36, 36);
     this.upgRoot.add(icon);
 
     // Name + level
-    const title = this.scene.add.text(towerCX(0), CY + 10, `${def.label}\nLv ${tower.level}${tower.evolved ? '★' : ''}`, {
-      fontSize: '11px', fontFamily: 'monospace', color: '#eef0f4', align: 'center', lineSpacing: 1,
+    const name = def.label.split(' ')[0];
+    const title = this.scene.add.text(cx0, CY + 16, `${name}\nLv${tower.level}${tower.evolved ? '★' : ''}`, {
+      fontSize: '10px', fontFamily: 'monospace', color: '#eef0f4', align: 'center', lineSpacing: 1,
     }).setOrigin(0.5);
     this.upgRoot.add(title);
 
-    // Stats
-    const stats = this.scene.add.text(towerCX(0), CY + 35, `⚔${Math.round(tower.damage)}  🎯${Math.round(tower.range)}`, {
-      fontSize: '10px', fontFamily: 'monospace', color: '#8899aa', align: 'center',
+    // Current stats
+    const curStats = this.scene.add.text(cx0, CY + 34, `⚔${Math.round(tower.damage)} 🎯${Math.round(tower.range)}`, {
+      fontSize: '9px', fontFamily: 'monospace', color: '#8899aa', align: 'center',
     }).setOrigin(0.5);
-    this.upgRoot.add(stats);
+    this.upgRoot.add(curStats);
 
-    // Synergy tags
     if (tower.activeSynergyTags.length) {
-      const syn = this.scene.add.text(towerCX(0), CY + 48, `✦ ${tower.activeSynergyTags.slice(0, 2).join(', ')}`, {
-        fontSize: '9px', fontFamily: 'monospace', color: '#ffeeaa', align: 'center',
+      const syn = this.scene.add.text(cx0, CY + 44, `✦${tower.activeSynergyTags.slice(0, 2).join(',')}`, {
+        fontSize: '8px', fontFamily: 'monospace', color: '#ffeeaa', align: 'center',
       }).setOrigin(0.5);
       this.upgRoot.add(syn);
     }
 
-    // Action buttons - placed at tower button positions 1-5
-    const actions: Array<{ label: string; color: number; cb: () => void; enabled: boolean; hotkey?: string }> = [];
+    // ═══════════════════════════════════════════════════════════════════════
+    // Positions 1+ — Action buttons with upgrade preview
+    // ═══════════════════════════════════════════════════════════════════════
+    interface UpgAction {
+      label: string; color: number; cb: () => void; enabled: boolean;
+      hotkey?: string; cost: number;
+      previewImgKey?: string;       // texture key for preview image
+      previewStats?: string;        // e.g. "⚔20 🎯200"
+      statsDiff?: string;           // e.g. "⚔12→20"
+    }
 
+    const actions: UpgAction[] = [];
+
+    // --- Upgrade button ---
     if (tower.canUpgrade()) {
       const cost = tower.upgradeCost();
       const tier = tower.def.upgrades[tower.level - 1];
+      const nextLevel = tower.level + 1;
+      const nextImgKey = `tower_${tower.towerType}_${Math.min(nextLevel - 1, 2)}`;
+      // Build stat diff string
+      const diffParts: string[] = [];
+      if (tier.damage !== tower.damage) diffParts.push(`⚔${Math.round(tower.damage)}→${tier.damage}`);
+      if (tier.range  !== tower.range)  diffParts.push(`🎯${Math.round(tower.range)}→${tier.range}`);
       actions.push({
-        label: `⬆ Upgrade\n${tier.label}  ${cost}g`,
-        hotkey: 'U',
+        label: `⬆ ${tier.label}`,
+        hotkey: 'U', cost,
         color: this.economy.canAfford(cost) ? 0x1e5a3a : 0x333333,
         enabled: this.economy.canAfford(cost),
+        previewImgKey: nextImgKey,
+        previewStats: `⚔${tier.damage} 🎯${tier.range}`,
+        statsDiff: diffParts.join(' '),
         cb: () => { this.onUpgrade?.(); this.showUpgradeMode(tower); },
       });
     }
 
+    // --- Evolve buttons ---
     if (tower.canEvolve()) {
       const evoKeys = ['U', 'I'];
       for (let b = 0; b < 2; b++) {
         const evo = def.evolutions[b];
         const can = this.economy.canAfford(evo.cost);
+        const evoImgKey = `tower_${evo.type}`;
+        // Compute stat preview
+        const evoDmg  = evo.stats.damage  ?? tower.damage;
+        const evoRng  = evo.stats.range   ?? tower.range;
+        const diffParts: string[] = [];
+        if (evo.stats.damage) diffParts.push(`⚔${Math.round(tower.damage)}→${evoDmg}`);
+        if (evo.stats.range)  diffParts.push(`🎯${Math.round(tower.range)}→${evoRng}`);
         actions.push({
-          label: `★ ${evo.label}\n${evo.cost}g`,
-          hotkey: evoKeys[b],
+          label: `★ ${evo.label}`,
+          hotkey: evoKeys[b], cost: evo.cost,
           color: can ? 0x3a2a00 : 0x333333,
           enabled: can,
+          previewImgKey: evoImgKey,
+          previewStats: `⚔${evoDmg} 🎯${evoRng}`,
+          statsDiff: diffParts.join(' '),
           cb: () => { this.onEvolve?.(b as 0 | 1); this.showUpgradeMode(tower); },
         });
       }
     }
 
+    // --- Sell button ---
     const sellVal = tower.sellValue();
     actions.push({
-      label: `Sell\n+${sellVal}g`,
+      label: '💰 Sell', cost: sellVal,
       color: 0x4a1a1a,
       enabled: true,
+      previewStats: `+${sellVal}g`,
       cb: () => this.onSell?.(),
     });
 
-    // Draw action buttons at positions 1, 2, 3, 4 in the tower button row
+    // Render action buttons
     actions.forEach((act, i) => {
       const cx = towerCX(i + 1);
+      const can = act.enabled;
+      const w = TBW, h = TBH;
 
+      // Background
       const bg4 = this.scene.add.graphics();
       this.upgRoot.add(bg4);
-      this.drawUBtn(bg4, cx, CY, TBW - 4, TBH - 4, act.color, false);
+      this.drawUBtn(bg4, cx, CY, w - 4, h - 4, act.color, false, can);
 
-      const txt = this.scene.add.text(cx, CY, act.label, {
-        fontSize: '10px', fontFamily: 'monospace', color: act.enabled ? '#eef0f4' : '#445566',
-        align: 'center', lineSpacing: 2,
+      // Preview image
+      if (act.previewImgKey) {
+        const pvImg = this.scene.add.image(cx, CY - 18, act.previewImgKey)
+          .setDisplaySize(26, 26).setAlpha(can ? 1 : 0.4);
+        this.upgRoot.add(pvImg);
+      }
+
+      // Label
+      const txt = this.scene.add.text(cx, CY + 6, act.label, {
+        fontSize: '10px', fontFamily: 'monospace', color: can ? '#eef0f4' : '#445566',
+        align: 'center',
       }).setOrigin(0.5);
       this.upgRoot.add(txt);
 
-      // Hotkey label (same style as build tower hotkeys)
-      if (act.hotkey) {
-        const hk = this.scene.add.text(cx, CY + 25, `[${act.hotkey}]`, {
-          fontSize: '9px', fontFamily: 'monospace', color: '#667788', align: 'center',
+      // Stats preview or diff
+      if (act.statsDiff) {
+        const diff = this.scene.add.text(cx, CY + 18, act.statsDiff, {
+          fontSize: '8px', fontFamily: 'monospace', color: can ? '#88cc88' : '#334433',
+          align: 'center',
         }).setOrigin(0.5);
-        this.upgRoot.add(hk);
+        this.upgRoot.add(diff);
+      } else if (act.previewStats) {
+        const pvs = this.scene.add.text(cx, CY + 18, act.previewStats, {
+          fontSize: '8px', fontFamily: 'monospace', color: can ? '#8899aa' : '#334455',
+          align: 'center',
+        }).setOrigin(0.5);
+        this.upgRoot.add(pvs);
       }
 
-      if (act.enabled) {
-        // Hit rects MUST be outside the container and screen-fixed
-        const hit = this.scene.add.rectangle(cx, CY, TBW - 8, TBH - 8, 0, 0)
+      // Cost + hotkey line
+      const costStr = act.label.startsWith('💰') ? '' : `${act.cost}g`;
+      const hkStr = act.hotkey ? `[${act.hotkey}]` : '';
+      const bottomLine = [costStr, hkStr].filter(Boolean).join(' ');
+      if (bottomLine) {
+        const bl = this.scene.add.text(cx, CY + 30, bottomLine, {
+          fontSize: '9px', fontFamily: 'monospace',
+          color: can ? '#ffd700' : '#554433',
+          align: 'center',
+        }).setOrigin(0.5);
+        this.upgRoot.add(bl);
+      }
+
+      // Hit rect for enabled buttons
+      if (can) {
+        const hit = this.scene.add.rectangle(cx, CY, w - 8, h - 8, 0, 0)
           .setScrollFactor(0).setInteractive({ useHandCursor: true }).setDepth(50);
-        hit.on('pointerover',  () => this.drawUBtn(bg4, cx, CY, TBW - 4, TBH - 4, act.color, true));
-        hit.on('pointerout',   () => this.drawUBtn(bg4, cx, CY, TBW - 4, TBH - 4, act.color, false));
-        hit.on('pointerup',    () => act.cb());
+        this.scene.cameras.main.ignore(hit);
+        hit.on('pointerover', () => this.drawUBtn(bg4, cx, CY, w - 4, h - 4, act.color, true, can));
+        hit.on('pointerout',  () => this.drawUBtn(bg4, cx, CY, w - 4, h - 4, act.color, false, can));
+        hit.on('pointerup',   () => act.cb());
         this.upgBtnList.push({ bg: bg4, txt, hit });
       }
     });
@@ -374,12 +456,13 @@ export class BottomBar {
   }
 
   private drawUBtn(g: Phaser.GameObjects.Graphics, cx: number, cy: number,
-    w: number, h: number, color: number, hover: boolean) {
+    w: number, h: number, color: number, hover: boolean, affordable: boolean = true) {
     g.clear();
-    g.fillStyle(hover ? Phaser.Display.Color.IntegerToColor(color).lighten(15).color : color, 1);
-    g.fillRoundedRect(cx - w / 2, cy - h / 2, w, h, 4);
-    g.lineStyle(1, 0x556677, 0.8);
-    g.strokeRoundedRect(cx - w / 2, cy - h / 2, w, h, 4);
+    const fill = !affordable ? 0x1a1a1a : hover ? COLORS.BTN_HOVER : COLORS.BTN_NORMAL;
+    g.fillStyle(fill, 1);
+    g.fillRoundedRect(cx - w / 2, cy - h / 2, w, h, 5);
+    g.lineStyle(1, affordable ? color : 0x333333, 0.5);
+    g.strokeRoundedRect(cx - w / 2, cy - h / 2, w, h, 5);
   }
 
   private drawWaveBtn(hover: boolean) {
