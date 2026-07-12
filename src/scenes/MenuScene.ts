@@ -4,6 +4,7 @@ import { hashSeed } from '../utils/helpers';
 
 export class MenuScene extends Phaser.Scene {
   private seedInput: HTMLInputElement | null = null;
+  private debugInput: HTMLInputElement | null = null;
 
   constructor() { super('MenuScene'); }
 
@@ -69,6 +70,24 @@ export class MenuScene extends Phaser.Scene {
     });
     document.body.appendChild(this.seedInput);
 
+    // Debug mode checkbox
+    this.add.text(W / 2 - 160, H * 0.53, 'DEBUG ($10k):', {
+      fontSize: '18px', fontFamily: 'monospace', color: '#8899aa',
+    }).setOrigin(0, 0.5);
+
+    this.debugInput = document.createElement('input');
+    this.debugInput.type = 'checkbox';
+    Object.assign(this.debugInput.style, {
+      position: 'absolute',
+      left: `${W / 2 - 20}px`,
+      top: `${H * 0.53 - 10}px`,
+      width: '20px',
+      height: '20px',
+      accentColor: '#ffd700',
+      cursor: 'pointer',
+    });
+    document.body.appendChild(this.debugInput);
+
     // Play button
     const playBtn = this.makeButton(W / 2, H * 0.60, 200, 50, 'PLAY', 0x1e3a5f, 0x2a5080);
     playBtn.on('pointerup', () => this.startGame());
@@ -131,8 +150,9 @@ export class MenuScene extends Phaser.Scene {
   private startGame() {
     const raw = this.seedInput?.value.trim() || String(Math.floor(Math.random() * 999999));
     const seed = hashSeed(raw || String(Date.now()));
+    const debug = this.debugInput?.checked ?? false;
     this.cleanupInput();
-    this.scene.start('GameScene', { seed, seedStr: raw });
+    this.scene.start('GameScene', { seed, seedStr: raw, debug });
   }
 
   private showHelp() {
@@ -203,6 +223,10 @@ export class MenuScene extends Phaser.Scene {
     if (this.seedInput) {
       document.body.removeChild(this.seedInput);
       this.seedInput = null;
+    }
+    if (this.debugInput) {
+      document.body.removeChild(this.debugInput);
+      this.debugInput = null;
     }
   }
 

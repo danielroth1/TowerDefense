@@ -12,9 +12,9 @@ export class EconomyManager {
   totalSpent: number = 0;
   private passiveTimer: number = 0;
 
-  constructor(scene: Phaser.Scene) {
+  constructor(scene: Phaser.Scene, startingGold?: number) {
     this.scene = scene;
-    this.gold  = STARTING_GOLD;
+    this.gold  = startingGold ?? STARTING_GOLD;
     this.lives = STARTING_LIVES;
   }
 

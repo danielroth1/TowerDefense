@@ -9,6 +9,9 @@ lerna-debug.log*
 
 .env.deploy
 
+.codebase-context
+archive
+
 node_modules
 dist
 dist-ssr

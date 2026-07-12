@@ -72,6 +72,7 @@ export const COLORS = {
 
 // ─── Economy ─────────────────────────────────────────────────────────────────
 export const STARTING_GOLD  = 200;
+export const DEBUG_STARTING_GOLD = 10000;
 export const STARTING_LIVES = 20;
 export const PASSIVE_INCOME_INTERVAL = 5000; // ms
 export const PASSIVE_INCOME_AMOUNT   = 10;

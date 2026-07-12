@@ -20,6 +20,7 @@ import {
   TILE_SIZE, GRID_COLS, GRID_ROWS, COLORS,
   MAX_BARRICADES, BARRICADE_COST, TOTAL_WAVES,
   UI_TOP_HEIGHT, UI_BOTTOM_HEIGHT,
+  DEBUG_STARTING_GOLD,
 } from '../utils/constants';
 import type { TowerType } from '../data/towers';
 import { TOWER_DEFS, TOWER_TYPES_ORDERED } from '../data/towers';
@@ -95,9 +96,11 @@ export class GameScene extends Phaser.Scene {
 
   constructor() { super('GameScene'); }
 
-  init(data: { seed: number; seedStr?: string }) {
+  init(data: { seed: number; seedStr?: string; debug?: boolean }) {
     this.mapData = generateMap(data.seed ?? 12345);
+    this._debug = data.debug ?? false;
   }
+  private _debug: boolean = false;
 
   create() {
     this.setupPhysics();
@@ -240,7 +243,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private createSystems() {
-    this.economy       = new EconomyManager(this);
+    this.economy       = new EconomyManager(this, this._debug ? DEBUG_STARTING_GOLD : undefined);
     this.waveManager   = new WaveManager(this, this.enemyGroup, this.flyerGroup, this.mapData.waypoints, this.mapData.spawnPoint);
     this.abilitySystem = new AbilitySystem(this);
     this.synergySystem = new SynergySystem(this);

@@ -267,7 +267,7 @@ export class BottomBar {
 
     // Tower icon
     const icon = this.scene.add.image(towerCX(0), CY - 14, `tower_${tower.towerType}_${Math.min(tower.level - 1, 3)}`)
-      .setScale(0.8);
+      .setDisplaySize(22, 22);
     this.upgRoot.add(icon);
 
     // Name + level
