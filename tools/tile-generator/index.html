@@ -98,6 +98,7 @@
     }
     .pricing-badge.megapixel { background: rgba(63,185,80,0.15); color: var(--green); }
     .pricing-badge.image     { background: rgba(88,166,255,0.15); color: var(--accent); }
+    .pricing-badge.per-unit  { background: rgba(255,123,0,0.18); color: #ff7b00; }
     .pricing-badge.gpu       { background: rgba(210,153,29,0.15); color: var(--yellow); }
     .pricing-badge.unknown   { background: rgba(139,148,158,0.12); color: var(--muted); }
 
@@ -761,7 +762,7 @@
     const modelPricingCache = {};
 
     function pricingBadge(type) {
-      const labels = { image: 'per img', video: 'per vid', megapixel: 'per MP', gpu: 'GPU', unknown: 'no info' };
+      const labels = { image: 'per img', 'per-unit': 'per unit', video: 'per vid', megapixel: 'per MP', gpu: 'GPU', unknown: 'no info' };
       const t = type || 'unknown';
       return `<span class="pricing-badge ${t}">${labels[t] || labels.unknown}</span>`;
     }
@@ -1000,12 +1001,15 @@
       }
     }
 
+    /** Priority order for pricing type groups (lower = first).
+     *  Per-unit is after per-image because one image = multiple units,
+     *  making it effectively more expensive than the raw unit price suggests. */
+    const TYPE_ORDER = { megapixel: 0, image: 1, 'per-unit': 2, gpu: 3, unknown: 4 };
+
     function parseCost(model) {
-      // Returns a numeric value for sorting by cost.
-      // Unknown/GPU models get null — they always sort to the bottom.
       const p = model.pricing || {};
       const raw = (p.cost || '—').replace('$', '');
-      if (raw === '—' || raw === 'GPU per-sec') return null;
+      if (raw === '—') return null;
       const num = parseFloat(raw);
       return isNaN(num) ? null : num;
     }
@@ -1016,9 +1020,17 @@
         sorted.sort((a, b) => a.name.localeCompare(b.name));
       } else if (sortKey === 'cost-asc' || sortKey === 'cost-desc') {
         sorted.sort((a, b) => {
+          const typeA = (a.pricing?.type) || 'unknown';
+          const typeB = (b.pricing?.type) || 'unknown';
+          const groupA = TYPE_ORDER[typeA] ?? 99;
+          const groupB = TYPE_ORDER[typeB] ?? 99;
+
+          // Group by pricing type first
+          if (groupA !== groupB) return groupA - groupB;
+
+          // Within same group, sort by cost
           const ca = parseCost(a);
           const cb = parseCost(b);
-          // Unknown/null costs always sort to the end
           if (ca === null && cb === null) return a.name.localeCompare(b.name);
           if (ca === null) return 1;
           if (cb === null) return -1;
@@ -1046,6 +1058,8 @@
       renderModelList(sortModels(source, currentSort));
     }
 
+    const GROUP_LABELS = { megapixel: 'PER MEGAPIXEL', image: 'PER IMAGE', 'per-unit': 'PER UNIT ⚠️', gpu: 'GPU / COMPUTE', unknown: 'NO PRICE INFO' };
+
     function renderModelList(models) {
       const selectedId = $model.value;
       $modelCount.textContent = `${models.length} model${models.length !== 1 ? 's' : ''}`;
@@ -1053,13 +1067,24 @@
         $modelList.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted);font-size:13px;">No models match your search.</div>';
         return;
       }
-      $modelList.innerHTML = models.map(m => {
-        const isSelected = m.id === selectedId;
+
+      let lastType = null;
+      const rows = models.map(m => {
         const p = m.pricing || { cost: '—', unit: '', type: 'unknown', note: 'No price info' };
+        const currentType = p.type || 'unknown';
+        const isSelected = m.id === selectedId;
         const priceStr = p.cost && p.cost !== '—' ? `${p.cost}${p.unit || ''}` : '—';
-        const badge = pricingBadge(p.type || 'unknown');
+        const badge = pricingBadge(currentType);
         const noteStr = p.note && p.note !== 'No price info' ? ` <span class="note">${p.note}</span>` : '';
-        return `<div class="model-row${isSelected ? ' selected' : ''}" data-model-id="${m.id}">
+
+        // Insert group header when pricing type changes
+        let header = '';
+        if (currentType !== lastType) {
+          header = `<div class="model-group-header" style="padding:8px 20px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);border-top:1px solid var(--border);margin-top:${lastType ? '2px' : '0'};">${GROUP_LABELS[currentType] || currentType.toUpperCase()}</div>`;
+          lastType = currentType;
+        }
+
+        return header + `<div class="model-row${isSelected ? ' selected' : ''}" data-model-id="${m.id}">
           <div style="flex:1;min-width:0;">
             <div class="model-name">${m.name}</div>
             <div class="model-id">${m.id}</div>
@@ -1068,6 +1093,8 @@
           ${isSelected ? '<span class="check-mark">✓</span>' : `<button class="model-select-btn">Select</button>`}
         </div>`;
       }).join('');
+
+      $modelList.innerHTML = rows;
 
       // Click handling
       $modelList.querySelectorAll('.model-row').forEach(row => {

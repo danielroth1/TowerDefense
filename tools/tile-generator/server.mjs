@@ -86,7 +86,7 @@ function classifyPricing(p) {
   switch (p.unit) {
     case 'megapixels':     unitLabel = '/MP';  type = 'megapixel'; break;
     case 'images':         unitLabel = '/img'; type = 'image';     break;
-    case 'units':          unitLabel = '/unit';type = 'image';     break; // treat like per-image
+    case 'units':          unitLabel = '/unit';type = 'per-unit';  break; // one image = multiple units, effectively more expensive
     case 'compute seconds':unitLabel = '/sec'; type = 'gpu';       break;
     default:               unitLabel = `/${p.unit || 'unit'}`; type = 'unknown'; break;
   }

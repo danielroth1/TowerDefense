@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tiles": "node tools/tile-generator/server.mjs"
+    "tiles": "node --watch --watch-path=tools/tile-generator tools/tile-generator/server.mjs"
   },
   "devDependencies": {
     "typescript": "~6.0.2",
