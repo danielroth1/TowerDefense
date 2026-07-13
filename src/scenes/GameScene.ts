@@ -36,6 +36,9 @@ export class GameScene extends Phaser.Scene {
   /** Keys of AI-loaded tile textures that support crop-based variation. */
   private aiTileKeys: Set<string> = new Set();
 
+  /** Terrain keys that have a pre-generated Wang tile set (16 tiles). */
+  private wangTerrainKeys: Set<string> = new Set();
+
   // Groups
   private towerGroup!: Phaser.GameObjects.Group;
   private enemyGroup!: Phaser.Physics.Arcade.Group;
@@ -107,9 +110,11 @@ export class GameScene extends Phaser.Scene {
   private _debug: boolean = false;
 
   create() {
-    // Read the set of AI tile keys from BootScene (shared via registry)
+    // Read AI tile keys + Wang tile availability from BootScene
     const keys: string[] | undefined = this.game.registry.get('aiTiles');
     this.aiTileKeys = new Set(keys ?? []);
+    const wangKeys: string[] | undefined = this.game.registry.get('wangTerrainKeys');
+    this.wangTerrainKeys = new Set(wangKeys ?? []);
 
     this.setupPhysics();
     this.buildMap();
@@ -148,14 +153,14 @@ export class GameScene extends Phaser.Scene {
         const py = r * TILE_SIZE + TILE_SIZE / 2;
 
         // Layer 1: Water base under every cell
-        const waterKey = this.pickCropKey('tile_ground', r, c);
+        const waterKey = this.pickVariationKey('tile_ground', r, c);
         const waterImg = this.add.image(px, py, waterKey).setDepth(0).setDisplaySize(TILE_SIZE, TILE_SIZE);
         this.waterSprites[r][c] = waterImg;
 
         // Layer 2: Topmost tile
         const { key, depth } = this.resolveTile(tile);
         const displayKey = this.aiTileKeys.has(key)
-          ? this.pickCropKey(key, r, c)
+          ? this.pickVariationKey(key, r, c)
           : key;
         const img = this.add.image(px, py, displayKey).setDepth(depth).setDisplaySize(TILE_SIZE, TILE_SIZE);
         this.tileSprites[r][c] = img;
@@ -166,28 +171,35 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Return a pre-generated crop-variant texture key for an AI tile.
+   * Return the best available variant texture key for a terrain tile.
    *
-   * Instead of using setCrop() at render time (which interacts poorly with
-   * setDisplaySize in Phaser 3), each AI source texture is sliced into a grid
-   * of 48×48 sub-textures during BootScene.  This method picks one
-   * deterministically based on grid position so adjacent tiles show different
-   * regions of the source — 1:1 pixel mapping, no scaling artefacts.
+   * Priority: Wang tiles > crop variants > base texture.
+   * - Wang tiles (16 unique, seamless, pre-generated at TILE_SIZE) — best quality.
+   * - Crop variants (25 from a 256×256 downscale) — good fallback.
+   * - Base texture as-is — last resort (no variation).
    */
-  private pickCropKey(baseKey: string, row: number, col: number): string {
-    const tex = this.textures.get(baseKey);
-    const src = tex?.source[0];
-    if (!src || (src.width <= TILE_SIZE && src.height <= TILE_SIZE)) {
-      return baseKey; // too small to crop — use as-is
+  private pickVariationKey(baseKey: string, row: number, col: number): string {
+    // 1. Wang tile sets: 16 seamless variants, 1:1 pixel mapping
+    if (this.wangTerrainKeys.has(baseKey)) {
+      const WANG_COUNT = 16;
+      const index = ((row * 31 + col * 17 + this.mapData.seed) >>> 0) % WANG_COUNT;
+      return `${baseKey}_wang_${index}`;
     }
 
-    // How many 48×48 crops fit in each dimension
-    const cols = Math.floor(src.width / TILE_SIZE);
-    const rows = Math.floor(src.height / TILE_SIZE);
+    // 2. Crop variants: 25 sub-textures from a 256×256 downscaled source
+    if (this.aiTileKeys.has(baseKey)) {
+      const tex = this.textures.get(baseKey);
+      const src = tex?.source[0];
+      if (src && (src.width > TILE_SIZE || src.height > TILE_SIZE)) {
+        const cols = Math.floor(src.width / TILE_SIZE);
+        const rows = Math.floor(src.height / TILE_SIZE);
+        const index = ((row * 31 + col * 17 + this.mapData.seed) >>> 0) % (rows * cols);
+        return `${baseKey}_crop_${index}`;
+      }
+    }
 
-    // Deterministic pick based on grid position + map seed
-    const index = ((row * 31 + col * 17 + this.mapData.seed) >>> 0) % (rows * cols);
-    return `${baseKey}_crop_${index}`;
+    // 3. Fallback: use the base texture as-is
+    return baseKey;
   }
 
   /** Determine the texture key and depth for a tile's topmost layer. */
@@ -226,7 +238,7 @@ export class GameScene extends Phaser.Scene {
     if (!sprite) return;
     const { key, depth } = this.resolveTile(this.mapData.grid[row][col]);
     const displayKey = this.aiTileKeys.has(key)
-      ? this.pickCropKey(key, row, col)
+      ? this.pickVariationKey(key, row, col)
       : key;
     sprite.setTexture(displayKey).setDepth(depth);
   }
