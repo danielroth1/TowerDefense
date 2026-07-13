@@ -152,16 +152,19 @@ export class GameScene extends Phaser.Scene {
         const px = c * TILE_SIZE + TILE_SIZE / 2;
         const py = r * TILE_SIZE + TILE_SIZE / 2;
 
-        // Layer 1: Water base under every cell
-        const waterKey = this.pickVariationKey('tile_ground', r, c);
-        const waterImg = this.add.image(px, py, waterKey).setDepth(0).setDisplaySize(TILE_SIZE, TILE_SIZE);
+        // Layer 1: Water base under every cell — use the seamless base
+        // texture directly (not Wang/crop variants). The source is seamless,
+        // so it tiles perfectly at TILE_SIZE with 1:1 pixel mapping.
+        const waterImg = this.add.image(px, py, 'tile_ground').setDepth(0).setDisplaySize(TILE_SIZE, TILE_SIZE);
         this.waterSprites[r][c] = waterImg;
 
         // Layer 2: Topmost tile
         const { key, depth } = this.resolveTile(tile);
-        const displayKey = this.aiTileKeys.has(key)
-          ? this.pickVariationKey(key, r, c)
-          : key;
+        // Use base texture for homogeneous layers (grass interior, ground),
+        // Wang/crop variants only for layers that need per-cell variation
+        const displayKey = (key === 'tile_buildable' || key === 'tile_ground')
+          ? key  // seamless base — tiles perfectly without variation
+          : (this.aiTileKeys.has(key) ? this.pickVariationKey(key, r, c) : key);
         const img = this.add.image(px, py, displayKey).setDepth(depth).setDisplaySize(TILE_SIZE, TILE_SIZE);
         this.tileSprites[r][c] = img;
       }
@@ -237,9 +240,9 @@ export class GameScene extends Phaser.Scene {
     const sprite = this.tileSprites[row]?.[col];
     if (!sprite) return;
     const { key, depth } = this.resolveTile(this.mapData.grid[row][col]);
-    const displayKey = this.aiTileKeys.has(key)
-      ? this.pickVariationKey(key, row, col)
-      : key;
+    const displayKey = (key === 'tile_buildable' || key === 'tile_ground')
+      ? key
+      : (this.aiTileKeys.has(key) ? this.pickVariationKey(key, row, col) : key);
     sprite.setTexture(displayKey).setDepth(depth);
   }
 

@@ -121,23 +121,18 @@ export class BootScene extends Phaser.Scene {
   }
 
   /**
-   * Downscale oversized AI tile textures and slice into TILE_SIZE crops.
+   * Downscale oversized AI tile textures.
    *
-   * Skips any key that has a Wang tile set — those are already pre-generated
-   * at exactly TILE_SIZE with 1:1 pixel mapping and 16× visual variety.
-   *
-   * For textures without Wang tiles (towers, non-terrain, or missing sets),
-   * we multi-step CPU-downscale to DOWNSAMPLE_SIZE, then slice the result
-   * into a grid of non-overlapping 48×48 sub-textures as a fallback.
+   * - Keys with Wang tile sets: downscale only to TILE_SIZE for homogeneous
+   *   background tiling (all tiles of this type use the same base texture,
+   *   which is seamless → perfect tiling with 1:1 pixel mapping).
+   * - Keys without Wang tiles: downscale to DOWNSAMPLE_SIZE, then slice into
+   *   crop sub-textures as a fallback for per-cell variation.
    */
   private generateMipmapsForAITiles(): void {
     const DOWNSAMPLE_SIZE = 256;
 
     for (const key of this.aiLoadedTiles) {
-      // Skip terrain keys that have a Wang tile set — those are already
-      // pre-generated at exactly TILE_SIZE, no downscale/slicing needed.
-      if (this.wangTerrainKeys.has(key)) continue;
-
       const texture = this.textures.get(key);
       if (!texture) continue;
 
@@ -145,16 +140,22 @@ export class BootScene extends Phaser.Scene {
       const img = source?.image as HTMLImageElement | undefined;
       if (!img) continue;
 
+      // Target size: TILE_SIZE if Wang tiles exist (homogeneous tiling),
+      // DOWNSAMPLE_SIZE otherwise (crop slicing needs more pixels).
+      const targetSize = this.wangTerrainKeys.has(key) ? TILE_SIZE : DOWNSAMPLE_SIZE;
+      const needsSlice = !this.wangTerrainKeys.has(key);
+      if (!img) continue;
+
       let finalCanvas: HTMLCanvasElement;
 
-      if (img.width > DOWNSAMPLE_SIZE) {
+      if (img.width > targetSize) {
         // ── Multi-step CPU downscale: halve repeatedly, then final step ──
         let src: TexImageSource = img;
         while (
           Math.max(
             (src as HTMLImageElement | HTMLCanvasElement).width,
             (src as HTMLImageElement | HTMLCanvasElement).height,
-          ) > DOWNSAMPLE_SIZE * 2
+          ) > targetSize * 2
         ) {
           const w = (src as HTMLImageElement | HTMLCanvasElement).width;
           const h = (src as HTMLImageElement | HTMLCanvasElement).height;
@@ -171,7 +172,7 @@ export class BootScene extends Phaser.Scene {
 
         const srcW = (src as HTMLImageElement | HTMLCanvasElement).width;
         const srcH = (src as HTMLImageElement | HTMLCanvasElement).height;
-        const finalScale = DOWNSAMPLE_SIZE / Math.max(srcW, srcH);
+        const finalScale = targetSize / Math.max(srcW, srcH);
         const dw = Math.round(srcW * finalScale);
         const dh = Math.round(srcH * finalScale);
 
@@ -188,15 +189,17 @@ export class BootScene extends Phaser.Scene {
         this.textures.remove(key);
         this.textures.addCanvas(key, finalCanvas);
       } else {
-        // Already small enough — extract a canvas copy for slicing
+        // Already small enough — extract a canvas copy
         finalCanvas = document.createElement('canvas');
         finalCanvas.width = img.width;
         finalCanvas.height = img.height;
         finalCanvas.getContext('2d')!.drawImage(img, 0, 0);
       }
 
-      // Slice into TILE_SIZE × TILE_SIZE crop sub-textures
-      this.sliceCropTextures(key, finalCanvas);
+      // Slice into crop sub-textures (only for non-Wang keys that need per-cell variation)
+      if (needsSlice) {
+        this.sliceCropTextures(key, finalCanvas);
+      }
     }
   }
 
