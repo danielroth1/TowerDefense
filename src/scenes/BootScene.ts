@@ -65,6 +65,10 @@ export class BootScene extends Phaser.Scene {
     this.generateParticleTextures();
     this.generateUITextures();
     this.registerAnimations();
+
+    // Share the set of AI-loaded tile keys so GameScene can apply crop variation
+    this.game.registry.set('aiTiles', [...this.aiLoadedTiles]);
+
     this.scene.start('MenuScene');
   }
 
@@ -81,19 +85,17 @@ export class BootScene extends Phaser.Scene {
   }
 
   /**
-   * Downscale oversized AI tile textures to reduce aliasing when zoomed out.
+   * Downscale oversized AI tile textures and slice into TILE_SIZE crops.
    *
-   * AI tiles are 1024×1024 but displayed at 48×48 (TILE_SIZE). Without mipmaps,
-   * the GPU's bilinear filter samples only 4 texels per fragment, producing
-   * aliasing artefacts that are especially visible when the camera zooms out.
-   *
-   * Instead of touching WebGL internals (which can corrupt Phaser's texture
-   * state), we downscale the source image via a CPU canvas and replace the
-   * texture.  A 4× downscale (1024→256) dramatically reduces the sampling
-   * ratio mismatch while preserving enough detail for close-up views.
+   * AI tiles are 1024×1024 — too large for WebGL and wasteful at 48×48
+   * display.  We multi-step CPU-downscale to DOWNSAMPLE_SIZE, then slice the
+   * result into a grid of non-overlapping 48×48 sub-textures.  Each sub-texture
+   * is registered as `{key}_crop_N` and rendered 1:1 by GameScene — zero GPU
+   * scaling means crisp tiles with per-cell variation via deterministic crop
+   * selection.
    */
   private generateMipmapsForAITiles(): void {
-    const MAX_SIZE = 256; // target max dimension after downscale
+    const DOWNSAMPLE_SIZE = 256;
 
     for (const key of this.aiLoadedTiles) {
       const texture = this.textures.get(key);
@@ -101,26 +103,90 @@ export class BootScene extends Phaser.Scene {
 
       const source = texture.source[0];
       const img = source?.image as HTMLImageElement | undefined;
-      if (!img || img.width <= MAX_SIZE) continue;
+      if (!img) continue;
 
-      // Downscale via canvas
-      const scale = MAX_SIZE / Math.max(img.width, img.height);
-      const dw = Math.round(img.width * scale);
-      const dh = Math.round(img.height * scale);
+      let finalCanvas: HTMLCanvasElement;
 
-      const canvas = document.createElement('canvas');
-      canvas.width = dw;
-      canvas.height = dh;
-      const ctx = canvas.getContext('2d')!;
-      // Use imageSmoothingQuality for a high-quality downscale
-      if ('imageSmoothingQuality' in ctx) {
-        (ctx as any).imageSmoothingQuality = 'high';
+      if (img.width > DOWNSAMPLE_SIZE) {
+        // ── Multi-step CPU downscale: halve repeatedly, then final step ──
+        let src: TexImageSource = img;
+        while (
+          Math.max(
+            (src as HTMLImageElement | HTMLCanvasElement).width,
+            (src as HTMLImageElement | HTMLCanvasElement).height,
+          ) > DOWNSAMPLE_SIZE * 2
+        ) {
+          const w = (src as HTMLImageElement | HTMLCanvasElement).width;
+          const h = (src as HTMLImageElement | HTMLCanvasElement).height;
+          const stepCanvas = document.createElement('canvas');
+          stepCanvas.width = Math.round(w / 2);
+          stepCanvas.height = Math.round(h / 2);
+          const stepCtx = stepCanvas.getContext('2d')!;
+          if ('imageSmoothingQuality' in stepCtx) {
+            (stepCtx as any).imageSmoothingQuality = 'high';
+          }
+          stepCtx.drawImage(src, 0, 0, stepCanvas.width, stepCanvas.height);
+          src = stepCanvas;
+        }
+
+        const srcW = (src as HTMLImageElement | HTMLCanvasElement).width;
+        const srcH = (src as HTMLImageElement | HTMLCanvasElement).height;
+        const finalScale = DOWNSAMPLE_SIZE / Math.max(srcW, srcH);
+        const dw = Math.round(srcW * finalScale);
+        const dh = Math.round(srcH * finalScale);
+
+        finalCanvas = document.createElement('canvas');
+        finalCanvas.width = dw;
+        finalCanvas.height = dh;
+        const ctx = finalCanvas.getContext('2d')!;
+        if ('imageSmoothingQuality' in ctx) {
+          (ctx as any).imageSmoothingQuality = 'high';
+        }
+        ctx.drawImage(src, 0, 0, dw, dh);
+
+        // Replace the huge original with the downscaled version
+        this.textures.remove(key);
+        this.textures.addCanvas(key, finalCanvas);
+      } else {
+        // Already small enough — extract a canvas copy for slicing
+        finalCanvas = document.createElement('canvas');
+        finalCanvas.width = img.width;
+        finalCanvas.height = img.height;
+        finalCanvas.getContext('2d')!.drawImage(img, 0, 0);
       }
-      ctx.drawImage(img, 0, 0, dw, dh);
 
-      // Remove the huge original and add the downscaled version under the same key
-      this.textures.remove(key);
-      this.textures.addCanvas(key, canvas);
+      // Slice into TILE_SIZE × TILE_SIZE crop sub-textures
+      this.sliceCropTextures(key, finalCanvas);
+    }
+  }
+
+  /**
+   * Slice a canvas into a grid of TILE_SIZE × TILE_SIZE sub-textures.
+   * Each sub-texture is registered as `{baseKey}_crop_N`.
+   */
+  private sliceCropTextures(baseKey: string, canvas: HTMLCanvasElement): void {
+    const cols = Math.floor(canvas.width / TILE_SIZE);
+    const rows = Math.floor(canvas.height / TILE_SIZE);
+    if (cols < 1 || rows < 1) return;
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const index = r * cols + c;
+        const cropKey = `${baseKey}_crop_${index}`;
+        if (this.textures.exists(cropKey)) this.textures.remove(cropKey);
+
+        // Each slice needs its own canvas — addCanvas stores a reference
+        const slice = document.createElement('canvas');
+        slice.width = TILE_SIZE;
+        slice.height = TILE_SIZE;
+        const sctx = slice.getContext('2d')!;
+        sctx.drawImage(
+          canvas,
+          c * TILE_SIZE, r * TILE_SIZE, TILE_SIZE, TILE_SIZE,
+          0, 0, TILE_SIZE, TILE_SIZE,
+        );
+        this.textures.addCanvas(cropKey, slice);
+      }
     }
   }
 

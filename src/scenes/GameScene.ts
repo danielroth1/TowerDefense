@@ -33,6 +33,9 @@ export class GameScene extends Phaser.Scene {
   private tileSprites: Phaser.GameObjects.Image[][] = [];
   private waterSprites: Phaser.GameObjects.Image[][] = [];
 
+  /** Keys of AI-loaded tile textures that support crop-based variation. */
+  private aiTileKeys: Set<string> = new Set();
+
   // Groups
   private towerGroup!: Phaser.GameObjects.Group;
   private enemyGroup!: Phaser.Physics.Arcade.Group;
@@ -104,6 +107,10 @@ export class GameScene extends Phaser.Scene {
   private _debug: boolean = false;
 
   create() {
+    // Read the set of AI tile keys from BootScene (shared via registry)
+    const keys: string[] | undefined = this.game.registry.get('aiTiles');
+    this.aiTileKeys = new Set(keys ?? []);
+
     this.setupPhysics();
     this.buildMap();
     this.createGroups();
@@ -141,17 +148,46 @@ export class GameScene extends Phaser.Scene {
         const py = r * TILE_SIZE + TILE_SIZE / 2;
 
         // Layer 1: Water base under every cell
-        const waterImg = this.add.image(px, py, 'tile_ground').setDepth(0).setDisplaySize(TILE_SIZE, TILE_SIZE);
+        const waterKey = this.pickCropKey('tile_ground', r, c);
+        const waterImg = this.add.image(px, py, waterKey).setDepth(0).setDisplaySize(TILE_SIZE, TILE_SIZE);
         this.waterSprites[r][c] = waterImg;
 
-        // Layer 2: Topmost tile (transition, buildable, path, special, or ground)
+        // Layer 2: Topmost tile
         const { key, depth } = this.resolveTile(tile);
-        const img = this.add.image(px, py, key).setDepth(depth).setDisplaySize(TILE_SIZE, TILE_SIZE);
+        const displayKey = this.aiTileKeys.has(key)
+          ? this.pickCropKey(key, r, c)
+          : key;
+        const img = this.add.image(px, py, displayKey).setDepth(depth).setDisplaySize(TILE_SIZE, TILE_SIZE);
         this.tileSprites[r][c] = img;
       }
     }
 
     this.hoverOverlay = this.add.image(0, 0, 'tile_buildable_hover').setAlpha(0).setDepth(1).setDisplaySize(TILE_SIZE, TILE_SIZE);
+  }
+
+  /**
+   * Return a pre-generated crop-variant texture key for an AI tile.
+   *
+   * Instead of using setCrop() at render time (which interacts poorly with
+   * setDisplaySize in Phaser 3), each AI source texture is sliced into a grid
+   * of 48×48 sub-textures during BootScene.  This method picks one
+   * deterministically based on grid position so adjacent tiles show different
+   * regions of the source — 1:1 pixel mapping, no scaling artefacts.
+   */
+  private pickCropKey(baseKey: string, row: number, col: number): string {
+    const tex = this.textures.get(baseKey);
+    const src = tex?.source[0];
+    if (!src || (src.width <= TILE_SIZE && src.height <= TILE_SIZE)) {
+      return baseKey; // too small to crop — use as-is
+    }
+
+    // How many 48×48 crops fit in each dimension
+    const cols = Math.floor(src.width / TILE_SIZE);
+    const rows = Math.floor(src.height / TILE_SIZE);
+
+    // Deterministic pick based on grid position + map seed
+    const index = ((row * 31 + col * 17 + this.mapData.seed) >>> 0) % (rows * cols);
+    return `${baseKey}_crop_${index}`;
   }
 
   /** Determine the texture key and depth for a tile's topmost layer. */
@@ -189,7 +225,10 @@ export class GameScene extends Phaser.Scene {
     const sprite = this.tileSprites[row]?.[col];
     if (!sprite) return;
     const { key, depth } = this.resolveTile(this.mapData.grid[row][col]);
-    sprite.setTexture(key).setDepth(depth);
+    const displayKey = this.aiTileKeys.has(key)
+      ? this.pickCropKey(key, row, col)
+      : key;
+    sprite.setTexture(displayKey).setDepth(depth);
   }
 
   private createGroups() {
