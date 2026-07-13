@@ -27,6 +27,12 @@ import type { TowerType } from '../data/towers';
 import { TOWER_DEFS, TOWER_TYPES_ORDERED } from '../data/towers';
 import { ABILITY_DEFS, type AbilityType } from '../data/abilities';
 
+/** Map alias texture keys to their base terrain keys for Wang tile lookup. */
+const ALIAS_TO_TERRAIN: Record<string, string> = {
+  'tile_buildable': 'tile_grass',
+  'tile_ground': 'tile_water',
+};
+
 export class GameScene extends Phaser.Scene {
   // Map
   private mapData!: MapData;
@@ -160,11 +166,11 @@ export class GameScene extends Phaser.Scene {
 
         // Layer 2: Topmost tile
         const { key, depth } = this.resolveTile(tile);
-        // Use base texture for homogeneous layers (grass interior, ground),
-        // Wang/crop variants only for layers that need per-cell variation
-        const displayKey = (key === 'tile_buildable' || key === 'tile_ground')
-          ? key  // seamless base — tiles perfectly without variation
-          : (this.aiTileKeys.has(key) ? this.pickVariationKey(key, r, c) : key);
+        // Apply Wang/crop variation to ALL layers including grass interior
+        // and water so the map doesn't show identical repeating tiles.
+        const displayKey = this.aiTileKeys.has(key)
+          ? this.pickVariationKey(key, r, c)
+          : key;
         const img = this.add.image(px, py, displayKey).setDepth(depth).setDisplaySize(TILE_SIZE, TILE_SIZE);
         this.tileSprites[r][c] = img;
       }
@@ -182,11 +188,15 @@ export class GameScene extends Phaser.Scene {
    * - Base texture as-is — last resort (no variation).
    */
   private pickVariationKey(baseKey: string, row: number, col: number): string {
+    // Resolve alias keys to their base terrain key for Wang lookup
+    // (tile_buildable → tile_grass, tile_ground → tile_water)
+    const terrainKey = ALIAS_TO_TERRAIN[baseKey] ?? baseKey;
+
     // 1. Wang tile sets: 16 seamless variants, 1:1 pixel mapping
-    if (this.wangTerrainKeys.has(baseKey)) {
+    if (this.wangTerrainKeys.has(terrainKey)) {
       const WANG_COUNT = 16;
       const index = ((row * 31 + col * 17 + this.mapData.seed) >>> 0) % WANG_COUNT;
-      return `${baseKey}_wang_${index}`;
+      return `${terrainKey}_wang_${index}`;
     }
 
     // 2. Crop variants: 25 sub-textures from a 256×256 downscaled source
@@ -240,9 +250,9 @@ export class GameScene extends Phaser.Scene {
     const sprite = this.tileSprites[row]?.[col];
     if (!sprite) return;
     const { key, depth } = this.resolveTile(this.mapData.grid[row][col]);
-    const displayKey = (key === 'tile_buildable' || key === 'tile_ground')
-      ? key
-      : (this.aiTileKeys.has(key) ? this.pickVariationKey(key, row, col) : key);
+    const displayKey = this.aiTileKeys.has(key)
+      ? this.pickVariationKey(key, row, col)
+      : key;
     sprite.setTexture(displayKey).setDepth(depth);
   }
 
