@@ -40,6 +40,13 @@ export class GameScene extends Phaser.Scene {
   private tileSprites: Phaser.GameObjects.Image[][] = [];
   private waterSprites: Phaser.GameObjects.Image[][] = [];
 
+  /**
+   * Alpha-mask overlay sprites for edge grass cells.
+   * These sit on top of a Wang tile to hide grass in the water area.
+   * Null for cells that don't need an overlay.
+   */
+  private overlaySprites: (Phaser.GameObjects.Image | null)[][] = [];
+
   /** Keys of AI-loaded tile textures that support crop-based variation. */
   private aiTileKeys: Set<string> = new Set();
 
@@ -163,10 +170,12 @@ export class GameScene extends Phaser.Scene {
     const { grid } = this.mapData;
     this.tileSprites = [];
     this.waterSprites = [];
+    this.overlaySprites = [];
 
     for (let r = 0; r < GRID_ROWS; r++) {
       this.tileSprites[r] = [];
       this.waterSprites[r] = [];
+      this.overlaySprites[r] = [];
       for (let c = 0; c < GRID_COLS; c++) {
         const tile = grid[r][c];
         const px = c * TILE_SIZE + TILE_SIZE / 2;
@@ -178,8 +187,8 @@ export class GameScene extends Phaser.Scene {
         const waterImg = this.add.image(px, py, 'tile_ground').setDepth(0).setDisplaySize(TILE_SIZE, TILE_SIZE);
         this.waterSprites[r][c] = waterImg;
 
-        // Layer 2: Topmost tile
-        const { key, depth } = this.resolveTile(tile);
+        // Layer 2: Topmost tile (and optional alpha-mask overlay)
+        const { key, depth, overlayKey, overlayDepth } = this.resolveTile(tile);
         // Apply Wang/crop variation to ALL layers including grass interior
         // and water so the map doesn't show identical repeating tiles.
         const displayKey = this.aiTileKeys.has(key)
@@ -187,6 +196,16 @@ export class GameScene extends Phaser.Scene {
           : key;
         const img = this.add.image(px, py, displayKey).setDepth(depth).setDisplaySize(TILE_SIZE, TILE_SIZE);
         this.tileSprites[r][c] = img;
+
+        // Layer 3: Alpha-mask overlay (only for edge grass cells)
+        if (overlayKey && this.textures.exists(overlayKey)) {
+          const overlay = this.add.image(px, py, overlayKey)
+            .setDepth(overlayDepth ?? depth + 0.01)
+            .setDisplaySize(TILE_SIZE, TILE_SIZE);
+          this.overlaySprites[r][c] = overlay;
+        } else {
+          this.overlaySprites[r][c] = null;
+        }
       }
     }
 
@@ -273,8 +292,13 @@ export class GameScene extends Phaser.Scene {
     return tl * 8 + tr * 4 + br * 2 + bl;
   }
 
-  /** Determine the texture key and depth for a tile's topmost layer. */
-  private resolveTile(tile: GridTile): { key: string; depth: number; transitionKey?: string } {
+  /**
+   * Determine the texture key and depth for a tile's topmost layer.
+   *
+   * For edge grass cells, also returns an alpha-mask overlay that sits on
+   * top of the Wang tile to hide grass in the water area.
+   */
+  private resolveTile(tile: GridTile): { key: string; depth: number; overlayKey?: string; overlayDepth?: number } {
     if (tile.type === 'spawn') {
       const mask = computeTerrainBlobMask(this.mapData.grid, tile.row, tile.col);
       return { key: mask === 15 ? 'tile_spawn' : transitionTileKey('spawn', mask), depth: 0.15 };
@@ -306,11 +330,21 @@ export class GameScene extends Phaser.Scene {
         return { key: displayKey, depth: 0.1 };
       }
 
-      // Edge cell: use the SDF transition overlay (which bakes the base
-      // grass texture into the blob shape).  No separate Wang tile underneath
-      // because the transition fills the blob region and is transparent
-      // outside it — a full-tile wang sprite would bleed grass into water.
-      return { key: transitionTileKey('grass', cardinalMask), depth: 0.05 };
+      // Edge cell: render a Wang tile underneath + alpha-mask overlay on top.
+      // The Wang tile provides sharp 48×48 1:1 grass detail. The overlay is
+      // transparent in the grass-blob area (letting the Wang tile show) and
+      // shows the water texture outside (hiding the grass Wang tile in water).
+      const edgeWangIndex = this.computeWangIndex(tile.row, tile.col);
+      const edgeDisplayKey = this.aiTileKeys.has('tile_buildable')
+        ? this.pickVariationKey('tile_buildable', tile.row, tile.col, edgeWangIndex)
+        : 'tile_buildable';
+      const alphaMaskKey = `tile_trans_alpha_grass_${cardinalMask}`;
+      return {
+        key: edgeDisplayKey,
+        depth: 0.05,
+        overlayKey: this.textures.exists(alphaMaskKey) ? alphaMaskKey : undefined,
+        overlayDepth: 0.06,
+      };
     }
     // Ground / water — use random vertex-based Wang tiles for varied
     // seamless tiling, just like interior grass cells.
@@ -322,11 +356,30 @@ export class GameScene extends Phaser.Scene {
   private refreshTileSprite(row: number, col: number): void {
     const sprite = this.tileSprites[row]?.[col];
     if (!sprite) return;
-    const { key, depth } = this.resolveTile(this.mapData.grid[row][col]);
+    const { key, depth, overlayKey, overlayDepth } = this.resolveTile(this.mapData.grid[row][col]);
     const displayKey = this.aiTileKeys.has(key)
       ? this.pickVariationKey(key, row, col)
       : key;
     sprite.setTexture(displayKey).setDepth(depth);
+
+    // Update or destroy the overlay sprite
+    const overlay = this.overlaySprites[row]?.[col];
+    if (overlay) {
+      if (overlayKey) {
+        overlay.setTexture(overlayKey).setDepth(overlayDepth ?? depth + 0.01).setVisible(true);
+      } else {
+        overlay.setVisible(false);
+      }
+    } else if (overlayKey && this.textures.exists(overlayKey)) {
+      const px = col * TILE_SIZE + TILE_SIZE / 2;
+      const py = row * TILE_SIZE + TILE_SIZE / 2;
+      const newOverlay = this.add.image(px, py, overlayKey)
+        .setDepth(overlayDepth ?? depth + 0.01)
+        .setDisplaySize(TILE_SIZE, TILE_SIZE);
+      if (!this.overlaySprites[row]) this.overlaySprites[row] = [];
+      this.overlaySprites[row][col] = newOverlay;
+      if (this.uiCam) this.uiCam.ignore(newOverlay);
+    }
   }
 
   private createGroups() {
@@ -504,6 +557,13 @@ export class GameScene extends Phaser.Scene {
     for (const row of this.waterSprites) {
       for (const img of row) {
         if (img) this.uiCam.ignore(img);
+      }
+    }
+
+    // Overlay sprites (edge grass alpha masks)
+    for (const row of this.overlaySprites) {
+      for (const overlay of row) {
+        if (overlay) this.uiCam.ignore(overlay);
       }
     }
 

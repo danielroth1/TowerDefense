@@ -3,7 +3,7 @@ import { COLORS, TILE_SIZE } from '../utils/constants';
 import { TOWER_DEFS, TOWER_TYPES_ORDERED } from '../data/towers';
 import { ENEMY_DEFS, BOSS_DEFS } from '../data/enemies';
 import { generateBlobTextures, generateBlobTexturesFromSource } from '../systems/BlobTileset';
-import { generateTransitionTextures } from '../systems/TerrainTransition';
+import { generateTransitionTextures, generateTransitionAlphaMasks } from '../systems/TerrainTransition';
 
 export class BootScene extends Phaser.Scene {
   /** Set of tile keys that were loaded from AI-generated images (vs procedural). */
@@ -495,6 +495,13 @@ export class BootScene extends Phaser.Scene {
     // pass its key as the source so it gets baked into the transition polygons.
     const grassSource = this.textures.exists('tile_grass') ? 'tile_grass' : undefined;
     generateTransitionTextures(this, 'grass', grassSource);
+
+    // Generate alpha-mask overlays for edge grass cells. These are transparent
+    // in the grass-blob area and show water outside, so they can be rendered
+    // on top of a sharp 48×48 Wang tile to hide the grass in the water zone.
+    if (this.textures.exists('tile_ground')) {
+      generateTransitionAlphaMasks(this, 'grass', 'tile_ground');
+    }
 
     // Spawn and goal tiles get the same SDF-based corner blending so their
     // water-facing edges blend organically instead of showing hard squares.

@@ -369,6 +369,102 @@ function connectedEdgeNoiseWeight(px: number, py: number, mask: number): number 
 }
 
 /**
+ * Generate 16 alpha-mask transition overlays for edge grass cells.
+ *
+ * These overlays are transparent (α=0) inside the grass blob and show the
+ * water texture (α=1) outside it, with a smooth SDF+noise edge. When
+ * rendered on top of a sharp 48×48 Wang tile at depth+0.01:
+ *
+ *   - Grass area: overlay is transparent → Wang tile shows through (sharp)
+ *   - Edge: smooth alpha blend
+ *   - Water area: overlay shows water → hides the grass Wang tile
+ *
+ * Call this during BootScene.create() after base tiles are ready.
+ *
+ * @param scene            — Phaser scene
+ * @param terrainId        — terrain identifier ('grass', 'sand', 'water')
+ * @param waterTextureKey  — key of the water texture to fill outside areas
+ */
+export function generateTransitionAlphaMasks(
+  scene: Phaser.Scene,
+  terrainId: string,
+  waterTextureKey: string,
+): void {
+  const noise = getTransitionNoise();
+  const waterTex = scene.textures.get(waterTextureKey);
+  if (!waterTex) return;
+  const waterImg = waterTex.getSourceImage() as HTMLImageElement | HTMLCanvasElement;
+  if (!waterImg) return;
+
+  for (let mask = 0; mask < 16; mask++) {
+    const key = `tile_trans_alpha_${terrainId}_${mask}`;
+    if (scene.textures.exists(key)) continue;
+
+    const ct = scene.textures.createCanvas(key, TS, TS);
+    if (!ct) continue;
+    const ctx = ct.getContext();
+
+    const noiseOffX = (mask * 17 + 3) % NOISE_SIZE;
+    const noiseOffY = (mask * 11 + 7) % NOISE_SIZE;
+    drawTransitionAlphaMask(ctx, mask, waterImg, noise, C, noiseOffX, noiseOffY);
+
+    ct.refresh();
+  }
+}
+
+/**
+ * Draw an alpha-mask overlay tile onto ctx.
+ *
+ * Fills with the water texture, then applies the inverted SDF+noise alpha so
+ * that the grass-blob area is transparent (α=0) and the water area is opaque
+ * (α=1).  Rendered at TS resolution, displayed at TILE_SIZE via GPU bilinear.
+ */
+function drawTransitionAlphaMask(
+  ctx: CanvasRenderingContext2D,
+  mask: number,
+  waterImg: HTMLImageElement | HTMLCanvasElement,
+  noise: Float32Array,
+  hw: number,
+  noiseOffX: number = 0,
+  noiseOffY: number = 0,
+): void {
+  // Pre-render water at TS resolution
+  const tmp = document.createElement('canvas');
+  tmp.width = TS;
+  tmp.height = TS;
+  const tmpCtx = tmp.getContext('2d')!;
+  tmpCtx.drawImage(waterImg, 0, 0, TS, TS);
+  const src = tmpCtx.getImageData(0, 0, TS, TS).data;
+
+  const out = ctx.createImageData(TS, TS);
+  const od  = out.data;
+
+  for (let py = 0; py < TS; py++) {
+    for (let px = 0; px < TS; px++) {
+      const sdf = signedDistanceToBlob(px, py, mask, hw);
+      const n   = noise[((py + noiseOffY) % NOISE_SIZE) * NOISE_SIZE + ((px + noiseOffX) % NOISE_SIZE)] - 0.5;
+      const nw  = connectedEdgeNoiseWeight(px, py, mask);
+      const feather = FEATHER_CONN + (FEATHER_WATER - FEATHER_CONN) * nw;
+      const bias    = FEATHER_WATER * (1.0 - nw);
+      const d       = sdf - bias + n * NOISE_AMP * nw;
+      // grassAlpha = 1 inside the grass blob, 0 outside
+      const grassAlpha = 1 - smoothstepFn(-feather, feather, d);
+      // Overlay alpha: inverted — transparent in grass area, opaque in water
+      const overlayAlpha = 1 - grassAlpha;
+      if (overlayAlpha <= 0) continue;
+
+      const i = (py * TS + px) * 4;
+      od[i]     = src[i];
+      od[i + 1] = src[i + 1];
+      od[i + 2] = src[i + 2];
+      od[i + 3] = Math.round(overlayAlpha * 255);
+    }
+  }
+
+  ctx.putImageData(out, 0, 0);
+}
+
+/**
  * Draw a transition tile onto ctx by combining an AI source texture with
  * the blob SDF perturbed by noise.  No banding — fully smooth alpha.
  */
