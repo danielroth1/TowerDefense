@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { generateMap, type MapData, type GridTile } from '../systems/MapGenerator';
 import { computeBlobMask, blobTileKey } from '../systems/BlobTileset';
-import { computeTerrainBlobMask, transitionTileKey } from '../systems/TerrainTransition';
+import { computeTerrainBlobMask, transitionTileKey, computeCornerMask, cornerMaskToWangIndex } from '../systems/TerrainTransition';
 import { Tower } from '../entities/Tower';
 import { Enemy } from '../entities/Enemy';
 import { Projectile, type ProjectileConfig } from '../entities/Projectile';
@@ -182,20 +182,30 @@ export class GameScene extends Phaser.Scene {
   /**
    * Return the best available variant texture key for a terrain tile.
    *
-   * Priority: Wang tiles > crop variants > base texture.
-   * - Wang tiles (16 unique, seamless, pre-generated at TILE_SIZE) — best quality.
-   * - Crop variants (25 from a 256×256 downscale) — good fallback.
-   * - Base texture as-is — last resort (no variation).
+   * Priority: Wang tiles (corner-matched) > Wang tiles (random) > crop variants > base texture.
+   *
+   * @param baseKey      — the texture key (may be an alias like tile_buildable)
+   * @param row          — grid row
+   * @param col          — grid column
+   * @param wangIndex    — (optional) explicit Wang tile index from corner mask.
+   *                        When provided, uses this exact tile for seamless
+   *                        edge matching. When omitted, picks randomly.
    */
-  private pickVariationKey(baseKey: string, row: number, col: number): string {
+  private pickVariationKey(
+    baseKey: string,
+    row: number,
+    col: number,
+    wangIndex?: number,
+  ): string {
     // Resolve alias keys to their base terrain key for Wang lookup
-    // (tile_buildable → tile_grass, tile_ground → tile_water)
     const terrainKey = ALIAS_TO_TERRAIN[baseKey] ?? baseKey;
 
     // 1. Wang tile sets: 16 seamless variants, 1:1 pixel mapping
     if (this.wangTerrainKeys.has(terrainKey)) {
       const WANG_COUNT = 16;
-      const index = ((row * 31 + col * 17 + this.mapData.seed) >>> 0) % WANG_COUNT;
+      const index = wangIndex !== undefined
+        ? wangIndex % WANG_COUNT
+        : ((row * 31 + col * 17 + this.mapData.seed) >>> 0) % WANG_COUNT;
       return `${terrainKey}_wang_${index}`;
     }
 
@@ -216,7 +226,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   /** Determine the texture key and depth for a tile's topmost layer. */
-  private resolveTile(tile: GridTile): { key: string; depth: number } {
+  private resolveTile(tile: GridTile): { key: string; depth: number; transitionKey?: string } {
     if (tile.type === 'spawn') {
       const mask = computeTerrainBlobMask(this.mapData.grid, tile.row, tile.col);
       return { key: mask === 15 ? 'tile_spawn' : transitionTileKey('spawn', mask), depth: 0.15 };
@@ -234,12 +244,28 @@ export class GameScene extends Phaser.Scene {
       return { key, depth: 0.2 };
     }
     if (tile.type === 'buildable') {
-      const mask = computeTerrainBlobMask(this.mapData.grid, tile.row, tile.col);
-      // Blobs: mask 0 = isolated (no neighbours) → full grass tile.
-      // Mask 15 = fully surrounded → solid fill.
-      // Masks 1-14 = edge cells → blob transition blends into water.
-      if (mask === 0 || mask === 15) return { key: 'tile_buildable', depth: 0.1 };
-      return { key: transitionTileKey('grass', mask), depth: 0.05 };
+      const cardinalMask = computeTerrainBlobMask(this.mapData.grid, tile.row, tile.col);
+
+      // Compute corner mask for correct Wang tile selection.
+      // A corner is "connected" (1) when the cell and both adjacent cardinals
+      // AND the diagonal neighbour are all buildable — see computeCornerMask.
+      const cornerMask = computeCornerMask(this.mapData.grid, tile.row, tile.col, 'buildable');
+      const wangIndex = cornerMaskToWangIndex(cornerMask);
+
+      // Interior (fully surrounded) or isolated: use the corner-matched
+      // Wang tile directly — no transition overlay needed.
+      if (cardinalMask === 0 || cardinalMask === 15) {
+        const displayKey = this.aiTileKeys.has('tile_buildable')
+          ? this.pickVariationKey('tile_buildable', tile.row, tile.col, wangIndex)
+          : 'tile_buildable';
+        return { key: displayKey, depth: 0.1 };
+      }
+
+      // Edge cell: use the SDF transition overlay (which bakes the base
+      // grass texture into the blob shape).  No separate Wang tile underneath
+      // because the transition fills the blob region and is transparent
+      // outside it — a full-tile wang sprite would bleed grass into water.
+      return { key: transitionTileKey('grass', cardinalMask), depth: 0.05 };
     }
     // Ground / water — only the water base layer is visible
     return { key: 'tile_ground', depth: 0 };

@@ -77,6 +77,66 @@ export function transitionTileKey(terrainId: string, mask: number): string {
   return `tile_trans_${terrainId}_${mask}`;
 }
 
+// ─── Wang tile corner mask ────────────────────────────────────────────────
+
+/**
+ * Corner bit weights for Wang tile selection.
+ *
+ * A corner is 1 ("connected") only if the tile itself AND both adjacent
+ * cardinal neighbours AND the diagonal neighbour all match the target
+ * terrain (i.e. are NOT water/ground).
+ *
+ * | Corner | Bit | Value | Cells checked                            |
+ * |--------|-----|-------|------------------------------------------|
+ * | TL     | 0   | 1     | (r,c), (r-1,c), (r,c-1), (r-1,c-1)     |
+ * | TR     | 1   | 2     | (r,c), (r-1,c), (r,c+1), (r-1,c+1)     |
+ * | BR     | 2   | 4     | (r,c), (r+1,c), (r,c+1), (r+1,c+1)     |
+ * | BL     | 3   | 8     | (r,c), (r+1,c), (r,c-1), (r+1,c-1)     |
+ */
+export function computeCornerMask(
+  grid: { type: string }[][],
+  row: number,
+  col: number,
+  targetType: string,
+): number {
+  const same = (r: number, c: number) => {
+    if (r < 0 || r >= GRID_ROWS || c < 0 || c >= GRID_COLS) return false;
+    return grid[r][c].type === targetType;
+  };
+
+  let mask = 0;
+  const here = same(row, col);
+  if (!here) return 0; // cell itself isn't the target terrain
+
+  // TL: (r,c), (r-1,c), (r,c-1), (r-1,c-1)
+  if (same(row - 1, col) && same(row, col - 1) && same(row - 1, col - 1)) mask |= 1;
+  // TR: (r,c), (r-1,c), (r,c+1), (r-1,c+1)
+  if (same(row - 1, col) && same(row, col + 1) && same(row - 1, col + 1)) mask |= 2;
+  // BR: (r,c), (r+1,c), (r,c+1), (r+1,c+1)
+  if (same(row + 1, col) && same(row, col + 1) && same(row + 1, col + 1)) mask |= 4;
+  // BL: (r,c), (r+1,c), (r,c-1), (r+1,c-1)
+  if (same(row + 1, col) && same(row, col - 1) && same(row + 1, col - 1)) mask |= 8;
+
+  return mask;
+}
+
+/**
+ * Convert a 4-bit corner mask to the Wang tile index used by
+ * tools/wang-tiles/generate.mjs.
+ *
+ * Generator uses:  tileIndex = tl*8 + tr*4 + br*2 + bl
+ * Corner mask:     TL=bit0, TR=bit1, BR=bit2, BL=bit3
+ *
+ * This is a 4-bit nibble reversal.
+ */
+export function cornerMaskToWangIndex(cornerMask: number): number {
+  const tl = (cornerMask & 1) ? 1 : 0;       // TL → bit 0 → wang tl (value 8)
+  const tr = (cornerMask & 2) ? 1 : 0;       // TR → bit 1 → wang tr (value 4)
+  const br = (cornerMask & 4) ? 1 : 0;       // BR → bit 2 → wang br (value 2)
+  const bl = (cornerMask & 8) ? 1 : 0;       // BL → bit 3 → wang bl (value 1)
+  return tl * 8 + tr * 4 + br * 2 + bl;
+}
+
 // ─── Texture generation ───────────────────────────────────────────────────
 
 /** Internal generation resolution scale. Higher = sharper AI source sampling
