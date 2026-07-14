@@ -36,8 +36,8 @@ const config: Phaser.Types.Core.GameConfig = {
   },
   scene: [BootScene, MenuScene, GameScene, GameOverScene],
   render: {
-    antialias: true,
-    pixelArt: false,
+    antialias: false,
+    pixelArt: true,
   },
   scale: {
     mode: Phaser.Scale.RESIZE,
