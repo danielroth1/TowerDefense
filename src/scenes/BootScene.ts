@@ -123,11 +123,14 @@ export class BootScene extends Phaser.Scene {
   /**
    * Downscale oversized AI tile textures.
    *
-   * - Keys with Wang tile sets: downscale only to TILE_SIZE for homogeneous
-   *   background tiling (all tiles of this type use the same base texture,
-   *   which is seamless → perfect tiling with 1:1 pixel mapping).
-   * - Keys without Wang tiles: downscale to DOWNSAMPLE_SIZE, then slice into
-   *   crop sub-textures as a fallback for per-cell variation.
+   * Always downscale to DOWNSAMPLE_SIZE so that:
+   *   1. Transition textures (which bake the AI source into 192px SDF masks)
+   *      have a high-quality source to sample from.
+   *   2. Crop sub-textures (non-Wang fallback) have enough pixel data for
+   *      variation.
+   *
+   * The actual tile rendering uses the pre-generated 48×48 Wang tiles from
+   * disk (when available), so the AI texture doesn't need to be at TILE_SIZE.
    */
   private generateMipmapsForAITiles(): void {
     const DOWNSAMPLE_SIZE = 256;
@@ -140,11 +143,12 @@ export class BootScene extends Phaser.Scene {
       const img = source?.image as HTMLImageElement | undefined;
       if (!img) continue;
 
-      // Target size: TILE_SIZE if Wang tiles exist (homogeneous tiling),
-      // DOWNSAMPLE_SIZE otherwise (crop slicing needs more pixels).
-      const targetSize = this.wangTerrainKeys.has(key) ? TILE_SIZE : DOWNSAMPLE_SIZE;
+      // Always use DOWNSAMPLE_SIZE — even if Wang tiles exist.  The AI
+      // texture is used as a source for transition texture generation and
+      // needs sufficient resolution to avoid blur when baked into the
+      // 192px SDF mask.
+      const targetSize = DOWNSAMPLE_SIZE;
       const needsSlice = !this.wangTerrainKeys.has(key);
-      if (!img) continue;
 
       let finalCanvas: HTMLCanvasElement;
 

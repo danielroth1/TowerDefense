@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { generateMap, type MapData, type GridTile } from '../systems/MapGenerator';
 import { computeBlobMask, blobTileKey } from '../systems/BlobTileset';
-import { computeTerrainBlobMask, transitionTileKey, computeCornerMask, cornerMaskToWangIndex } from '../systems/TerrainTransition';
+import { computeTerrainBlobMask, transitionTileKey } from '../systems/TerrainTransition';
 import { Tower } from '../entities/Tower';
 import { Enemy } from '../entities/Enemy';
 import { Projectile, type ProjectileConfig } from '../entities/Projectile';
@@ -16,6 +16,7 @@ import { ComboSystem } from '../systems/ComboSystem';
 import { HUD } from '../ui/HUD';
 import { BottomBar } from '../ui/BottomBar';
 import { SoundSystem } from '../systems/SoundSystem';
+import { createPRNG } from '../utils/helpers';
 import {
   TILE_SIZE, GRID_COLS, GRID_ROWS, COLORS,
   MAX_BARRICADES, BARRICADE_COST, TOTAL_WAVES,
@@ -44,6 +45,14 @@ export class GameScene extends Phaser.Scene {
 
   /** Terrain keys that have a pre-generated Wang tile set (16 tiles). */
   private wangTerrainKeys: Set<string> = new Set();
+
+  /**
+   * Random Wang corner colors (0 or 1) for each grid intersection point.
+   * Generated once at map creation. Adjacent cells share vertices, so
+   * Wang tile edges always match seamlessly while the tile pattern is
+   * randomly varied across the map.
+   */
+  private wangCorners: number[][] = [];
 
   // Groups
   private towerGroup!: Phaser.GameObjects.Group;
@@ -121,6 +130,11 @@ export class GameScene extends Phaser.Scene {
     this.aiTileKeys = new Set(keys ?? []);
     const wangKeys: string[] | undefined = this.game.registry.get('wangTerrainKeys');
     this.wangTerrainKeys = new Set(wangKeys ?? []);
+
+    // Generate random Wang corner colors for varied seamless tiling.
+    // Each vertex gets a random 0/1 — adjacent cells share vertices,
+    // so edges always match while the tile pattern looks random.
+    this.generateWangCorners(this.mapData.seed);
 
     this.setupPhysics();
     this.buildMap();
@@ -225,6 +239,40 @@ export class GameScene extends Phaser.Scene {
     return baseKey;
   }
 
+  /**
+   * Generate random Wang corner colors for each grid intersection point.
+   * Each vertex gets a random 0 or 1. Adjacent cells share vertices,
+   * so tile edges always match seamlessly while the overall pattern
+   * is randomly varied across the map.
+   */
+  private generateWangCorners(seed: number): void {
+    const rng = createPRNG(seed + 0x5EED); // distinct seed from map generation
+    for (let r = 0; r <= GRID_ROWS; r++) {
+      this.wangCorners[r] = [];
+      for (let c = 0; c <= GRID_COLS; c++) {
+        this.wangCorners[r][c] = Math.floor(rng() * 2);
+      }
+    }
+  }
+
+  /**
+   * Compute the Wang tile index from random corner colors at the 4
+   * vertices surrounding grid cell (row, col).
+   *
+   *   TL───TR
+   *    │     │
+   *   BL───BR
+   *
+   * Index = tl*8 + tr*4 + br*2 + bl  (matches generate.mjs tileIndex formula)
+   */
+  private computeWangIndex(row: number, col: number): number {
+    const tl = this.wangCorners[row][col];
+    const tr = this.wangCorners[row][col + 1];
+    const br = this.wangCorners[row + 1][col + 1];
+    const bl = this.wangCorners[row + 1][col];
+    return tl * 8 + tr * 4 + br * 2 + bl;
+  }
+
   /** Determine the texture key and depth for a tile's topmost layer. */
   private resolveTile(tile: GridTile): { key: string; depth: number; transitionKey?: string } {
     if (tile.type === 'spawn') {
@@ -246,15 +294,12 @@ export class GameScene extends Phaser.Scene {
     if (tile.type === 'buildable') {
       const cardinalMask = computeTerrainBlobMask(this.mapData.grid, tile.row, tile.col);
 
-      // Compute corner mask for correct Wang tile selection.
-      // A corner is "connected" (1) when the cell and both adjacent cardinals
-      // AND the diagonal neighbour are all buildable — see computeCornerMask.
-      const cornerMask = computeCornerMask(this.mapData.grid, tile.row, tile.col, 'buildable');
-      const wangIndex = cornerMaskToWangIndex(cornerMask);
-
-      // Interior (fully surrounded) or isolated: use the corner-matched
-      // Wang tile directly — no transition overlay needed.
+      // Interior (fully surrounded) or isolated: use Wang tile with
+      // random vertex-assigned corner colors. Every adjacent cell shares
+      // its vertex colours, so edges always match — but the tile pattern
+      // is randomly varied across the map.
       if (cardinalMask === 0 || cardinalMask === 15) {
+        const wangIndex = this.computeWangIndex(tile.row, tile.col);
         const displayKey = this.aiTileKeys.has('tile_buildable')
           ? this.pickVariationKey('tile_buildable', tile.row, tile.col, wangIndex)
           : 'tile_buildable';
@@ -267,8 +312,10 @@ export class GameScene extends Phaser.Scene {
       // outside it — a full-tile wang sprite would bleed grass into water.
       return { key: transitionTileKey('grass', cardinalMask), depth: 0.05 };
     }
-    // Ground / water — only the water base layer is visible
-    return { key: 'tile_ground', depth: 0 };
+    // Ground / water — use random vertex-based Wang tiles for varied
+    // seamless tiling, just like interior grass cells.
+    const wangIdx = this.computeWangIndex(tile.row, tile.col);
+    return { key: `tile_water_wang_${wangIdx}`, depth: 0 };
   }
 
   /** Recompute and apply the correct tile texture and depth for a grid cell. */
