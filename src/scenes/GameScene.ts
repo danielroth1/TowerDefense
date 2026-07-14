@@ -309,6 +309,19 @@ export class GameScene extends Phaser.Scene {
     }
     if (tile.type === 'path') {
       const mask = computeBlobMask(this.mapData.grid, tile.row, tile.col);
+
+      // Render a grass Wang tile underneath + alpha path overlay on top.
+      // The Wang tile provides sharp 48×48 grass detail behind the path.
+      const pathGrassWang = this.pickVariationKey('tile_buildable', tile.row, tile.col);
+      const overlayKey = this.textures.exists(`tile_path_blob_overlay_${mask}`)
+        ? `tile_path_blob_overlay_${mask}`
+        : this.textures.exists(`tile_path_overlay_${mask}`)
+          ? `tile_path_overlay_${mask}`
+          : undefined;
+      if (overlayKey) {
+        return { key: pathGrassWang, depth: 0.15, overlayKey, overlayDepth: 0.2 };
+      }
+      // Fallback: no overlay available — use the old opaque path tile
       const blobAITileKey = `tile_path_blob_${mask}`;
       const key = this.textures.exists(blobAITileKey) ? blobAITileKey
         : this.textures.exists('tile_path') ? 'tile_path'

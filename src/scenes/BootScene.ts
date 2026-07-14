@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { COLORS, TILE_SIZE } from '../utils/constants';
 import { TOWER_DEFS, TOWER_TYPES_ORDERED } from '../data/towers';
 import { ENEMY_DEFS, BOSS_DEFS } from '../data/enemies';
-import { generateBlobTextures, generateBlobTexturesFromSource } from '../systems/BlobTileset';
+import { generateBlobTextures, generateBlobTexturesFromSource, generatePathOverlayTextures, generatePathOverlayTexturesFromSource } from '../systems/BlobTileset';
 import { generateTransitionTextures, generateTransitionAlphaMasks } from '../systems/TerrainTransition';
 
 export class BootScene extends Phaser.Scene {
@@ -74,6 +74,7 @@ export class BootScene extends Phaser.Scene {
     // If an AI path tile was loaded, generate masked blob textures from it
     if (this.textures.exists('tile_path')) {
       generateBlobTexturesFromSource(this, 'tile_path', 'tile_path_blob');
+      generatePathOverlayTexturesFromSource(this, 'tile_path', 'tile_path_blob');
     }
     this.generateTerrainTransitionTextures();
     this.generateTowerTextures();
@@ -487,6 +488,8 @@ export class BootScene extends Phaser.Scene {
   // ─── Blob tileset ─────────────────────────────────────────────────────────
   private generateBlobTextures() {
     generateBlobTextures(this);
+    // Generate alpha-only path overlays for grass Wang tile underneath
+    generatePathOverlayTextures(this);
   }
 
   // ─── Terrain transition tiles ─────────────────────────────────────────────

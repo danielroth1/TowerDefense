@@ -249,6 +249,94 @@ export function generateBlobTextures(scene: Phaser.Scene): void {
   }
 }
 
+// ─── Path alpha-overlay generation ────────────────────────────────────────────
+
+/**
+ * Road-only alpha output: road pixels get α=rA, grass pixels get α=0.
+ * Used for the alpha-mask overlay that sits on top of a sharp grass Wang tile.
+ */
+function blendRoadAlpha(
+  od: Uint8ClampedArray,
+  roadData: Uint8ClampedArray,
+  mask: number,
+  noise: Float32Array,
+): void {
+  for (let py = 0; py < TS; py++) {
+    for (let px = 0; px < TS; px++) {
+      const sdf = roadBlobSDF(px, py, mask);
+      const n   = noise[(py % NOISE_SIZE) * NOISE_SIZE + (px % NOISE_SIZE)] - 0.5;
+      const nw  = roadConnectedNoiseWeight(px, py, mask);
+      const feather = ROAD_FEATHER_CONN + (ROAD_FEATHER_WATER - ROAD_FEATHER_CONN) * nw;
+      const bias    = ROAD_FEATHER_WATER * (1.0 - nw);
+      const rA = 1 - smoothstepBl(-feather, feather, sdf - bias + n * ROAD_NOISE_AMP * nw);
+      const i = (py * TS + px) * 4;
+      // Road visible where rA > 0; grass area is transparent
+      od[i]     = roadData[i];
+      od[i + 1] = roadData[i + 1];
+      od[i + 2] = roadData[i + 2];
+      od[i + 3] = Math.round(rA * 255);
+    }
+  }
+}
+
+/**
+ * Generate 16 alpha-only path overlay textures (`tile_path_overlay_N`).
+ *
+ * These overlays are opaque (α=1) in the road area and transparent (α=0) in
+ * the grass area, with a smooth SDF+noise edge.  When rendered on top of a
+ * sharp 48×48 grass Wang tile:
+ *
+ *   - Road area: overlay is opaque → road shows on top of Wang tile
+ *   - Edge: smooth alpha blend
+ *   - Grass area: overlay is transparent → Wang tile shows through (sharp)
+ */
+export function generatePathOverlayTextures(scene: Phaser.Scene): void {
+  const noise = getBlobNoise();
+
+  for (let mask = 0; mask < 16; mask++) {
+    const key = `tile_path_overlay_${mask}`;
+    if (scene.textures.exists(key)) continue;
+    const ct = scene.textures.createCanvas(key, TS, TS);
+    if (!ct) continue;
+    const ctx = ct.getContext();
+    const out = ctx.createImageData(TS, TS);
+    blendRoadAlpha(out.data, buildStonePixels(), mask, noise);
+    ctx.putImageData(out, 0, 0);
+    ct.refresh();
+  }
+}
+
+/**
+ * Generate 16 alpha-only path overlay textures from an AI path source.
+ * Textures are named `{prefix}_overlay_N` (e.g. `tile_path_blob_overlay_3`).
+ */
+export function generatePathOverlayTexturesFromSource(
+  scene: Phaser.Scene,
+  sourceKey: string,
+  prefix: string,
+): void {
+  const readPixels = (img: HTMLImageElement | HTMLCanvasElement) => {
+    const tmp = document.createElement('canvas');
+    tmp.width = TS; tmp.height = TS;
+    tmp.getContext('2d')!.drawImage(img, 0, 0, TS, TS);
+    return tmp.getContext('2d')!.getImageData(0, 0, TS, TS).data;
+  };
+  const srcData = readPixels(scene.textures.get(sourceKey).getSourceImage() as HTMLImageElement | HTMLCanvasElement);
+  const noise   = getBlobNoise();
+
+  for (let mask = 0; mask < 16; mask++) {
+    const key = `${prefix}_overlay_${mask}`;
+    if (scene.textures.exists(key)) scene.textures.remove(key);
+    const ct = scene.textures.createCanvas(key, TS, TS);
+    if (!ct) continue;
+    const ctx = ct.getContext();
+    const out = ctx.createImageData(TS, TS);
+    blendRoadAlpha(out.data, srcData, mask, noise);
+    ctx.putImageData(out, 0, 0);
+    ct.refresh();
+  }
+}
+
 /**
  * Generate 16 blob tiles by blending an AI path source texture over the AI grass
  * background. Road→grass edge uses SDF + noise for a smooth, organic transition.
