@@ -3,10 +3,14 @@ import { BootScene }     from './scenes/BootScene';
 import { MenuScene }     from './scenes/MenuScene';
 import { GameScene }     from './scenes/GameScene';
 import { GameOverScene } from './scenes/GameOverScene';
+import {
+  GAME_WIDTH, GAME_HEIGHT,
+  UI_TOP_HEIGHT, UI_BOTTOM_HEIGHT,
+} from './utils/constants';
 
 // ── Text factory: auto-inject devicePixelRatio for crisp text on Retina ────
-// (Canvas backing store stays at CSS-pixel resolution; the browser handles
-//  Retina upscaling. This is the correct approach for Phaser 3.60+.)
+// (Text renders on its own internal canvas — this resolution hint is
+//  independent of the main game canvas resolution.)
 (() => {
   const origText = (Phaser.GameObjects.GameObjectFactory.prototype as any).text;
   (Phaser.GameObjects.GameObjectFactory.prototype as any).text = function (
@@ -21,10 +25,12 @@ import { GameOverScene } from './scenes/GameOverScene';
 })();
 
 // ── Game config ──────────────────────────────────────────────────────────────
+const GAME_TOTAL_HEIGHT = GAME_HEIGHT + UI_TOP_HEIGHT + UI_BOTTOM_HEIGHT;
+
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
-  width: window.innerWidth,
-  height: window.innerHeight,
+  width: GAME_WIDTH,
+  height: GAME_TOTAL_HEIGHT,
   backgroundColor: '#0a0a0f',
   parent: document.body,
   physics: {
@@ -36,11 +42,12 @@ const config: Phaser.Types.Core.GameConfig = {
   },
   scene: [BootScene, MenuScene, GameScene, GameOverScene],
   render: {
-    antialias: false,
-    pixelArt: true,
+    antialias: true,
+    pixelArt: false,
   },
   scale: {
-    mode: Phaser.Scale.RESIZE,
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
   },
 };
 

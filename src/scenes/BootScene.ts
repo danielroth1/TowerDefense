@@ -136,6 +136,24 @@ export class BootScene extends Phaser.Scene {
   private generateMipmapsForAITiles(): void {
     const DOWNSAMPLE_SIZE = 256;
 
+    /**
+     * Get a 2D context with explicit high-quality smoothing enabled.
+     * Fresh canvas contexts default to imageSmoothingEnabled=true and
+     * imageSmoothingQuality='low', but Phaser's pixelArt mode may have
+     * patched the CanvasRenderingContext2D prototype.  Being explicit
+     * guarantees we always get interpolated (not nearest-neighbour)
+     * downscaling on the CPU side.
+     */
+    const smoothCtx = (w: number, h: number): CanvasRenderingContext2D => {
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      const ctx = c.getContext('2d')!;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      return ctx;
+    };
+
     for (const key of this.aiLoadedTiles) {
       const texture = this.textures.get(key);
       if (!texture) continue;
@@ -152,53 +170,45 @@ export class BootScene extends Phaser.Scene {
       const needsSlice = !this.wangTerrainKeys.has(key);
 
       let finalCanvas: HTMLCanvasElement;
+      const maxDim = Math.max(img.width, img.height);
 
-      if (img.width > targetSize) {
-        // ── Multi-step CPU downscale: halve repeatedly, then final step ──
+      if (maxDim > targetSize) {
+        // ── Multi-step CPU downscale ─────────────────────────────────────
+        // Strategy: never downscale by more than 2× in a single drawImage
+        // call, and always use explicit high-quality bilinear interpolation.
+        // This produces visibly sharper results than a single large step
+        // because each halving pass preserves more mid-frequency detail.
         let src: TexImageSource = img;
-        while (
-          Math.max(
-            (src as HTMLImageElement | HTMLCanvasElement).width,
-            (src as HTMLImageElement | HTMLCanvasElement).height,
-          ) > targetSize * 2
-        ) {
-          const w = (src as HTMLImageElement | HTMLCanvasElement).width;
-          const h = (src as HTMLImageElement | HTMLCanvasElement).height;
-          const stepCanvas = document.createElement('canvas');
-          stepCanvas.width = Math.round(w / 2);
-          stepCanvas.height = Math.round(h / 2);
-          const stepCtx = stepCanvas.getContext('2d')!;
-          if ('imageSmoothingQuality' in stepCtx) {
-            (stepCtx as any).imageSmoothingQuality = 'high';
-          }
-          stepCtx.drawImage(src, 0, 0, stepCanvas.width, stepCanvas.height);
-          src = stepCanvas;
+        let curW = img.width;
+        let curH = img.height;
+
+        // Halve until we're ≤ 2× the target, then one final step
+        while (Math.max(curW, curH) > targetSize * 2) {
+          const nextW = Math.round(curW / 2);
+          const nextH = Math.round(curH / 2);
+          const stepCtx = smoothCtx(nextW, nextH);
+          stepCtx.drawImage(src, 0, 0, nextW, nextH);
+          src = stepCtx.canvas;
+          curW = nextW;
+          curH = nextH;
         }
 
-        const srcW = (src as HTMLImageElement | HTMLCanvasElement).width;
-        const srcH = (src as HTMLImageElement | HTMLCanvasElement).height;
-        const finalScale = targetSize / Math.max(srcW, srcH);
-        const dw = Math.round(srcW * finalScale);
-        const dh = Math.round(srcH * finalScale);
-
-        finalCanvas = document.createElement('canvas');
-        finalCanvas.width = dw;
-        finalCanvas.height = dh;
-        const ctx = finalCanvas.getContext('2d')!;
-        if ('imageSmoothingQuality' in ctx) {
-          (ctx as any).imageSmoothingQuality = 'high';
-        }
+        // Final step: clamp to targetSize while preserving aspect ratio
+        const finalScale = targetSize / Math.max(curW, curH);
+        const dw = Math.round(curW * finalScale);
+        const dh = Math.round(curH * finalScale);
+        const ctx = smoothCtx(dw, dh);
         ctx.drawImage(src, 0, 0, dw, dh);
+        finalCanvas = ctx.canvas;
 
         // Replace the huge original with the downscaled version
         this.textures.remove(key);
         this.textures.addCanvas(key, finalCanvas);
       } else {
         // Already small enough — extract a canvas copy
-        finalCanvas = document.createElement('canvas');
-        finalCanvas.width = img.width;
-        finalCanvas.height = img.height;
-        finalCanvas.getContext('2d')!.drawImage(img, 0, 0);
+        const ctx = smoothCtx(img.width, img.height);
+        ctx.drawImage(img, 0, 0);
+        finalCanvas = ctx.canvas;
       }
 
       // Slice into crop sub-textures (only for non-Wang keys that need per-cell variation)

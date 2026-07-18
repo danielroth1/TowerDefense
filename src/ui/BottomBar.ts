@@ -5,12 +5,14 @@ import type { EconomyManager } from '../systems/EconomyManager';
 import type { Tower } from '../entities/Tower';
 
 // ─── Layout constants ─────────────────────────────────────────────────────
-const BAR_H    = 120;
+// These are in the 1776×1046 game coordinate space.  FIT mode scales them
+// down ~0.45× to the window, so sizes are ~2.2× what they'd be in RESIZE.
+const BAR_H    = 260;
 
 // Tower/Upgrade section (left side)
-const TBW = 86, TBH = 88, TGAP = 6, TLEFT = 8;
+const TBW = 190, TBH = 195, TGAP = 14, TLEFT = 18;
 
-const WAVE_H  = 64;
+const WAVE_H  = 140;
 
 // Derived layout constants (independent of browser size)
 const DIV1_X   = TLEFT + 6 * (TBW + TGAP) - TGAP; // right edge of tower section
@@ -92,24 +94,24 @@ export class BottomBar {
       this.drawTowerBtn(bg2, cx, cy, TBW, TBH, def.color, false, false, canAfford);
       this.buildBgs.push(bg2);
 
-      const icon = scene.add.image(cx, cy - 12, `tower_${type}_0`)
-        .setDisplaySize(28, 28).setScrollFactor(0).setDepth(D + 2);
+      const icon = scene.add.image(cx, cy - 28, `tower_${type}_0`)
+        .setDisplaySize(60, 60).setScrollFactor(0).setDepth(D + 2);
       this.buildIcons.push(icon);
 
-      const lbl = scene.add.text(cx, cy + 14, def.label.split(' ')[0], {
-        fontSize: '10px', fontFamily: 'monospace', color: '#ccddee', align: 'center',
+      const lbl = scene.add.text(cx, cy + 32, def.label.split(' ')[0], {
+        fontSize: '22px', fontFamily: 'monospace', color: '#ccddee', align: 'center',
       }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 2);
       this.buildNames.push(lbl);
 
       // Hotkey label
       const hkChars = ['Q','W','E','A','S','D'];
-      const hkLbl = scene.add.text(cx, cy + 25, `[${hkChars[i]}]`, {
-        fontSize: '9px', fontFamily: 'monospace', color: '#667788', align: 'center',
+      const hkLbl = scene.add.text(cx, cy + 56, `[${hkChars[i]}]`, {
+        fontSize: '20px', fontFamily: 'monospace', color: '#667788', align: 'center',
       }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 2);
       this.hotkeyLabels.push(hkLbl);
 
-      const cost = scene.add.text(cx, cy + 36, `${def.baseCost}g`, {
-        fontSize: '11px', fontFamily: 'monospace', color: '#ffd700', align: 'center',
+      const cost = scene.add.text(cx, cy + 80, `${def.baseCost}g`, {
+        fontSize: '24px', fontFamily: 'monospace', color: '#ffd700', align: 'center',
       }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 2);
       this.buildCosts.push(cost);
 
@@ -134,8 +136,8 @@ export class BottomBar {
 
     // ── Wave button ─────────────────────────────────────────────────────────
     this.waveBg  = scene.add.graphics().setScrollFactor(0).setDepth(D + 1);
-    this.waveLabel = scene.add.text(this._WAVE_CX, this._TOWER_CY - 10, '▶▶ SEND NEXT WAVE\n[SPACE]', {
-      fontSize: '12px', fontFamily: 'monospace', color: '#44ff88', align: 'center', lineSpacing: 2,
+    this.waveLabel = scene.add.text(this._WAVE_CX, this._TOWER_CY - 24, '▶▶ SEND NEXT WAVE\n[SPACE]', {
+      fontSize: '26px', fontFamily: 'monospace', color: '#44ff88', align: 'center', lineSpacing: 4,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 2);
     this.drawWaveBtn(false);
 
@@ -180,10 +182,10 @@ export class BottomBar {
       const cy  = this._TOWER_CY;
 
       this.drawTowerBtn(this.buildBgs[i], cx, cy, TBW, TBH, def.color, false, false, this.economy.canAfford(def.baseCost));
-      this.buildIcons[i].setPosition(cx, cy - 12);
-      this.buildNames[i].setPosition(cx, cy + 14);
-      this.hotkeyLabels[i].setPosition(cx, cy + 25);
-      this.buildCosts[i].setPosition(cx, cy + 36);
+      this.buildIcons[i].setPosition(cx, cy - 28);
+      this.buildNames[i].setPosition(cx, cy + 32);
+      this.hotkeyLabels[i].setPosition(cx, cy + 56);
+      this.buildCosts[i].setPosition(cx, cy + 80);
       this.buildHits[i].setPosition(cx, cy);
     });
 
@@ -284,25 +286,25 @@ export class BottomBar {
     this.upgRoot.add(infoBg);
 
     // Current tower image
-    const icon = this.scene.add.image(cx0, CY - 16, curImgKey).setDisplaySize(36, 36);
+    const icon = this.scene.add.image(cx0, CY - 36, curImgKey).setDisplaySize(80, 80);
     this.upgRoot.add(icon);
 
     // Name + level
     const name = def.label.split(' ')[0];
-    const title = this.scene.add.text(cx0, CY + 16, `${name}\nLv${tower.level}${tower.evolved ? '★' : ''}`, {
-      fontSize: '10px', fontFamily: 'monospace', color: '#eef0f4', align: 'center', lineSpacing: 1,
+    const title = this.scene.add.text(cx0, CY + 36, `${name}\nLv${tower.level}${tower.evolved ? '★' : ''}`, {
+      fontSize: '22px', fontFamily: 'monospace', color: '#eef0f4', align: 'center', lineSpacing: 2,
     }).setOrigin(0.5);
     this.upgRoot.add(title);
 
     // Current stats
-    const curStats = this.scene.add.text(cx0, CY + 34, `⚔${Math.round(tower.damage)} 🎯${Math.round(tower.range)}`, {
-      fontSize: '9px', fontFamily: 'monospace', color: '#8899aa', align: 'center',
+    const curStats = this.scene.add.text(cx0, CY + 76, `⚔${Math.round(tower.damage)} 🎯${Math.round(tower.range)}`, {
+      fontSize: '20px', fontFamily: 'monospace', color: '#8899aa', align: 'center',
     }).setOrigin(0.5);
     this.upgRoot.add(curStats);
 
     if (tower.activeSynergyTags.length) {
-      const syn = this.scene.add.text(cx0, CY + 44, `✦${tower.activeSynergyTags.slice(0, 2).join(',')}`, {
-        fontSize: '8px', fontFamily: 'monospace', color: '#ffeeaa', align: 'center',
+      const syn = this.scene.add.text(cx0, CY + 100, `✦${tower.activeSynergyTags.slice(0, 2).join(',')}`, {
+        fontSize: '18px', fontFamily: 'monospace', color: '#ffeeaa', align: 'center',
       }).setOrigin(0.5);
       this.upgRoot.add(syn);
     }
@@ -391,28 +393,28 @@ export class BottomBar {
 
       // Preview image
       if (act.previewImgKey) {
-        const pvImg = this.scene.add.image(cx, CY - 18, act.previewImgKey)
-          .setDisplaySize(26, 26).setAlpha(can ? 1 : 0.4);
+        const pvImg = this.scene.add.image(cx, CY - 40, act.previewImgKey)
+          .setDisplaySize(56, 56).setAlpha(can ? 1 : 0.4);
         this.upgRoot.add(pvImg);
       }
 
       // Label
-      const txt = this.scene.add.text(cx, CY + 6, act.label, {
-        fontSize: '10px', fontFamily: 'monospace', color: can ? '#eef0f4' : '#445566',
+      const txt = this.scene.add.text(cx, CY + 14, act.label, {
+        fontSize: '22px', fontFamily: 'monospace', color: can ? '#eef0f4' : '#445566',
         align: 'center',
       }).setOrigin(0.5);
       this.upgRoot.add(txt);
 
       // Stats preview or diff
       if (act.statsDiff) {
-        const diff = this.scene.add.text(cx, CY + 18, act.statsDiff, {
-          fontSize: '8px', fontFamily: 'monospace', color: can ? '#88cc88' : '#334433',
+        const diff = this.scene.add.text(cx, CY + 40, act.statsDiff, {
+          fontSize: '18px', fontFamily: 'monospace', color: can ? '#88cc88' : '#334433',
           align: 'center',
         }).setOrigin(0.5);
         this.upgRoot.add(diff);
       } else if (act.previewStats) {
-        const pvs = this.scene.add.text(cx, CY + 18, act.previewStats, {
-          fontSize: '8px', fontFamily: 'monospace', color: can ? '#8899aa' : '#334455',
+        const pvs = this.scene.add.text(cx, CY + 40, act.previewStats, {
+          fontSize: '18px', fontFamily: 'monospace', color: can ? '#8899aa' : '#334455',
           align: 'center',
         }).setOrigin(0.5);
         this.upgRoot.add(pvs);
@@ -423,8 +425,8 @@ export class BottomBar {
       const hkStr = act.hotkey ? `[${act.hotkey}]` : '';
       const bottomLine = [costStr, hkStr].filter(Boolean).join(' ');
       if (bottomLine) {
-        const bl = this.scene.add.text(cx, CY + 30, bottomLine, {
-          fontSize: '9px', fontFamily: 'monospace',
+        const bl = this.scene.add.text(cx, CY + 66, bottomLine, {
+          fontSize: '20px', fontFamily: 'monospace',
           color: can ? '#ffd700' : '#554433',
           align: 'center',
         }).setOrigin(0.5);

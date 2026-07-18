@@ -111,9 +111,12 @@ export const COMBO_MULTIPLIERS = [1, 2, 3, 5, 10] as const;
 export const WEATHER_CHANGE_INTERVAL = 75000; // ms between weather shifts
 
 // ─── UI Layout ──────────────────────────────────────────────────────────────
-export const UI_TOP_HEIGHT    = 34;  // HUD top bar height
-export const UI_BOTTOM_HEIGHT = 100; // BottomBar height
+// These values are in the game's logical coordinate space (1776×1046).
+// FIT mode scales them down to the actual window; a ~2.2× multiplier
+// compensates so UI elements appear at their intended pixel size on screen.
+export const UI_TOP_HEIGHT    = 75;  // HUD top bar height
+export const UI_BOTTOM_HEIGHT = 220; // BottomBar height
 
 // ─── Camera ─────────────────────────────────────────────────────────────────
 export const CAMERA_MIN_ZOOM = 0.3;
-export const CAMERA_MAX_ZOOM = 2.0;
+export const CAMERA_MAX_ZOOM = 4.0;

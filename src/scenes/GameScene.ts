@@ -541,7 +541,7 @@ export class GameScene extends Phaser.Scene {
 
     // ── Main camera: renders the game world in the viewport between UI bars ──
     this.cameras.main.setBounds(0, 0, W, H);
-    this.cameras.main.setZoom(0.85);
+    this.cameras.main.setZoom(2.0);
     this.cameras.main.setViewport(0, UI_TOP_HEIGHT, this.scale.width, this.scale.height - UI_TOP_HEIGHT - UI_BOTTOM_HEIGHT);
     // Main camera ignores UI objects
     this.cameras.main.ignore(this.uiGroup);
@@ -1265,12 +1265,12 @@ export class GameScene extends Phaser.Scene {
 
   // ─── Floating Ability Buttons (top-left) ─────────────────────────────
   private createFloatingAbilities() {
-    const BTN_SIZE = 44;
-    const GAP = 6;
-    const startX = 8;
-    const startY = UI_TOP_HEIGHT + 8;
+    const BTN_SIZE = 100;
+    const GAP = 14;
+    const startX = 18;
+    const startY = UI_TOP_HEIGHT + 18;
     const D = 60;
-    const r = 10; // icon radius
+    const r = 24; // icon radius
 
     ABILITY_DEFS.forEach((def, i) => {
       const cx = startX + BTN_SIZE / 2;
@@ -1280,10 +1280,10 @@ export class GameScene extends Phaser.Scene {
       const icon = this.add.graphics().setScrollFactor(0).setDepth(D + 1);
       const cdOvl = this.add.graphics().setScrollFactor(0).setDepth(D + 2);
       const cdTxt = this.add.text(cx, cy, '', {
-        fontSize: '14px', fontFamily: 'monospace', color: '#ffffff', align: 'center',
+        fontSize: '30px', fontFamily: 'monospace', color: '#ffffff', align: 'center',
       }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 3);
-      const cost = this.add.text(cx, cy + BTN_SIZE / 2 + 4, `${def.cost}g`, {
-        fontSize: '9px', fontFamily: 'monospace', color: '#ffd700', align: 'center',
+      const cost = this.add.text(cx, cy + BTN_SIZE / 2 + 8, `${def.cost}g`, {
+        fontSize: '20px', fontFamily: 'monospace', color: '#ffd700', align: 'center',
       }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1);
 
       // Draw button background
@@ -1387,10 +1387,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateFloatingAbilities() {
-    const BTN_SIZE = 44;
-    const GAP = 6;
-    const startX = 8;
-    const startY = UI_TOP_HEIGHT + 8;
+    const BTN_SIZE = 100;
+    const GAP = 14;
+    const startX = 18;
+    const startY = UI_TOP_HEIGHT + 18;
 
     ABILITY_DEFS.forEach((def, i) => {
       const btn = this.abilityFloating.get(def.type);

@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { COLORS, COMBO_MULTIPLIERS } from '../utils/constants';
+import { COLORS, COMBO_MULTIPLIERS, UI_TOP_HEIGHT, UI_BOTTOM_HEIGHT } from '../utils/constants';
 import type { WeatherState } from '../systems/WeatherSystem';
 import { SoundSystem } from '../systems/SoundSystem';
 
@@ -41,24 +41,24 @@ export class HUD {
 
     this.bar = scene.add.graphics().setScrollFactor(0).setDepth(DEPTH);
     this.bar.fillStyle(COLORS.PANEL_BG, 0.92);
-    this.bar.fillRect(0, 0, W, 34);
+    this.bar.fillRect(0, 0, W, UI_TOP_HEIGHT);
     this.bar.lineStyle(1, COLORS.PANEL_BORDER, 1);
-    this.bar.lineBetween(0, 34, W, 34);
+    this.bar.lineBetween(0, UI_TOP_HEIGHT, W, UI_TOP_HEIGHT);
 
-    this.goldText = scene.add.text(10, 5, '$ 200', {
-      fontSize: '18px', fontFamily: 'monospace', color: '#ffd700',
+    this.goldText = scene.add.text(20, 14, '$ 200', {
+      fontSize: '38px', fontFamily: 'monospace', color: '#ffd700',
     }).setScrollFactor(0).setDepth(DEPTH + 1);
 
-    this.livesText = scene.add.text(140, 5, '♥ 20', {
-      fontSize: '18px', fontFamily: 'monospace', color: '#ff4444',
+    this.livesText = scene.add.text(300, 14, '♥ 20', {
+      fontSize: '38px', fontFamily: 'monospace', color: '#ff4444',
     }).setScrollFactor(0).setDepth(DEPTH + 1);
 
-    this.waveText = scene.add.text(W / 2, 5, 'WAVE 0 / 50', {
-      fontSize: '17px', fontFamily: 'monospace', color: '#eef0f4', align: 'center',
+    this.waveText = scene.add.text(W / 2, 14, 'WAVE 0 / 50', {
+      fontSize: '36px', fontFamily: 'monospace', color: '#eef0f4', align: 'center',
     }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(DEPTH + 1);
 
-    this.sfxBtn = scene.add.text(W - 165, 5, '🔊 SFX', {
-      fontSize: '14px', fontFamily: 'monospace', color: '#88cc88',
+    this.sfxBtn = scene.add.text(W - 360, 12, '🔊 SFX', {
+      fontSize: '30px', fontFamily: 'monospace', color: '#88cc88',
     }).setScrollFactor(0).setDepth(DEPTH + 2).setInteractive({ useHandCursor: true });
     this.sfxBtn.on('pointerup', () => {
       const on = this.sound.toggleSFX();
@@ -66,8 +66,8 @@ export class HUD {
       this.sfxBtn.setColor(on ? '#88cc88' : '#cc8888');
     });
 
-    this.bgmBtn = scene.add.text(W - 63, 5, '🎵 BGM', {
-      fontSize: '14px', fontFamily: 'monospace', color: '#88cc88',
+    this.bgmBtn = scene.add.text(W - 135, 12, '🎵 BGM', {
+      fontSize: '30px', fontFamily: 'monospace', color: '#88cc88',
     }).setScrollFactor(0).setDepth(DEPTH + 2).setInteractive({ useHandCursor: true });
     this.bgmBtn.on('pointerup', () => {
       const on = this.sound.toggleMusic();
@@ -75,45 +75,45 @@ export class HUD {
       this.bgmBtn.setColor(on ? '#88cc88' : '#cc8888');
     });
 
-    this.pauseBtn = scene.add.text(W - 260, 5, '⏸ [P]', {
-      fontSize: '14px', fontFamily: 'monospace', color: '#aabbcc',
+    this.pauseBtn = scene.add.text(W - 560, 12, '⏸ [P]', {
+      fontSize: '30px', fontFamily: 'monospace', color: '#aabbcc',
     }).setScrollFactor(0).setDepth(DEPTH + 2).setInteractive({ useHandCursor: true });
     this.pauseBtn.on('pointerup', () => scene.events.emit('toggle_pause'));
 
-    this.weatherText = scene.add.text(W - 450, 5, '☀ SUNNY', {
-      fontSize: '14px', fontFamily: 'monospace', color: '#ffeeaa',
+    this.weatherText = scene.add.text(W - 980, 12, '☀ SUNNY', {
+      fontSize: '30px', fontFamily: 'monospace', color: '#ffeeaa',
     }).setScrollFactor(0).setDepth(DEPTH + 1);
 
-    this.weatherTimer = scene.add.text(W - 520, 5, '', {
-      fontSize: '12px', fontFamily: 'monospace', color: '#8899aa',
+    this.weatherTimer = scene.add.text(W - 1130, 12, '', {
+      fontSize: '26px', fontFamily: 'monospace', color: '#8899aa',
     }).setScrollFactor(0).setDepth(DEPTH + 1);
 
-    this.comboText = scene.add.text(W - 315, 5, '×1', {
-      fontSize: '15px', fontFamily: 'monospace', color: '#ffd700',
+    this.comboText = scene.add.text(W - 690, 12, '×1', {
+      fontSize: '32px', fontFamily: 'monospace', color: '#ffd700',
     }).setOrigin(1, 0).setScrollFactor(0).setDepth(DEPTH + 1);
 
-    this.countdownText = scene.add.text(W / 2, 44, '', {
-      fontSize: '13px', fontFamily: 'monospace', color: '#8899aa', align: 'center',
+    this.countdownText = scene.add.text(W / 2, UI_TOP_HEIGHT + 12, '', {
+      fontSize: '28px', fontFamily: 'monospace', color: '#8899aa', align: 'center',
     }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(DEPTH + 1);
 
-    this.heroText = scene.add.text(12, H - 96, 'HERO Lv1  HP ●●●●●', {
-      fontSize: '12px', fontFamily: 'monospace', color: '#ffdd44',
+    this.heroText = scene.add.text(26, H - UI_BOTTOM_HEIGHT - 30, 'HERO Lv1  HP ●●●●●', {
+      fontSize: '26px', fontFamily: 'monospace', color: '#ffdd44',
     }).setScrollFactor(0).setDepth(DEPTH + 1);
 
     this.bossBg = scene.add.graphics().setScrollFactor(0);
     this.bossBg.fillStyle(COLORS.PANEL_BG, 0.9);
-    this.bossBg.fillRect(W / 2 - 200, 39, 400, 16);
+    this.bossBg.fillRect(W / 2 - 440, UI_TOP_HEIGHT + 8, 880, 36);
     this.bossBg.lineStyle(1, 0xff2200, 0.8);
-    this.bossBg.strokeRect(W / 2 - 200, 39, 400, 16);
+    this.bossBg.strokeRect(W / 2 - 440, UI_TOP_HEIGHT + 8, 880, 36);
     this.bossBarFg = scene.add.graphics().setScrollFactor(0);
-    this.bossLabel = scene.add.text(W / 2, 47, '', {
-      fontSize: '11px', fontFamily: 'monospace', color: '#ffaaaa', align: 'center',
+    this.bossLabel = scene.add.text(W / 2, UI_TOP_HEIGHT + 26, '', {
+      fontSize: '24px', fontFamily: 'monospace', color: '#ffaaaa', align: 'center',
     }).setOrigin(0.5).setScrollFactor(0);
     this.bossBarContainer = scene.add.container(0, 0, [this.bossBg, this.bossBarFg, this.bossLabel])
       .setDepth(DEPTH + 3).setScrollFactor(0).setVisible(false);
 
-    this.fpsText = scene.add.text(W - 6, H - 96, '', {
-      fontSize: '11px', fontFamily: 'monospace', color: '#334455',
+    this.fpsText = scene.add.text(W - 14, H - UI_BOTTOM_HEIGHT - 30, '', {
+      fontSize: '24px', fontFamily: 'monospace', color: '#334455',
     }).setOrigin(1, 0).setScrollFactor(0).setDepth(DEPTH + 1);
 
     scene.events.on('gold_changed',   (g: number)                => this.setGold(g));
@@ -157,28 +157,28 @@ export class HUD {
     // Background bar
     this.bar.clear();
     this.bar.fillStyle(COLORS.PANEL_BG, 0.92);
-    this.bar.fillRect(0, 0, W, 34);
+    this.bar.fillRect(0, 0, W, UI_TOP_HEIGHT);
     this.bar.lineStyle(1, COLORS.PANEL_BORDER, 1);
-    this.bar.lineBetween(0, 34, W, 34);
+    this.bar.lineBetween(0, UI_TOP_HEIGHT, W, UI_TOP_HEIGHT);
 
-    this.waveText.setPosition(W / 2, 5);
-    this.sfxBtn.setPosition(W - 165, 5);
-    this.bgmBtn.setPosition(W - 63, 5);
-    this.pauseBtn.setPosition(W - 260, 5);
-    this.weatherText.setPosition(W - 450, 5);
-    this.weatherTimer.setPosition(W - 520, 5);
-    this.comboText.setPosition(W - 315, 5);
-    this.countdownText.setPosition(W / 2, 44);
-    this.heroText.setPosition(12, H - 96);
-    this.fpsText.setPosition(W - 6, H - 96);
+    this.waveText.setPosition(W / 2, 14);
+    this.sfxBtn.setPosition(W - 360, 12);
+    this.bgmBtn.setPosition(W - 135, 12);
+    this.pauseBtn.setPosition(W - 560, 12);
+    this.weatherText.setPosition(W - 980, 12);
+    this.weatherTimer.setPosition(W - 1130, 12);
+    this.comboText.setPosition(W - 690, 12);
+    this.countdownText.setPosition(W / 2, UI_TOP_HEIGHT + 12);
+    this.heroText.setPosition(26, H - UI_BOTTOM_HEIGHT - 30);
+    this.fpsText.setPosition(W - 14, H - UI_BOTTOM_HEIGHT - 30);
 
     // Boss bar
     this.bossBg.clear();
     this.bossBg.fillStyle(COLORS.PANEL_BG, 0.9);
-    this.bossBg.fillRect(W / 2 - 200, 39, 400, 16);
+    this.bossBg.fillRect(W / 2 - 440, UI_TOP_HEIGHT + 8, 880, 36);
     this.bossBg.lineStyle(1, 0xff2200, 0.8);
-    this.bossBg.strokeRect(W / 2 - 200, 39, 400, 16);
-    this.bossLabel.setPosition(W / 2, 47);
+    this.bossBg.strokeRect(W / 2 - 440, UI_TOP_HEIGHT + 8, 880, 36);
+    this.bossLabel.setPosition(W / 2, UI_TOP_HEIGHT + 26);
   }
 
   setPaused(paused: boolean) {
