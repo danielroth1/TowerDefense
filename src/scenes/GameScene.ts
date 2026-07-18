@@ -836,8 +836,9 @@ export class GameScene extends Phaser.Scene {
     const tile = this.mapData.grid[row][col];
 
     if (!this.placingTower && !this.placingBarricade) {
-      // Ability cast
-      if (this.abilitySystem.pendingCast) {
+      // Ability cast — skip if click was on a floating ability button (they
+      // have their own pointerup handler that toggles pendingCast)
+      if (this.abilitySystem.pendingCast && !this.isClickOnAbilityButton(p)) {
         const allEnemies = [
           ...this.enemyGroup.getChildren() as Enemy[],
           ...this.flyerGroup.getChildren() as Enemy[],
@@ -1331,6 +1332,20 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  /** Check whether a pointer event landed on a floating ability button. */
+  private isClickOnAbilityButton(p: Phaser.Input.Pointer): boolean {
+    const BTN_SIZE = 100;
+    const GAP = 14;
+    const startX = 18;
+    const startY = UI_TOP_HEIGHT + 18;
+    if (p.x < startX || p.x > startX + BTN_SIZE) return false;
+    for (let i = 0; i < ABILITY_DEFS.length; i++) {
+      const top = startY + i * (BTN_SIZE + GAP);
+      if (p.y >= top && p.y <= top + BTN_SIZE) return true;
+    }
+    return false;
+  }
+
   /** Draw the icon symbol for a floating ability button (copied from BottomBar). */
   private drawAbilityFloatingIcon(g: Phaser.GameObjects.Graphics, cx: number, cy: number, color: number, type: AbilityType, r: number) {
     g.fillStyle(color, 0.9);
@@ -1454,9 +1469,8 @@ export class GameScene extends Phaser.Scene {
     const worldX = (mmRelX / this.minimapW) * mapW;
     const worldY = (mmRelY / this.minimapH) * mapH;
     const cam = this.cameras.main;
-    // Center camera on clicked world position using worldView for accurate half-sizes
-    cam.scrollX = worldX - cam.worldView.width  / 2;
-    cam.scrollY = worldY - cam.worldView.height / 2;
+    // Center camera on clicked world position — centerOn accounts for zoom internally
+    cam.centerOn(worldX, worldY);
   }
 
   // ─── Aura towers ────────────────────────────────────────────────────────

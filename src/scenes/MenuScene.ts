@@ -8,6 +8,36 @@ export class MenuScene extends Phaser.Scene {
 
   constructor() { super('MenuScene'); }
 
+  /**
+   * Convert game-internal coordinates to screen-relative CSS pixel
+   * coordinates, accounting for FIT scaling and canvas centering.
+   */
+  private internalToScreen(gameX: number, gameY: number): { x: number; y: number } {
+    const canvas = this.sys.game.canvas;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = rect.width / this.scale.width;
+    const scaleY = rect.height / this.scale.height;
+    return {
+      x: rect.left + gameX * scaleX,
+      y: rect.top + gameY * scaleY,
+    };
+  }
+
+  /** Reposition HTML inputs using current canvas bounds. */
+  private repositionInputs() {
+    if (!this.seedInput || !this.debugInput) return;
+    const W = this.scale.width;
+    const H = this.scale.height;
+
+    const seedPos = this.internalToScreen(W / 2 - 100, H * 0.48 - 24);
+    this.seedInput.style.left = `${seedPos.x}px`;
+    this.seedInput.style.top = `${seedPos.y}px`;
+
+    const debugPos = this.internalToScreen(W / 2 - 20, H * 0.53 - 17);
+    this.debugInput.style.left = `${debugPos.x}px`;
+    this.debugInput.style.top = `${debugPos.y}px`;
+  }
+
   create() {
     const W = this.scale.width;
     const H = this.scale.height;
@@ -44,7 +74,7 @@ export class MenuScene extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5);
 
-    // Seed label + HTML input – positioned close together
+    // Seed label
     this.add.text(W / 2 - 160, H * 0.48, 'SEED:', {
       fontSize: '18px', fontFamily: 'monospace', color: '#8899aa',
     }).setOrigin(0, 0.5);
@@ -54,17 +84,15 @@ export class MenuScene extends Phaser.Scene {
     this.seedInput.placeholder = 'random';
     this.seedInput.maxLength = 20;
     Object.assign(this.seedInput.style, {
-      position: 'absolute',
-      left: `${W / 2 - 100}px`,
-      top: `${H * 0.48 - 14}px`,
-      width: '180px',
-      height: '28px',
+      position: 'fixed',
+      width: '130px',
+      height: '22px',
       background: '#0d1117',
       border: '1px solid #2a3a4a',
       color: '#eef0f4',
       fontFamily: 'monospace',
-      fontSize: '16px',
-      padding: '2px 8px',
+      fontSize: '13px',
+      padding: '1px 6px',
       outline: 'none',
       borderRadius: '4px',
     });
@@ -78,15 +106,19 @@ export class MenuScene extends Phaser.Scene {
     this.debugInput = document.createElement('input');
     this.debugInput.type = 'checkbox';
     Object.assign(this.debugInput.style, {
-      position: 'absolute',
-      left: `${W / 2 - 20}px`,
-      top: `${H * 0.53 - 10}px`,
-      width: '20px',
-      height: '20px',
+      position: 'fixed',
+      width: '14px',
+      height: '14px',
       accentColor: '#ffd700',
       cursor: 'pointer',
     });
     document.body.appendChild(this.debugInput);
+
+    // Position HTML inputs relative to the scaled canvas
+    this.repositionInputs();
+
+    // Re-position on window resize (Phaser Scale.FIT re-sizes the canvas)
+    this.scale.on('resize', () => this.repositionInputs(), this);
 
     // Play button
     const playBtn = this.makeButton(W / 2, H * 0.60, 200, 50, 'PLAY', 0x1e3a5f, 0x2a5080);

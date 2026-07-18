@@ -95,7 +95,7 @@ export class BottomBar {
       this.buildBgs.push(bg2);
 
       const icon = scene.add.image(cx, cy - 28, `tower_${type}_0`)
-        .setDisplaySize(60, 60).setScrollFactor(0).setDepth(D + 2);
+        .setDisplaySize(90, 90).setScrollFactor(0).setDepth(D + 2);
       this.buildIcons.push(icon);
 
       const lbl = scene.add.text(cx, cy + 32, def.label.split(' ')[0], {
