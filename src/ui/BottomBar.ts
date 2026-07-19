@@ -14,7 +14,7 @@ export class BottomBar {
   // Background
   private bg: Phaser.GameObjects.Graphics;
 
-  // BUILD mode elements (all 6 always created, hidden when scrolled away)
+  // BUILD mode elements (all 6 created, hidden when scrolled)
   private buildBgs:     Phaser.GameObjects.Graphics[] = [];
   private buildIcons:   Phaser.GameObjects.Image[]    = [];
   private buildNames:   Phaser.GameObjects.Text[]     = [];
@@ -22,7 +22,7 @@ export class BottomBar {
   private buildHits:    Phaser.GameObjects.Rectangle[] = [];
   private hotkeyLabels: Phaser.GameObjects.Text[]     = [];
 
-  // Scroll arrows (shown when not all 6 buttons fit)
+  // Scroll arrows (only shown when not all 6 fit)
   private scrollPrevBg:  Phaser.GameObjects.Graphics;
   private scrollPrevHit: Phaser.GameObjects.Rectangle;
   private scrollNextBg:  Phaser.GameObjects.Graphics;
@@ -33,7 +33,7 @@ export class BottomBar {
   private upgBtnList: UBtn[] = [];
   private currentUpgradeTower: Tower | null = null;
 
-  // Wave button
+  // Wave button (floating, bottom-right corner, above the bar)
   private waveBg:     Phaser.GameObjects.Graphics;
   private waveLine1:  Phaser.GameObjects.Text;
   private waveLabel:  Phaser.GameObjects.Text;
@@ -41,16 +41,17 @@ export class BottomBar {
   private _wavePulse: Phaser.Tweens.Tween | null = null;
 
   // Dynamic layout — recomputed in resize()
-  private _BAR_H    = 180;
+  private _BAR_H    = 140;
   private _BAR_Y    = 0;
   private _TOWER_CY = 0;
-  private _TBW      = 110;   // tower button width
-  private _TBH      = 100;   // tower button height
-  private _TGAP     = 6;     // gap between buttons
-  private _WAVE_W   = 140;   // wave button width
+  private _TBW      = 100;
+  private _TBH      = 95;
+  private _TGAP     = 6;
+  private _WAVE_W   = 100;
+  private _WAVE_H   = 60;
   private _WAVE_CX  = 0;
-  private _DIVX     = 0;     // x where wave section begins
-  private _ARROW_W  = 0;     // scroll arrow width (0 = no scrolling)
+  private _WAVE_CY  = 0;   // floating Y (above bar)
+  private _ARROW_W  = 0;
   private _visibleTowers = 6;
   private _scrollOffset  = 0;
 
@@ -66,21 +67,21 @@ export class BottomBar {
     this.economy = economy;
     const D = 40;
 
-    // ── Background ─────────────────────────────────────────────────────────
+    // ── Background ──────────────────────────────────────────────────────────
     this.bg = scene.add.graphics().setScrollFactor(0).setDepth(D);
 
-    // ── Scroll arrows ──────────────────────────────────────────────────────
+    // ── Scroll arrows ────────────────────────────────────────────────────────
     this.scrollPrevBg = scene.add.graphics().setScrollFactor(0).setDepth(D + 1).setVisible(false);
     this.scrollPrevHit = scene.add.rectangle(-999, 0, 28, 80, 0, 0)
       .setScrollFactor(0).setDepth(D + 4).setInteractive({ useHandCursor: true }).setVisible(false)
-      .on('pointerup', () => this.scrollTowers(-1));
+      .on('pointerup', () => this.scrollTowers(-this._visibleTowers));
 
     this.scrollNextBg = scene.add.graphics().setScrollFactor(0).setDepth(D + 1).setVisible(false);
     this.scrollNextHit = scene.add.rectangle(-999, 0, 28, 80, 0, 0)
       .setScrollFactor(0).setDepth(D + 4).setInteractive({ useHandCursor: true }).setVisible(false)
-      .on('pointerup', () => this.scrollTowers(+1));
+      .on('pointerup', () => this.scrollTowers(+this._visibleTowers));
 
-    // ── Build section ──────────────────────────────────────────────────────
+    // ── Build section ────────────────────────────────────────────────────────
     TOWER_TYPES_ORDERED.forEach((type, i) => {
       const def = TOWER_DEFS[type];
 
@@ -107,7 +108,6 @@ export class BottomBar {
       }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 2);
       this.buildCosts.push(cost);
 
-      // Hit rect: handlers reference instance fields so resize is transparent
       const hit = scene.add.rectangle(-999, 0, 100, 80, 0, 0)
         .setScrollFactor(0).setInteractive({ useHandCursor: true }).setDepth(D + 3);
       hit.on('pointerover', () => {
@@ -130,24 +130,27 @@ export class BottomBar {
       this.buildHits.push(hit);
     });
 
-    // ── Upgrade section ────────────────────────────────────────────────────
+    // ── Upgrade section ──────────────────────────────────────────────────────
     this.upgRoot = scene.add.container(0, 0).setScrollFactor(0).setDepth(D + 1).setVisible(false);
 
-    // ── Wave button ────────────────────────────────────────────────────────
-    this.waveBg    = scene.add.graphics().setScrollFactor(0).setDepth(D + 1);
+    // ── Wave button (floating, depth higher than bar) ─────────────────────────
+    const WD = D + 8;  // above everything in the bar
+    this.waveBg    = scene.add.graphics().setScrollFactor(0).setDepth(WD);
     this.waveLine1 = scene.add.text(0, 0, 'WAVE 0 / 50', {
-      fontSize: '12px', fontFamily: 'monospace', color: '#8899aa', align: 'center',
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 2);
+      fontSize: '11px', fontFamily: 'monospace', color: '#8899aa', align: 'center',
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(WD + 1);
     this.waveLabel = scene.add.text(0, 0, '▶ SEND\n[SPACE]', {
-      fontSize: '17px', fontFamily: 'monospace', color: '#44ff88', align: 'center', lineSpacing: 4,
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 2);
-    this.waveHit = scene.add.rectangle(0, 0, 140, 80, 0, 0)
-      .setScrollFactor(0).setInteractive({ useHandCursor: true }).setDepth(D + 3);
+      fontSize: '15px', fontFamily: 'monospace', color: '#44ff88', align: 'center', lineSpacing: 4,
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(WD + 1);
+    this.waveHit = scene.add.rectangle(0, 0, 100, 60, 0, 0)
+      .setScrollFactor(0).setInteractive({ useHandCursor: true }).setDepth(WD + 2);
     this.waveHit.on('pointerover', () => this.drawWaveBtn(true));
     this.waveHit.on('pointerout',  () => this.drawWaveBtn(false));
     this.waveHit.on('pointerup',   () => this.onSendWave?.());
 
-    // Gold-change listener
+    this.drawWaveBtn(false);
+
+    // Gold listener
     scene.events.on('gold_changed', () => {
       this.refreshBuildAffordability();
       if (this.upgRoot.visible && this.currentUpgradeTower) {
@@ -156,15 +159,13 @@ export class BottomBar {
     });
   }
 
-  // ─── Layout helpers ───────────────────────────────────────────────────────
+  // ─── Layout helpers ──────────────────────────────────────────────────────
 
-  /** Global tower index → screen X based on current scroll offset. */
   private towerScreenX(i: number): number {
     const slot = i - this._scrollOffset;
     return TLEFT + this._ARROW_W + slot * (this._TBW + this._TGAP) + this._TBW / 2;
   }
 
-  /** Slot 0..N → screen X for upgrade section (no scroll, no arrow offset). */
   private upgradeCX(slot: number): number {
     return TLEFT + slot * (this._TBW + this._TGAP) + this._TBW / 2;
   }
@@ -183,25 +184,22 @@ export class BottomBar {
 
   private repositionBuildButtons() {
     const cy = this._TOWER_CY;
-    const iconSize = Math.max(36, Math.round(this._TBW * 0.47));
-    const nameFSPx = Math.max(10, Math.round(this._TBW * 0.115));
-    const hkFSPx   = Math.max(9,  Math.round(this._TBW * 0.095));
-    const costFSPx = Math.max(10, Math.round(this._TBW * 0.115));
+    const iconSize  = Math.max(36, Math.round(this._TBW * 0.47));
+    const nameFSPx  = Math.max(10, Math.round(this._TBW * 0.115));
+    const hkFSPx    = Math.max(9,  Math.round(this._TBW * 0.095));
+    const costFSPx  = Math.max(10, Math.round(this._TBW * 0.115));
 
     TOWER_TYPES_ORDERED.forEach((type, i) => {
-      const visible = this.isTowerVisible(i);
-      if (!visible) {
+      if (!this.isTowerVisible(i)) {
         this.buildBgs[i].clear();
-        [this.buildIcons[i], this.buildNames[i], this.hotkeyLabels[i], this.buildCosts[i], this.buildHits[i]]
-          .forEach(o => (o as any).setPosition(-999, cy));
+        [this.buildIcons[i], this.buildNames[i], this.hotkeyLabels[i],
+         this.buildCosts[i], this.buildHits[i]].forEach(o => (o as any).setPosition(-999, cy));
         this.buildHits[i].input!.enabled = false;
         return;
       }
-
       const cx  = this.towerScreenX(i);
       const def = TOWER_DEFS[type];
       const can = this.economy.canAfford(def.baseCost);
-
       this.drawTowerBtn(this.buildBgs[i], cx, cy, this._TBW, this._TBH, def.color, false, false, can);
       this.buildIcons[i].setPosition(cx, cy - this._TBH * 0.15).setDisplaySize(iconSize, iconSize);
       this.buildNames[i].setPosition(cx, cy + this._TBH * 0.17).setStyle({ fontSize: nameFSPx + 'px' });
@@ -226,11 +224,12 @@ export class BottomBar {
       return;
     }
 
-    const arrowH = Math.round(this._BAR_H * 0.52);
+    // Arrow height matches tower button height
+    const arrowH = this._TBH;
     const canPrev = this._scrollOffset > 0;
     const canNext = this._scrollOffset + this._visibleTowers < TOWER_TYPES_ORDERED.length;
 
-    // Prev (left) arrow
+    // Prev arrow
     const px = TLEFT;
     this.scrollPrevBg.clear().setVisible(true);
     this.scrollPrevBg.fillStyle(canPrev ? 0x1e3a5f : 0x151520, 0.9);
@@ -239,14 +238,15 @@ export class BottomBar {
     this.scrollPrevBg.strokeRoundedRect(px, cy - arrowH / 2, aw - 2, arrowH, 4);
     if (canPrev) {
       this.scrollPrevBg.fillStyle(0xeef0f4, 1);
-      const mid = cy;
       const tx1 = px + aw * 0.65, tx2 = px + aw * 0.35;
-      this.scrollPrevBg.fillTriangle(tx2, mid, tx1, mid - arrowH * 0.28, tx1, mid + arrowH * 0.28);
+      this.scrollPrevBg.fillTriangle(tx2, cy, tx1, cy - arrowH * 0.28, tx1, cy + arrowH * 0.28);
     }
     this.scrollPrevHit.setVisible(true).setPosition(px + aw / 2, cy).setSize(aw, arrowH);
 
-    // Next (right) arrow
-    const nx = this._DIVX - aw;
+    // Next arrow — right after the last visible tower button
+    const lastSlot = this._visibleTowers - 1;
+    const lastTowerRight = TLEFT + this._ARROW_W + lastSlot * (this._TBW + this._TGAP) + this._TBW;
+    const nx = lastTowerRight;
     this.scrollNextBg.clear().setVisible(true);
     this.scrollNextBg.fillStyle(canNext ? 0x1e3a5f : 0x151520, 0.9);
     this.scrollNextBg.fillRoundedRect(nx + 2, cy - arrowH / 2, aw - 2, arrowH, 4);
@@ -254,14 +254,23 @@ export class BottomBar {
     this.scrollNextBg.strokeRoundedRect(nx + 2, cy - arrowH / 2, aw - 2, arrowH, 4);
     if (canNext) {
       this.scrollNextBg.fillStyle(0xeef0f4, 1);
-      const mid = cy;
       const tx1 = nx + aw * 0.35, tx2 = nx + aw * 0.65;
-      this.scrollNextBg.fillTriangle(tx2, mid, tx1, mid - arrowH * 0.28, tx1, mid + arrowH * 0.28);
+      this.scrollNextBg.fillTriangle(tx2, cy, tx1, cy - arrowH * 0.28, tx1, cy + arrowH * 0.28);
     }
     this.scrollNextHit.setVisible(true).setPosition(nx + aw / 2, cy).setSize(aw, arrowH);
   }
 
-  // ─── Public API ───────────────────────────────────────────────────────────
+  // ─── Public API ──────────────────────────────────────────────────────────
+
+  get barHeight(): number { return this._BAR_H; }
+
+  /** True if (x, y) is within the floating wave button's area. */
+  isInWaveArea(x: number, y: number): boolean {
+    return x >= this._WAVE_CX - this._WAVE_W / 2 - 4
+        && x <= this._WAVE_CX + this._WAVE_W / 2 + 4
+        && y >= this._WAVE_CY - this._WAVE_H / 2 - 4
+        && y <= this._WAVE_CY + this._WAVE_H / 2 + 4;
+  }
 
   getRoot(): Phaser.GameObjects.Graphics { return this.bg; }
 
@@ -269,7 +278,7 @@ export class BottomBar {
     return [
       this.bg,
       this.upgRoot,
-      this.waveBg,   this.waveLine1, this.waveLabel,
+      this.waveBg, this.waveLine1, this.waveLabel,
       this.scrollPrevBg, this.scrollPrevHit,
       this.scrollNextBg, this.scrollNextHit,
       ...this.buildBgs,
@@ -284,31 +293,27 @@ export class BottomBar {
   }
 
   resize(sw: number, sh: number) {
-    this._BAR_H = Math.max(155, Math.round(sh * 0.21));
-    this._BAR_Y = sh - this._BAR_H;
-    this._TOWER_CY = this._BAR_Y + Math.round(this._BAR_H * 0.5);
+    // ── 1. Compute tower button size from available width ──────────────────
+    // Reserve space for floating wave button on the right
+    const waveW = Math.max(84, Math.round(sw * 0.078));
+    const waveH = Math.max(52, Math.round(waveW * 0.6));
+    this._WAVE_W = waveW;
+    this._WAVE_H = waveH;
 
-    // Wave button always occupies the right portion
-    this._WAVE_W  = Math.max(120, Math.round(sw * 0.115));
-    this._WAVE_CX = sw - this._WAVE_W / 2;
-    this._DIVX    = sw - this._WAVE_W;
-
-    // Compute tower button size to fit all 6 in tower area
-    const towerAreaW = this._DIVX - TLEFT;
+    // Tower area uses full bar width (wave button floats separately)
+    const towerAreaW = sw - 2 * TLEFT;
     const arrowW = 30;
     const tgap = Math.max(4, Math.min(10, Math.round(towerAreaW * 0.009)));
 
-    // Try fitting all 6 without scroll arrows
     const rawTBW = Math.floor((towerAreaW + tgap) / 6 - tgap);
     const tbwFull = Math.max(68, Math.min(148, rawTBW));
-    const fits6 = 6 * tbwFull + 5 * tgap <= towerAreaW;
+    const fits6   = 6 * tbwFull + 5 * tgap <= towerAreaW;
 
     if (fits6) {
       this._ARROW_W = 0;
       this._visibleTowers = 6;
       this._TBW = tbwFull;
     } else {
-      // Need scroll: reserve arrow width on each side
       const innerW = towerAreaW - 2 * arrowW;
       const maxVis = Math.max(3, Math.min(5, Math.floor((innerW + tgap) / (68 + tgap))));
       this._ARROW_W = arrowW;
@@ -317,37 +322,45 @@ export class BottomBar {
     }
 
     this._TGAP = tgap;
-    this._TBH  = Math.max(60, Math.min(Math.round(this._TBW * 0.95), Math.round(this._BAR_H * 0.84)));
+    this._TBH  = Math.max(60, Math.min(Math.round(this._TBW * 0.95), 140));
+
+    // ── 2. Bar height derived from tower button height ─────────────────────
+    const vertPad = Math.max(12, Math.round(this._TBH * 0.22));
+    this._BAR_H   = this._TBH + 2 * vertPad;
+    this._BAR_Y   = sh - this._BAR_H;
+    this._TOWER_CY = this._BAR_Y + Math.round(this._BAR_H * 0.5);
+
+    // ── 3. Wave button floats above the bar, bottom-right corner ────────────
+    this._WAVE_CX = sw - waveW / 2 - 10;
+    // Center: partially above bar (1/3 above), visually floating
+    this._WAVE_CY = this._BAR_Y - Math.round(waveH * 0.35);
 
     // Clamp scroll
     this._scrollOffset = Math.min(this._scrollOffset, Math.max(0, TOWER_TYPES_ORDERED.length - this._visibleTowers));
 
-    // Wave button font
-    const waveFS = Math.max(13, Math.min(18, Math.round(this._WAVE_W * 0.115)));
+    // Wave font
+    const waveFS = Math.max(12, Math.min(16, Math.round(waveW * 0.135)));
     this.waveLabel.setStyle({ fontSize: waveFS + 'px' });
-    this.waveLine1.setStyle({ fontSize: Math.max(10, waveFS - 4) + 'px' });
+    this.waveLine1.setStyle({ fontSize: Math.max(9, waveFS - 3) + 'px' });
 
-    // Background
+    // ── Background bar (no divider — full width for towers) ────────────────
     this.bg.clear();
     this.bg.fillStyle(COLORS.PANEL_BG, 0.97);
     this.bg.fillRect(0, this._BAR_Y, sw, this._BAR_H);
     this.bg.lineStyle(2, COLORS.PANEL_BORDER, 1);
     this.bg.lineBetween(0, this._BAR_Y, sw, this._BAR_Y);
-    this.bg.lineStyle(1, COLORS.PANEL_BORDER, 0.6);
-    this.bg.lineBetween(this._DIVX, this._BAR_Y + 6, this._DIVX, this._BAR_Y + this._BAR_H - 6);
 
-    // Tower buttons
+    // ── Tower buttons ──────────────────────────────────────────────────────
     this.repositionBuildButtons();
     this.updateScrollArrows();
 
-    // Wave button
-    const waveH = Math.round(this._BAR_H * 0.62);
-    this.waveLine1.setPosition(this._WAVE_CX, this._TOWER_CY - Math.round(this._BAR_H * 0.17));
-    this.waveLabel.setPosition(this._WAVE_CX, this._TOWER_CY + Math.round(this._BAR_H * 0.03));
-    this.waveHit.setPosition(this._WAVE_CX, this._TOWER_CY).setSize(this._WAVE_W - 8, waveH);
+    // ── Floating wave button ───────────────────────────────────────────────
+    this.waveLine1.setPosition(this._WAVE_CX, this._WAVE_CY - Math.round(waveH * 0.22));
+    this.waveLabel.setPosition(this._WAVE_CX, this._WAVE_CY + Math.round(waveH * 0.1));
+    this.waveHit.setPosition(this._WAVE_CX, this._WAVE_CY).setSize(waveW - 6, waveH - 4);
     this.drawWaveBtn(false);
 
-    // Upgrade section rebuild if visible
+    // ── Upgrade section ────────────────────────────────────────────────────
     if (this.upgRoot.visible && this.currentUpgradeTower) {
       this.showUpgradeMode(this.currentUpgradeTower);
     }
@@ -433,9 +446,7 @@ export class BottomBar {
   }
 
   private setBuildInputEnabled(enabled: boolean) {
-    this.buildHits.forEach((h, i) => {
-      h.input!.enabled = enabled && this.isTowerVisible(i);
-    });
+    this.buildHits.forEach((h, i) => { h.input!.enabled = enabled && this.isTowerVisible(i); });
   }
 
   private rebuildUpgradeSection(tower: Tower) {
@@ -446,7 +457,6 @@ export class BottomBar {
     const CY  = this._TOWER_CY;
     const cx0 = this.upgradeCX(0);
 
-    // Info panel (slot 0)
     const infoBg = this.scene.add.graphics();
     const curImgKey = tower.evolved && tower.evolutionType
       ? `tower_${tower.evolutionType}`
@@ -455,21 +465,18 @@ export class BottomBar {
     this.upgRoot.add(infoBg);
 
     const iconSize = Math.round(this._TBW * 0.5);
-    const icon = this.scene.add.image(cx0, CY - this._TBH * 0.25, curImgKey).setDisplaySize(iconSize, iconSize);
-    this.upgRoot.add(icon);
+    this.upgRoot.add(this.scene.add.image(cx0, CY - this._TBH * 0.25, curImgKey).setDisplaySize(iconSize, iconSize));
 
     const nameFSPx = Math.max(10, Math.round(this._TBW * 0.115));
-    const title = this.scene.add.text(cx0, CY + this._TBH * 0.2,
+    this.upgRoot.add(this.scene.add.text(cx0, CY + this._TBH * 0.2,
       `${def.label.split(' ')[0]}\nLv${tower.level}${tower.evolved ? '★' : ''}`, {
         fontSize: nameFSPx + 'px', fontFamily: 'monospace', color: '#eef0f4', align: 'center', lineSpacing: 2,
-      }).setOrigin(0.5);
-    this.upgRoot.add(title);
+      }).setOrigin(0.5));
 
-    const stats = this.scene.add.text(cx0, CY + this._TBH * 0.41,
+    this.upgRoot.add(this.scene.add.text(cx0, CY + this._TBH * 0.41,
       `⚔${Math.round(tower.damage)} 🎯${Math.round(tower.range)}`, {
         fontSize: Math.max(9, nameFSPx - 2) + 'px', fontFamily: 'monospace', color: '#8899aa', align: 'center',
-      }).setOrigin(0.5);
-    this.upgRoot.add(stats);
+      }).setOrigin(0.5));
 
     if (tower.activeSynergyTags.length) {
       this.upgRoot.add(this.scene.add.text(cx0, CY + this._TBH * 0.55,
@@ -478,7 +485,6 @@ export class BottomBar {
         }).setOrigin(0.5));
     }
 
-    // Action buttons (slots 1+)
     interface UpgAction {
       label: string; color: number; cb: () => void; enabled: boolean;
       hotkey?: string; cost: number; previewImgKey?: string; previewStats?: string; statsDiff?: string;
@@ -497,8 +503,7 @@ export class BottomBar {
         color: this.economy.canAfford(cost) ? 0x1e5a3a : 0x333333,
         enabled: this.economy.canAfford(cost),
         previewImgKey: `tower_${tower.towerType}_${Math.min(tower.level, 2)}`,
-        previewStats: `⚔${tier.damage} 🎯${tier.range}`,
-        statsDiff: diffParts.join(' '),
+        previewStats: `⚔${tier.damage} 🎯${tier.range}`, statsDiff: diffParts.join(' '),
         cb: () => { this.onUpgrade?.(); this.showUpgradeMode(tower); },
       });
     }
@@ -517,18 +522,18 @@ export class BottomBar {
           label: `★ ${evo.label}`, hotkey, cost: evo.cost,
           color: can ? 0x3a2a00 : 0x333333, enabled: can,
           previewImgKey: `tower_${evo.type}`,
-          previewStats: `⚔${evoDmg} 🎯${evoRng}`,
-          statsDiff: diffParts.join(' '),
+          previewStats: `⚔${evoDmg} 🎯${evoRng}`, statsDiff: diffParts.join(' '),
           cb: () => { this.onEvolve?.(b as 0 | 1); this.showUpgradeMode(tower); },
         });
       });
     }
 
     const sellVal = tower.sellValue();
-    actions.push({ label: '💰 Sell', cost: sellVal, color: 0x4a1a1a, enabled: true, previewStats: `+${sellVal}g`, cb: () => this.onSell?.() });
+    actions.push({ label: '💰 Sell', cost: sellVal, color: 0x4a1a1a, enabled: true,
+      previewStats: `+${sellVal}g`, cb: () => this.onSell?.() });
 
     actions.forEach((act, i) => {
-      const cx  = this.upgradeCX(i + 1);
+      const cx = this.upgradeCX(i + 1);
       const can = act.enabled;
       const w = this._TBW, h = this._TBH;
       const actFSPx = Math.max(10, Math.round(w * 0.105));
@@ -548,19 +553,17 @@ export class BottomBar {
       }).setOrigin(0.5);
       this.upgRoot.add(txt);
 
-      const subFSPx = Math.max(9, actFSPx - 2) + 'px';
       const subText = act.statsDiff || act.previewStats || '';
       if (subText) {
         this.upgRoot.add(this.scene.add.text(cx, CY + h * 0.26, subText, {
-          fontSize: subFSPx, fontFamily: 'monospace',
+          fontSize: Math.max(9, actFSPx - 2) + 'px', fontFamily: 'monospace',
           color: act.statsDiff ? (can ? '#88cc88' : '#334433') : (can ? '#8899aa' : '#334455'),
           align: 'center',
         }).setOrigin(0.5));
       }
 
-      const costStr = act.label.startsWith('💰') ? '' : `${act.cost}g`;
-      const hkStr   = act.hotkey ? `[${act.hotkey}]` : '';
-      const line = [costStr, hkStr].filter(Boolean).join(' ');
+      const line = [act.label.startsWith('💰') ? '' : `${act.cost}g`, act.hotkey ? `[${act.hotkey}]` : '']
+        .filter(Boolean).join(' ');
       if (line) {
         this.upgRoot.add(this.scene.add.text(cx, CY + h * 0.42, line, {
           fontSize: Math.max(9, actFSPx - 1) + 'px', fontFamily: 'monospace',
@@ -591,8 +594,11 @@ export class BottomBar {
   }
 
   private drawWaveBtn(hover: boolean) {
-    const waveH = Math.round(this._BAR_H * 0.62);
-    drawElevatedButton(this.waveBg, { cx: this._WAVE_CX, cy: this._TOWER_CY, w: this._WAVE_W, h: waveH, theme: 'wave', hover, radius: 8 });
+    drawElevatedButton(this.waveBg, {
+      cx: this._WAVE_CX, cy: this._WAVE_CY,
+      w: this._WAVE_W, h: this._WAVE_H,
+      theme: 'wave', hover, radius: 10,
+    });
   }
 
   private clearUpgHits() {

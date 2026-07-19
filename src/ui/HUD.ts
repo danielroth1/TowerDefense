@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import {
-  COLORS, COMBO_MULTIPLIERS,
+  COLORS,
 } from '../utils/constants';
 import type { WeatherState } from '../systems/WeatherSystem';
 import { SoundSystem } from '../systems/SoundSystem';
@@ -25,11 +25,7 @@ export class HUD {
   private settingsTxt: Phaser.GameObjects.Text;
   private settingsHit: Phaser.GameObjects.Rectangle;
 
-  // Top-centre combo badge
-  private comboBg:  Phaser.GameObjects.Graphics;
-  private comboTxt: Phaser.GameObjects.Text;
-
-  // Wave countdown (small, below combo)
+  // Wave countdown (top-centre small text)
   private countdownTxt: Phaser.GameObjects.Text;
 
   // Boss HP bar
@@ -102,13 +98,7 @@ export class HUD {
       .on('pointerover', () => { this.settingsTxt.setColor('#ffffff'); })
       .on('pointerout',  () => { this.settingsTxt.setColor('#aabbcc'); });
 
-    // ── Combo badge ──────────────────────────────────────────────────────────
-    this.comboBg  = scene.add.graphics().setScrollFactor(0).setDepth(D);
-    this.comboTxt = scene.add.text(0, 0, '×1', {
-      fontSize: '17px', fontFamily: 'monospace', color: '#ffd700',
-    }).setScrollFactor(0).setDepth(D + 1).setOrigin(0.5).setAlpha(0.45);
-
-    // ── Countdown text ───────────────────────────────────────────────────────
+    // ── Wave countdown (top-centre) ──────────────────────────────────────────
     this.countdownTxt = scene.add.text(0, 0, '', {
       fontSize: '14px', fontFamily: 'monospace', color: '#8899aa', align: 'center',
     }).setScrollFactor(0).setDepth(D + 1).setOrigin(0.5);
@@ -175,9 +165,9 @@ export class HUD {
     // ── Event subscriptions ──────────────────────────────────────────────────
     scene.events.on('gold_changed',   (g: number)  => this.setGold(g));
     scene.events.on('lives_changed',  (l: number)  => this.setLives(l));
-    scene.events.on('wave_started',   (_w: number, boss: boolean) => { if (boss) this.flashCombo(); });
+    scene.events.on('wave_started',   () => { /* boss flash handled elsewhere */ });
     scene.events.on('wave_complete',  () => this.bossContainer.setVisible(false));
-    scene.events.on('combo_updated',  (kills: number, mult: number) => this.setCombo(kills, mult));
+    scene.events.on('combo_updated',  () => { /* combo display removed */ });
     scene.events.on('weather_changed', (_state: WeatherState) => { /* visual effects still run */ });
     scene.events.on('boss_hp_update', (hp: number, maxHp: number, label: string) =>
       this.setBossHP(hp, maxHp, label));
@@ -198,7 +188,6 @@ export class HUD {
       this.goldBg,  this.goldTxt,
       this.timerBg, this.timerTxt,
       this.settingsBg, this.settingsTxt, this.settingsHit,
-      this.comboBg, this.comboTxt,
       this.countdownTxt,
       this.bossContainer,
       this.heroTxt,
@@ -270,7 +259,6 @@ export class HUD {
     this.goldTxt.setStyle({ fontSize: fontSz + 'px' });
     this.timerTxt.setStyle({ fontSize: fontSz + 'px' });
     this.settingsTxt.setStyle({ fontSize: Math.max(12, Math.round(18 * sc)) + 'px' });
-    this.comboTxt.setStyle({ fontSize: fontSz + 'px' });
     this.countdownTxt.setStyle({ fontSize: smFontSz + 'px' });
     this.heroTxt.setStyle({ fontSize: Math.max(10, Math.round(15 * sc)) + 'px' });
     this.fpsTxt.setStyle({ fontSize: Math.max(9,  Math.round(13 * sc)) + 'px' });
@@ -297,14 +285,8 @@ export class HUD {
     this.settingsTxt.setPosition(sx, CY);
     this.settingsHit.setPosition(sx, CY).setSize(settingsW, bh);
 
-    // Combo badge (top-centre)
-    const comboCX = W / 2;
-    const comboW  = Math.max(50, Math.round(this.comboTxt.width + 16));
-    drawPillBadge(this.comboBg, comboCX, CY, comboW, bh);
-    this.comboTxt.setPosition(comboCX, CY);
-
-    // Countdown just below combo
-    this.countdownTxt.setPosition(comboCX, padT + bh + 8);
+    // Countdown at top-centre
+    this.countdownTxt.setPosition(W / 2, padT + bh + 8);
 
     // Hero / FPS just above bottom bar
     this.heroTxt.setPosition(10, H - barH - 14);
@@ -364,21 +346,6 @@ export class HUD {
     }
   }
 
-  private setCombo(kills: number, mult: number) {
-    this.comboTxt.setText('×' + mult + (kills > 0 ? ' [' + kills + ']' : ''));
-    const tier = COMBO_MULTIPLIERS.indexOf(mult as (typeof COMBO_MULTIPLIERS)[number]);
-    const colors = ['#ffd700', '#ffaa00', '#ff8800', '#ff4400', '#ff0000'];
-    this.comboTxt.setColor(colors[Math.max(0, tier)] ?? '#ffd700');
-    this.comboTxt.setAlpha(mult > 1 ? 1 : 0.45);
-    if (mult > 1) {
-      this.scene.tweens.add({ targets: this.comboTxt, scaleX: 1.18, scaleY: 1.18, duration: 100, yoyo: true });
-    }
-    const comboW = Math.max(50, Math.round(this.comboTxt.width + 16));
-    const sc = this._sc;
-    const bh = Math.max(26, Math.round(36 * sc));
-    drawPillBadge(this.comboBg, this._W / 2, Math.max(6, Math.round(12 * sc)) + bh / 2, comboW, bh);
-  }
-
   private setBossHP(hp: number, maxHp: number, label: string) {
     this.bossContainer.setVisible(true);
     const frac  = Math.max(0, hp / maxHp);
@@ -401,12 +368,6 @@ export class HUD {
     const pips = maxHp > 0 ? Math.round((hp / maxHp) * 5) : 0;
     const bar = '●'.repeat(pips) + '○'.repeat(5 - pips);
     this.heroTxt.setText('HERO Lv' + level + '  HP ' + bar);
-  }
-
-  private flashCombo() {
-    this.scene.tweens.add({
-      targets: this.comboTxt, scaleX: 1.25, scaleY: 1.25, duration: 200, yoyo: true, repeat: 3,
-    });
   }
 
   private toggleSettings() {

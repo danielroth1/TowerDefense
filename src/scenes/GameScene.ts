@@ -142,9 +142,9 @@ export class GameScene extends Phaser.Scene {
   private minimapViewport!: Phaser.GameObjects.Graphics;
   private minimapHitArea!: Phaser.GameObjects.Rectangle;
   private minimapX = 0;
-  private readonly minimapY = 56;  // below floating badges (BADGE_HEIGHT + PAD_T + 8)
-  private readonly minimapW = 200;
-  private readonly minimapH = 103;
+  private readonly minimapY = 56;
+  private minimapW = 200;   // display width — updated per resize (15% of screen)
+  private minimapH = 103;   // display height — updated per resize
 
   constructor() { super('GameScene'); }
 
@@ -565,7 +565,7 @@ export class GameScene extends Phaser.Scene {
     // ── Main camera: renders the game world in the viewport between UI bars ──
     this.cameras.main.setBounds(0, 0, W, H);
     this.cameras.main.setZoom(2.0);
-    this.cameras.main.setViewport(0, 0, this.scale.width, this.scale.height - this._barH);
+    this.cameras.main.setViewport(0, 0, this.scale.width, this.scale.height - this.bottomBar.barHeight);
     // Main camera ignores UI objects
     this.cameras.main.ignore(this.uiGroup);
 
@@ -829,6 +829,9 @@ export class GameScene extends Phaser.Scene {
 
     // Block clicks when settings modal is open
     if (this.hud.isSettingsOpen) return;
+
+    // Block clicks on the floating wave button (above the bar)
+    if (this.bottomBar.isInWaveArea(p.x, p.y)) return;
 
     const wx = p.worldX;
     const wy = p.worldY;
@@ -1211,22 +1214,23 @@ export class GameScene extends Phaser.Scene {
   // ─── Minimap ─────────────────────────────────────────────────────────────
   private initResizeHandler() {
     const applyLayout = (W: number, H: number) => {
-      this._barH = Math.max(155, Math.round(H * 0.21));
+      // Compute bottom bar first — barH is derived from tower button size
+      this.bottomBar.resize(W, H);
+      this._barH = this.bottomBar.barHeight;
 
-      // Update camera viewport
+      // Camera viewport
       this.cameras.main.setViewport(0, 0, W, H - this._barH);
 
-      // Update UI camera
+      // UI camera
       this.uiCam.setSize(W, H);
 
-      // Reposition minimap
+      // Minimap reposition
       this.repositionMinimap(W);
 
-      // Redraw HUD and bottom bar
+      // HUD with actual barH
       this.hud.resize(W, H, this._barH);
-      this.bottomBar.resize(W, H);
 
-      // Resize ability buttons proportionally
+      // Ability buttons
       this.relayoutAbilities(H, this._barH);
     };
 
@@ -1240,24 +1244,27 @@ export class GameScene extends Phaser.Scene {
 
   /** Reposition all minimap graphics when screen width changes. */
   private repositionMinimap(W: number) {
-    if (!this.minimapBg) return;  // not yet created
-    const MM_X  = W - this.minimapW - 4;
+    if (!this.minimapBg) return;
+    // Responsive size: 15% of screen width, aspect ratio maintained
+    const newW = Math.max(80, Math.round(W * 0.15));
+    const newH = Math.round(newW * GRID_ROWS / GRID_COLS);
+    this.minimapW = newW;
+    this.minimapH = newH;
+
+    const MM_X  = W - newW - 4;
     const MM_Y  = this.minimapY;
-    const MM_W  = this.minimapW;
-    const MM_H  = this.minimapH;
     const MM_PAD = 2;
 
     this.minimapX = MM_X;
 
     this.minimapBg.clear();
     this.minimapBg.fillStyle(0x0a1a2a, 0.35);
-    this.minimapBg.fillRect(MM_X - MM_PAD, MM_Y - MM_PAD, MM_W + MM_PAD * 2, MM_H + MM_PAD * 2);
+    this.minimapBg.fillRect(MM_X - MM_PAD, MM_Y - MM_PAD, newW + MM_PAD * 2, newH + MM_PAD * 2);
     this.minimapBg.lineStyle(1, 0x5a8aaa, 0.6);
-    this.minimapBg.strokeRect(MM_X - MM_PAD, MM_Y - MM_PAD, MM_W + MM_PAD * 2, MM_H + MM_PAD * 2);
+    this.minimapBg.strokeRect(MM_X - MM_PAD, MM_Y - MM_PAD, newW + MM_PAD * 2, newH + MM_PAD * 2);
 
-    this.minimapMapImg.setPosition(MM_X, MM_Y);
-    this.minimapHitArea.setPosition(MM_X + MM_W / 2, MM_Y + MM_H / 2)
-      .setSize(MM_W, MM_H);
+    this.minimapMapImg.setPosition(MM_X, MM_Y).setDisplaySize(newW, newH);
+    this.minimapHitArea.setPosition(MM_X + newW / 2, MM_Y + newH / 2).setSize(newW, newH);
   }
 
   /**
