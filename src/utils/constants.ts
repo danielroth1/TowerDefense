@@ -110,12 +110,14 @@ export const COMBO_MULTIPLIERS = [1, 2, 3, 5, 10] as const;
 // ─── Weather ────────────────────────────────────────────────────────────────
 export const WEATHER_CHANGE_INTERVAL = 75000; // ms between weather shifts
 
-// ─── UI Layout ──────────────────────────────────────────────────────────────
-// These values are in the game's logical coordinate space (1776×1046).
-// FIT mode scales them down to the actual window; a ~2.2× multiplier
-// compensates so UI elements appear at their intended pixel size on screen.
-export const UI_TOP_HEIGHT    = 75;  // HUD top bar height
-export const UI_BOTTOM_HEIGHT = 220; // BottomBar height
+// ─── UI Layout (screen pixels, RESIZE mode) ─────────────────────────────────
+export const UI_TOP_HEIGHT    = 0;   // top bar removed — world renders from y=0
+export const UI_BOTTOM_HEIGHT = 200; // BottomBar initial height (screen px)
+
+// Floating badge layout (screen pixels)
+export const BADGE_HEIGHT    = 36;   // pill badge height
+export const BADGE_GAP       = 8;    // gap between badges
+export const BADGE_PADDING_X = 12;   // horizontal padding inside badge
 
 // ─── Camera ─────────────────────────────────────────────────────────────────
 export const CAMERA_MIN_ZOOM = 0.3;

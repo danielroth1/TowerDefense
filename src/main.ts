@@ -3,10 +3,7 @@ import { BootScene }     from './scenes/BootScene';
 import { MenuScene }     from './scenes/MenuScene';
 import { GameScene }     from './scenes/GameScene';
 import { GameOverScene } from './scenes/GameOverScene';
-import {
-  GAME_WIDTH, GAME_HEIGHT,
-  UI_TOP_HEIGHT, UI_BOTTOM_HEIGHT,
-} from './utils/constants';
+import { GAME_WIDTH, GAME_HEIGHT } from './utils/constants';
 
 // ── Text factory: auto-inject devicePixelRatio for crisp text on Retina ────
 // (Text renders on its own internal canvas — this resolution hint is
@@ -25,12 +22,10 @@ import {
 })();
 
 // ── Game config ──────────────────────────────────────────────────────────────
-const GAME_TOTAL_HEIGHT = GAME_HEIGHT + UI_TOP_HEIGHT + UI_BOTTOM_HEIGHT;
-
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
   width: GAME_WIDTH,
-  height: GAME_TOTAL_HEIGHT,
+  height: GAME_HEIGHT,
   backgroundColor: '#0a0a0f',
   parent: document.body,
   physics: {
@@ -43,11 +38,12 @@ const config: Phaser.Types.Core.GameConfig = {
   scene: [BootScene, MenuScene, GameScene, GameOverScene],
   render: {
     antialias: true,
+    antialiasGL: true,
     pixelArt: false,
+    mipmapFilter: 'LINEAR_MIPMAP_LINEAR',
   },
   scale: {
-    mode: Phaser.Scale.FIT,
-    autoCenter: Phaser.Scale.CENTER_BOTH,
+    mode: Phaser.Scale.RESIZE,
   },
 };
 
