@@ -5,7 +5,7 @@ import type { EconomyManager } from '../systems/EconomyManager';
 import type { Tower } from '../entities/Tower';
 import { drawElevatedButton } from '../utils/ButtonStyles';
 
-const TLEFT = 12;  // left margin for tower button area
+const TLEFT = 0; // 12;  // left margin for tower button area
 
 export class BottomBar {
   private scene:   Phaser.Scene;
@@ -306,7 +306,7 @@ export class BottomBar {
     const tgap = Math.max(4, Math.min(10, Math.round(towerAreaW * 0.009)));
 
     const rawTBW = Math.floor((towerAreaW + tgap) / 6 - tgap);
-    const tbwFull = Math.max(68, Math.min(148, rawTBW));
+    const tbwFull = Math.max(68, Math.min(Math.round(sw * 0.20), rawTBW));
     const fits6   = 6 * tbwFull + 5 * tgap <= towerAreaW;
 
     if (fits6) {
@@ -322,10 +322,16 @@ export class BottomBar {
     }
 
     this._TGAP = tgap;
-    this._TBH  = Math.max(60, Math.min(Math.round(this._TBW * 0.95), 140));
+    this._TBH  = Math.max(60, Math.min(Math.round(this._TBW * 0.95), Math.round(sh * 0.20)));
+    // Enforce rectangular aspect ratio: width ≤ 90% of height so buttons
+    // are never wider than they are tall (avoids stretched look on wide screens)
+    const maxRectW = Math.round(this._TBH * 0.9);
+    if (this._TBW > maxRectW) {
+      this._TBW = maxRectW;
+    }
 
     // ── 2. Bar height derived from tower button height ─────────────────────
-    const vertPad = Math.max(12, Math.round(this._TBH * 0.22));
+    const vertPad = 0; //Math.max(12, Math.round(this._TBH * 0.22));
     this._BAR_H   = this._TBH + 2 * vertPad;
     this._BAR_Y   = sh - this._BAR_H;
     this._TOWER_CY = this._BAR_Y + Math.round(this._BAR_H * 0.5);
