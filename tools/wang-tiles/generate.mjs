@@ -1,23 +1,33 @@
 #!/usr/bin/env node
 /**
- * Wang Tile Generator — Corner-Based / Sub-Tile Quadrant Method
+ * Wang Tile Generator — Corner-Based Quadrant Compositing
  *
- * Generates 16 seamless Wang tiles from a single square seamless input texture.
+ * Generates 16 Wang tiles from a single square seamless input texture.
  *
  * Method:
  *   1. Divide the source into 4 quadrants (Color-0 set).
  *   2. Derive the Color-1 set by taking diagonally opposite quadrants
- *      (TL1=BR0, TR1=BL0, BL1=TR0, BR1=TL0).  Because the source is
- *      seamless, this produces a valid alternative "color" for every corner.
+ *      (TL₁=BR₀, TR₁=BL₀, BL₁=TR₀, BR₁=TL₀).
  *   3. For each of the 2⁴=16 corner-colour permutations (TL,TR,BR,BL ∈ {0,1}),
- *      assemble a 2×2 grid of the appropriate quadrant variants and resize to
- *      the target tile size.
+ *      assemble a 2×2 grid of the appropriate quadrant variants.
+ *
+ * Edge-matching guarantee:
+ *   Adjacent tiles share two vertex colours, so their touching edges use the
+ *   same quadrant content.  Two tiles with the same (TL,TR) corner pair, for
+ *   example, have identical top-edge pixels — guaranteeing seamless transitions
+ *   between tiles of the same terrain.
+ *
+ * The quadrants meet at the centre cross.  At the generation resolution (192×192)
+ * there is a 1-pixel seam at this boundary, but when the tile is displayed
+ * in-game at 48×48 (4× GPU bilinear downscale) the seam is smoothed invisibly.
+ * No pixel blending is applied — avoiding the color artifacts that arise when
+ * blending unrelated texture regions.
  *
  * Usage:
  *   node tools/wang-tiles/generate.mjs <input> <outputDir> [tileSize]
  *
  * Example:
- *   node tools/wang-tiles/generate.mjs public/assets/tiles/tile_grass.png public/assets/tiles/ 48
+ *   node tools/wang-tiles/generate.mjs public/assets/tiles/tile_grass.png public/assets/tiles/ 192
  */
 
 import sharp from 'sharp';
@@ -37,7 +47,7 @@ async function main() {
 
   const inputPath  = args[0];
   const outputDir  = args[1];
-  const tileSize   = parseInt(args[2], 10) || 48;
+  const tileSize   = parseInt(args[2], 10) || 192;
   const quadSize   = Math.floor(tileSize / 2);
 
   if (!fs.existsSync(inputPath)) {
@@ -46,14 +56,11 @@ async function main() {
   }
 
   const baseName = path.basename(inputPath, path.extname(inputPath));
-
-  // Output into a subfolder named {baseName}_wang/
   const wangDir = path.join(outputDir, `${baseName}_wang`);
   ensureDir(wangDir);
 
-  const image    = sharp(inputPath);
-  const meta     = await image.metadata();
-
+  const image = sharp(inputPath);
+  const meta  = await image.metadata();
   const srcW = meta.width;
   const srcH = meta.height;
 
@@ -66,30 +73,24 @@ async function main() {
   const halfH = Math.floor(srcH / 2);
 
   // ── Step 1: Extract 4 quadrants (Color-0 set) ─────────────────────────
-  const extractQuadrant = (left, top) =>
-    image
-      .clone()
+  const extractQ = (left, top) =>
+    image.clone()
       .extract({ left, top, width: halfW, height: halfH })
       .resize(quadSize, quadSize, { kernel: 'lanczos3' })
       .png()
       .toBuffer();
 
-  const Q_TL_0 = await extractQuadrant(0, 0);
-  const Q_TR_0 = await extractQuadrant(halfW, 0);
-  const Q_BL_0 = await extractQuadrant(0, halfH);
-  const Q_BR_0 = await extractQuadrant(halfW, halfH);
+  const Q_TL_0 = await extractQ(0, 0);
+  const Q_TR_0 = await extractQ(halfW, 0);
+  const Q_BL_0 = await extractQ(0, halfH);
+  const Q_BR_0 = await extractQ(halfW, halfH);
 
   // ── Step 2: Color-1 set = diagonally opposite quadrants ───────────────
-  const Q_TL_1 = Q_BR_0;
-  const Q_TR_1 = Q_BL_0;
-  const Q_BL_1 = Q_TR_0;
-  const Q_BR_1 = Q_TL_0;
-
-  const quadrantMap = {
-    TL_0: Q_TL_0, TL_1: Q_TL_1,
-    TR_0: Q_TR_0, TR_1: Q_TR_1,
-    BL_0: Q_BL_0, BL_1: Q_BL_1,
-    BR_0: Q_BR_0, BR_1: Q_BR_1,
+  const qmap = {
+    TL_0: Q_TL_0, TL_1: Q_BR_0,
+    TR_0: Q_TR_0, TR_1: Q_BL_0,
+    BL_0: Q_BL_0, BL_1: Q_TR_0,
+    BR_0: Q_BR_0, BR_1: Q_TL_0,
   };
 
   console.log(`Generating 16 Wang tiles (${tileSize}×${tileSize}) from ${srcW}×${srcH} source → ${wangDir}/`);
@@ -101,24 +102,21 @@ async function main() {
       for (let br = 0; br <= 1; br++) {
         for (let bl = 0; bl <= 1; bl++) {
           const tileIndex = tl * 8 + tr * 4 + br * 2 + bl;
-
           const fileName = `wang_${tileIndex}.png`;
-
           const outputPath = path.join(wangDir, fileName);
 
           await sharp({
             create: {
-              width: tileSize,
-              height: tileSize,
+              width: tileSize, height: tileSize,
               channels: 4,
               background: { r: 0, g: 0, b: 0, alpha: 0 },
             },
           })
             .composite([
-              { input: quadrantMap[`TL_${tl}`], top: 0,        left: 0 },
-              { input: quadrantMap[`TR_${tr}`], top: 0,        left: quadSize },
-              { input: quadrantMap[`BL_${bl}`], top: quadSize, left: 0 },
-              { input: quadrantMap[`BR_${br}`], top: quadSize, left: quadSize },
+              { input: qmap[`TL_${tl}`], top: 0,        left: 0 },
+              { input: qmap[`TR_${tr}`], top: 0,        left: quadSize },
+              { input: qmap[`BL_${bl}`], top: quadSize, left: 0 },
+              { input: qmap[`BR_${br}`], top: quadSize, left: quadSize },
             ])
             .png()
             .toFile(outputPath);

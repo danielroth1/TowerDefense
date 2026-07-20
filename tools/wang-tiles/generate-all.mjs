@@ -16,7 +16,7 @@ import { execSync } from 'node:child_process';
 
 const TILES_DIR = 'public/assets/tiles';
 const SCRIPT    = 'tools/wang-tiles/generate.mjs';
-const tileSize  = parseInt(process.argv[2], 10) || 48;
+const tileSize  = parseInt(process.argv[2], 10) || 192;
 
 // Which base textures to generate Wang tiles for
 const TERRAIN_KEYS = [
