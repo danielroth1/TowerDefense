@@ -382,10 +382,13 @@ export class GameScene extends Phaser.Scene {
         overlayDepth: 0.06,
       };
     }
-    // Ground / water — use random vertex-based Wang tiles for varied
-    // seamless tiling, just like interior grass cells.
-    const wangIdx = this.computeWangIndex(tile.row, tile.col);
-    return { key: `tile_water_wang_${wangIdx}`, depth: 0 };
+    // Ground / water — use vertex-based Wang tiles via pickVariationKey
+    // so the Wang tile set is properly resolved (matching interior grass).
+    const waterWangIdx = this.computeWangIndex(tile.row, tile.col);
+    const waterKey = this.aiTileKeys.has('tile_water')
+      ? this.pickVariationKey('tile_water', tile.row, tile.col, waterWangIdx)
+      : 'tile_ground';
+    return { key: waterKey, depth: 0 };
   }
 
   /** Recompute and apply the correct tile texture and depth for a grid cell. */
