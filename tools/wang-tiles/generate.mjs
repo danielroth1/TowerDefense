@@ -17,11 +17,11 @@
  *   example, have identical top-edge pixels — guaranteeing seamless transitions
  *   between tiles of the same terrain.
  *
- * The quadrants meet at the centre cross.  At the generation resolution (192×192)
- * there is a 1-pixel seam at this boundary, but when the tile is displayed
- * in-game at 48×48 (4× GPU bilinear downscale) the seam is smoothed invisibly.
- * No pixel blending is applied — avoiding the color artifacts that arise when
- * blending unrelated texture regions.
+ * The quadrants meet at the centre cross.  A configurable alpha-feathered blend
+ * zone (default 16 px each side, 32 px total) cross-fades adjacent quadrants at
+ * the centre seams.  Output pixels are computed as the alpha-weighted average of
+ * all covering quadrants, producing fully-opaque tiles with no compositing-order
+ * bias or transparency artifacts.
  *
  * Usage:
  *   node tools/wang-tiles/generate.mjs <input> <outputDir> [tileSize]
@@ -72,30 +72,74 @@ async function main() {
   const halfW = Math.floor(srcW / 2);
   const halfH = Math.floor(srcH / 2);
 
-  // ── Step 1: Extract 4 quadrants (Color-0 set) ─────────────────────────
-  const extractQ = (left, top) =>
+  // ── Blend width for center-cross feathering ──────────────────────────
+  const BLEND = 16; // half-width of the blend zone (total = 32 px cross-fade)
+
+  // Extra source pixels needed to extend quadrants past the centre
+  const extraSrc = Math.ceil(BLEND * (srcW / tileSize));
+  const largeSize = quadSize + BLEND;
+
+  // ── Helper: extract a raw RGBA quadrant at the larger size ────────────
+  const extractRaw = (left, top, w, h) =>
     image.clone()
-      .extract({ left, top, width: halfW, height: halfH })
-      .resize(quadSize, quadSize, { kernel: 'lanczos3' })
-      .png()
-      .toBuffer();
+      .extract({ left, top, width: Math.min(w, srcW - left), height: Math.min(h, srcH - top) })
+      .resize(largeSize, largeSize, { kernel: 'lanczos3' })
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
 
-  const Q_TL_0 = await extractQ(0, 0);
-  const Q_TR_0 = await extractQ(halfW, 0);
-  const Q_BL_0 = await extractQ(0, halfH);
-  const Q_BR_0 = await extractQ(halfW, halfH);
+  // ── Helper: apply alpha feather mask to a raw RGBA buffer ─────────────
+  // Fades over 2×BLEND pixels so adjacent quadrants cross-fade in the same
+  // region.  Returns a cloned { data, info } with modified alpha channel.
+  function applyFeather(rawResult, opts) {
+    const { data, info } = rawResult;
+    const { width, height } = info;
+    const fadeLen = BLEND * 2; // total fade distance on each edge
+    const buf = Buffer.alloc(data.length);
+    data.copy(buf);
 
-  // ── Step 2: Color-1 set = diagonally opposite quadrants ───────────────
-  const qmap = {
-    TL_0: Q_TL_0, TL_1: Q_BR_0,
-    TR_0: Q_TR_0, TR_1: Q_BL_0,
-    BL_0: Q_BL_0, BL_1: Q_TR_0,
-    BR_0: Q_BR_0, BR_1: Q_TL_0,
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        let a = 1.0;
+        if (opts.fadeRight)  { const d = width  - 1 - x; if (d < fadeLen) a *= Math.max(0, d / fadeLen); }
+        if (opts.fadeLeft)   { if (x < fadeLen)            a *= Math.max(0, x / fadeLen); }
+        if (opts.fadeBottom) { const d = height - 1 - y; if (d < fadeLen) a *= Math.max(0, d / fadeLen); }
+        if (opts.fadeTop)    { if (y < fadeLen)            a *= Math.max(0, y / fadeLen); }
+        buf[(y * width + x) * 4 + 3] = Math.round(Math.max(0, a) * 255);
+      }
+    }
+    return { data: buf, info };
+  }
+
+  // ── Step 1: Extract 4 large quadrants (extending past centre) ─────────
+  const Q_LARGE_TL = await extractRaw(0, 0, halfW + extraSrc, halfH + extraSrc);
+  const Q_LARGE_TR = await extractRaw(halfW - extraSrc, 0, halfW + extraSrc, halfH + extraSrc);
+  const Q_LARGE_BL = await extractRaw(0, halfH - extraSrc, halfW + extraSrc, halfH + extraSrc);
+  const Q_LARGE_BR = await extractRaw(halfW - extraSrc, halfH - extraSrc, halfW + extraSrc, halfH + extraSrc);
+
+  // ── Step 2: Pre-compute 8 feathered variants ──────────────────────────
+  // Each base quadrant appears in two Wang-colour positions with different
+  // feather directions.
+  const feathered = {
+    TL_0: applyFeather(Q_LARGE_TL, { fadeRight: true, fadeBottom: true }),
+    TL_1: applyFeather(Q_LARGE_BR, { fadeRight: true, fadeBottom: true }),
+    TR_0: applyFeather(Q_LARGE_TR, { fadeLeft: true,  fadeBottom: true }),
+    TR_1: applyFeather(Q_LARGE_BL, { fadeLeft: true,  fadeBottom: true }),
+    BL_0: applyFeather(Q_LARGE_BL, { fadeRight: true, fadeTop: true }),
+    BL_1: applyFeather(Q_LARGE_TR, { fadeRight: true, fadeTop: true }),
+    BR_0: applyFeather(Q_LARGE_BR, { fadeLeft: true,  fadeTop: true }),
+    BR_1: applyFeather(Q_LARGE_TL, { fadeLeft: true,  fadeTop: true }),
   };
 
-  console.log(`Generating 16 Wang tiles (${tileSize}×${tileSize}) from ${srcW}×${srcH} source → ${wangDir}/`);
+  console.log(`Generating 16 Wang tiles (${tileSize}×${tileSize}, ${BLEND}px centre-cross blend) from ${srcW}×${srcH} source → ${wangDir}/`);
 
   // ── Step 3: Generate all 16 corner-colour permutations ────────────────
+  // Pixel-level weighted averaging — each output pixel is the
+  // alpha-weighted mean of all quadrants that cover it.  This avoids the
+  // transparency / compositing-order bias that pure alpha-over would
+  // introduce.
+  const overlap = quadSize - BLEND; // left/top of right/bottom quadrants
+
   let count = 0;
   for (let tl = 0; tl <= 1; tl++) {
     for (let tr = 0; tr <= 1; tr++) {
@@ -105,19 +149,49 @@ async function main() {
           const fileName = `wang_${tileIndex}.png`;
           const outputPath = path.join(wangDir, fileName);
 
-          await sharp({
-            create: {
-              width: tileSize, height: tileSize,
-              channels: 4,
-              background: { r: 0, g: 0, b: 0, alpha: 0 },
-            },
+          const quads = [
+            { buf: feathered[`TL_${tl}`], ox: 0,      oy: 0 },
+            { buf: feathered[`TR_${tr}`], ox: overlap, oy: 0 },
+            { buf: feathered[`BL_${bl}`], ox: 0,      oy: overlap },
+            { buf: feathered[`BR_${br}`], ox: overlap, oy: overlap },
+          ];
+
+          const outRaw = Buffer.alloc(tileSize * tileSize * 4);
+
+          for (let y = 0; y < tileSize; y++) {
+            for (let x = 0; x < tileSize; x++) {
+              let r = 0, g = 0, b = 0, wTotal = 0;
+
+              for (const { buf, ox, oy } of quads) {
+                const lx = x - ox;
+                const ly = y - oy;
+                if (lx < 0 || ly < 0 || lx >= largeSize || ly >= largeSize) continue;
+
+                const qi = (ly * largeSize + lx) * 4;
+                const w = buf.data[qi + 3] / 255; // alpha as weight
+                if (w > 0) {
+                  r += buf.data[qi]     * w;
+                  g += buf.data[qi + 1] * w;
+                  b += buf.data[qi + 2] * w;
+                  wTotal += w;
+                }
+              }
+
+              const oi = (y * tileSize + x) * 4;
+              if (wTotal > 0) {
+                outRaw[oi]     = Math.round(r / wTotal);
+                outRaw[oi + 1] = Math.round(g / wTotal);
+                outRaw[oi + 2] = Math.round(b / wTotal);
+                outRaw[oi + 3] = 255;
+              }
+              // else stays transparent black (shouldn't happen — every pixel
+              // is covered by at least one quadrant)
+            }
+          }
+
+          await sharp(outRaw, {
+            raw: { width: tileSize, height: tileSize, channels: 4 },
           })
-            .composite([
-              { input: qmap[`TL_${tl}`], top: 0,        left: 0 },
-              { input: qmap[`TR_${tr}`], top: 0,        left: quadSize },
-              { input: qmap[`BL_${bl}`], top: quadSize, left: 0 },
-              { input: qmap[`BR_${br}`], top: quadSize, left: quadSize },
-            ])
             .png()
             .toFile(outputPath);
 
