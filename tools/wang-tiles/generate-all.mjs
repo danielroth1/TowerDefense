@@ -7,7 +7,8 @@
  * tile_path, tile_spawn, tile_goal.
  *
  * Usage:
- *   node tools/wang-tiles/generate-all.mjs [tileSize]
+ *   node tools/wang-tiles/generate-all.mjs [tileSize]          # default algorithm
+ *   node tools/wang-tiles/generate-all.mjs --cohen [tileSize]  # Cohen et al. search
  */
 
 import fs from 'node:fs';
@@ -15,8 +16,17 @@ import path from 'node:path';
 import { execSync } from 'node:child_process';
 
 const TILES_DIR = 'public/assets/tiles';
-const SCRIPT    = 'tools/wang-tiles/generate.mjs';
-const tileSize  = parseInt(process.argv[2], 10) || 192;
+
+// Parse args: --cohen flag can be anywhere, tileSize is first numeric arg
+const args = process.argv.slice(2);
+const useCohen  = args.includes('--cohen');
+const tileSize  = parseInt(args.find(a => /^\d+$/.test(a)), 10) || 192;
+
+const SCRIPT = useCohen
+  ? 'tools/wang-tiles/generate-cohen.mjs'
+  : 'tools/wang-tiles/generate.mjs';
+
+console.log(`Using ${useCohen ? 'Cohen et al.' : 'diagonal swap'} algorithm (${SCRIPT})`);
 
 // Which base textures to generate Wang tiles for
 const TERRAIN_KEYS = [

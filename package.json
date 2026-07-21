@@ -8,7 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tiles": "node --watch --watch-path=tools/tile-generator tools/tile-generator/server.mjs",
-    "wang-tiles": "node tools/wang-tiles/generate-all.mjs"
+    "wang-tiles": "node tools/wang-tiles/generate-all.mjs",
+    "wang-tiles-cohen": "node tools/wang-tiles/generate-all.mjs --cohen"
   },
   "devDependencies": {
     "typescript": "~6.0.2",
