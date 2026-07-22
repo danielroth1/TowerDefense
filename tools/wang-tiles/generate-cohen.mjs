@@ -1,23 +1,28 @@
 #!/usr/bin/env node
 /**
- * Cohen et al. (2003) Wang Tile Generator — Search-Based Edge/Interior Filling
+ * Cohen et al. (2003) Wang Tile Generator — Correct Implementation
  *
- * Instead of splitting the source into fixed quadrants and swapping them
- * diagonally (the simple algorithm in generate.mjs), this searches the source
- * for optimal edge strips and interior patches.
+ * Key insight: there are only 4 HORIZONTAL canonical strips (H[00..11])
+ * and 4 VERTICAL canonical strips (V[00..11]).  A tile's top edge and another
+ * tile's bottom edge share the SAME H strip whenever their meeting corners
+ * match.  The previous implementation used 16 directional strips (separate
+ * top/right/bottom/left), which meant tiles with matching color pairs still had
+ * different edge pixels — never truly seamless.
  *
  * Algorithm:
- *   Phase 1 — Edge strip search: For each of 16 (edge, colourPair) combos,
- *             search the source for the lowest-variance 1px-wide strip.
- *   Phase 2 — Corner consistency: For each corner position and colour,
- *             average the endpoint pixels of all strips meeting there.
- *   Phase 3 — Band extraction: Sample BLEND-px-wide bands inward from each
- *             edge strip (used for feathering).
- *   Phase 4 — Interior search: For each of 16 corner permutations, search
- *             the source for the (tileSize-2*BLEND-2)² interior patch whose
- *             border best matches the 4 edge bands.
- *   Phase 5 — Assembly: Composite strips + bands + interior with centre-cross
- *             alpha feathered blending.
+ *   Phase 1 — Strip search: find 4 H-strips (rows) and 4 V-strips (columns)
+ *             from the source, stratified so all 4 are distinct.  Score: variance.
+ *   Phase 2 — Corner consistency: average endpoints of all strips sharing a
+ *             corner color; write the canonical corner pixel back.
+ *   Phase 3 — Patch search: for each of 16 tiles, find the tileSize×tileSize
+ *             source patch whose 4 edges best match the canonical strips (MSE).
+ *   Phase 4 — Assembly: copy the patch; for pixels within BLEND px of any tile
+ *             edge, smoothstep-blend toward the canonical strip pixel.
+ *             "Nearest edge wins" ensures stable corner handling.
+ *
+ * Seamlessness guarantee:
+ *   Matching-edge tiles use the SAME canonical strip.  The outermost pixel is
+ *   always exactly that strip's pixel — no arithmetic applied at d=0.
  *
  * Usage:
  *   node tools/wang-tiles/generate-cohen.mjs <inputPath> <outputDir> [tileSize]
@@ -27,54 +32,30 @@
  */
 
 import sharp from 'sharp';
-import fs from 'node:fs';
-import path from 'node:path';
+import fs    from 'node:fs';
+import path  from 'node:path';
 
-// ── Tunables ────────────────────────────────────────────────────────────
-const BLEND  = 6;   // feather / transition zone width in pixels
-const STRIDE = 4;   // interior search stride (1 = exhaustive, 4 = 16× faster)
+// ── Tunables ─────────────────────────────────────────────────────────────────
+const BLEND  = 20;   // blend-zone width in pixels (capped to tileSize/4 for small tiles)
+const STRIDE = 4;    // patch-search stride — higher = faster
 
-function ensureDir(dir) {
-  fs.mkdirSync(dir, { recursive: true });
-}
 
-// ── RGBA helpers ────────────────────────────────────────────────────────
-function srcIdx(w, x, y) {
-  return ((y & 0xffff) * w + (x & 0xffff)) * 4;
-}
+// ── Utilities ─────────────────────────────────────────────────────────────────
+function ensureDir (dir) { fs.mkdirSync(dir, { recursive: true }); }
 
-function mean(buf, n) {
-  let r = 0, g = 0, b = 0;
-  for (let i = 0; i < n; i++) {
-    const o = i * 4;
-    r += buf[o];     g += buf[o + 1]; b += buf[o + 2];
-  }
-  return [r / n, g / n, b / n];
-}
+/** pair index: (a,b) → 0..3 where a,b ∈ {0,1} */
+function pairIdx (a, b) { return (a << 1) | b; }
 
-function variance(buf, n) {
-  const [rm, gm, bm] = mean(buf, n);
-  let v = 0;
-  for (let i = 0; i < n; i++) {
-    const o = i * 4;
-    const dr = buf[o] - rm, dg = buf[o + 1] - gm, db = buf[o + 2] - bm;
-    v += dr * dr + dg * dg + db * db;
-  }
-  return v / n;
-}
+function clamp (v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
-// ── Pair index helpers ──────────────────────────────────────────────────
-// pair index = firstColour * 2 + secondColour
-function pairIdx(a, b) { return a * 2 + b; }
+/** Smooth Hermite interpolation t∈[0,1] → [0,1] */
+function smoothstep (t) { const c = clamp(t, 0, 1); return c * c * (3 - 2 * c); }
 
-// Edge → which corner colours define the pair:
-//   top(0):    (tl, tr) → pair = tl*2 + tr
-//   right(1):  (tr, br) → pair = tr*2 + br
-//   bottom(2): (br, bl) → pair = br*2 + bl
-//   left(3):   (bl, tl) → pair = bl*2 + tl
+/** Linear interpolation a→b by t */
+function lerp (a, b, t) { return a + (b - a) * t; }
 
-// ── Main ────────────────────────────────────────────────────────────────
-async function main() {
+// ── Main ──────────────────────────────────────────────────────────────────────
+async function main () {
   const args = process.argv.slice(2);
   if (args.length < 2) {
     console.error('Usage: node generate-cohen.mjs <inputPath> <outputDir> [tileSize]');
@@ -86,7 +67,7 @@ async function main() {
   const tileSize  = parseInt(args[2], 10) || 192;
 
   if (!fs.existsSync(inputPath)) {
-    console.error(`Input file not found: ${inputPath}`);
+    console.error(`Input not found: ${inputPath}`);
     process.exit(1);
   }
 
@@ -94,520 +75,350 @@ async function main() {
   const wangDir  = path.join(outputDir, `${baseName}_wang`);
   ensureDir(wangDir);
 
-  // ── Load source ──────────────────────────────────────────────────────
-  const image = sharp(inputPath);
-  const meta  = await image.metadata();
-  const srcW  = meta.width;
-  const srcH  = meta.height;
-  if (!srcW || !srcH || srcW !== srcH) {
-    console.error('Input must be a square image.');
+  // ── Load source ────────────────────────────────────────────────────────────
+  const image  = sharp(inputPath);
+  const meta   = await image.metadata();
+  const srcW   = meta.width;
+  const srcH   = meta.height;
+
+  if (!srcW || !srcH) { console.error('Cannot read image dimensions.'); process.exit(1); }
+  if (srcW < tileSize || srcH < tileSize) {
+    console.error(`Source (${srcW}x${srcH}) is smaller than tile size (${tileSize}).`);
     process.exit(1);
   }
 
-  console.log(`\nCohen Wang Tile Generator`);
-  console.log(`  Source:     ${inputPath} (${srcW}×${srcH})`);
+  const { data: S } = await image.ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+
+  const blend = Math.min(BLEND, Math.floor(tileSize / 4));   // cap for small tiles
+
+  console.log(`\nCohen Wang Tile Generator (correct unified strips)`);
+  console.log(`  Source:     ${inputPath}  (${srcW}x${srcH})`);
   console.log(`  Tile size:  ${tileSize}px`);
-  console.log(`  Blend:      ${BLEND}px`);
+  console.log(`  Blend zone: ${blend}px`);
+  console.log(`  Stride:     ${STRIDE}px`);
   console.log(`  Output:     ${wangDir}/\n`);
 
-  const { data: S } = await image
-    .ensureAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-
-  // Edge strip geometry per edge:
-  //   0=top:   1px tall, tileSize wide,  wraps in X (y = offset)
-  //   1=right:  tileSize tall, 1px wide,  wraps in Y (x = offset)
-  //   2=bottom: 1px tall, tileSize wide,  wraps in X (y = offset)
-  //   3=left:   tileSize tall, 1px wide,  wraps in Y (x = offset)
-  const EDGE_NAMES = ['top', 'right', 'bottom', 'left'];
-  const stripW = [tileSize, 1, tileSize, 1];
-  const stripH = [1, tileSize, 1, tileSize];
-  const searchLen = [srcH, srcW, srcH, srcW]; // how many offsets to search
-  const isHoriz   = [true, false, true, false];
-
-  // ─────────────────────────────────────────────────────────────────────
-  // PHASE 1 — Edge strip search (stratified by colour pair)
-  // ─────────────────────────────────────────────────────────────────────
-  // KEY FIX: Each colour-pair variant searches a DIFFERENT region of the
-  // source.  This guarantees the 4 strips per edge come from different
-  // source offsets, producing visually distinct tiles.
+  // ── PHASE 1 — Horizontal strip search ─────────────────────────────────────
   //
-  // If all 4 variants search the same range and pick the minimum-variance
-  // strip, they converge to the same offset (especially for uniform
-  // textures like grass), making all 16 tiles look identical.
+  // hStrip[p] = canonical row of tileSize RGBA pixels, used as:
+  //   - top  edge of any tile whose (TL,TR) corner pair == p
+  //   - bottom edge of any tile whose (BL,BR) corner pair == p
   //
-  // The source is divided into 4 equal bands per edge.  Pair 0 searches
-  // band 0, pair 1 searches band 1, etc.  After selection, Phase 2
-  // enforces corner consistency by averaging endpoints, which naturally
-  // makes the strips compatible at shared corners.
+  // Four strips, each from a different horizontal band of the source.
+  // Columns 0..tileSize-1 are used (source is seamless so x=0 is equivalent
+  // to any other starting column).
 
-  console.log('Phase 1: Edge strip search (stratified)...');
+  console.log('Phase 1: Horizontal strip search (stratified by row band)...');
 
-  // edgeStrips[e][p] = Float64Array(tileSize * 4)
-  const edgeStrips = Array.from({ length: 4 }, () => Array(4));
-  const edgeOffsets = Array.from({ length: 4 }, () => Array(4));
+  const hStrips = Array.from({ length: 4 }, () => new Float32Array(tileSize * 4));
+  const hBand   = Math.floor(srcH / 4);
 
-  for (let e = 0; e < 4; e++) {
-    const h = isHoriz[e];
-    const maxOff = searchLen[e];
-    const len = tileSize;
+  for (let p = 0; p < 4; p++) {
+    const bandStart = p * hBand;
+    const bandEnd   = p === 3 ? srcH : bandStart + hBand;
 
-    // Divide the search range into 4 equal bands, one per colour pair
-    const bandSize = Math.floor(maxOff / 4);
+    let bestVar = Infinity;
+    let bestRow = bandStart;
 
-    for (let p = 0; p < 4; p++) {
-      const bandStart = p * bandSize;
-      const bandEnd   = p === 3 ? maxOff : (p + 1) * bandSize;
-
-      let bestScore = Infinity;
-      let bestOff = 0;
-      let bestBuf = null;
-
-      for (let off = bandStart; off < bandEnd; off++) {
-        const buf = new Float64Array(len * 4);
-        for (let i = 0; i < len; i++) {
-          const sx = h ? i : off;
-          const sy = h ? off : i;
-          const si = srcIdx(srcW, sx, sy);
-          const di = i * 4;
-          buf[di]     = S[si];
-          buf[di + 1] = S[si + 1];
-          buf[di + 2] = S[si + 2];
-          buf[di + 3] = 255;
-        }
-        const score = variance(buf, len);
-        if (score < bestScore) {
-          bestScore = score;
-          bestOff   = off;
-          bestBuf   = buf;
-        }
+    for (let row = bandStart; row < bandEnd; row++) {
+      let sr = 0, sg = 0, sb = 0;
+      for (let x = 0; x < tileSize; x++) {
+        const i = (row * srcW + x) * 4;
+        sr += S[i]; sg += S[i + 1]; sb += S[i + 2];
       }
-
-      edgeStrips[e][p]  = bestBuf;
-      edgeOffsets[e][p] = bestOff;
-      const c1 = (p >> 1) & 1, c2 = p & 1;
-      console.log(`  ${EDGE_NAMES[e]} (${c1}${c2}): offset=${bestOff} (band ${bandStart}..${bandEnd-1}), score=${bestScore.toFixed(1)}`);
+      const mr = sr / tileSize, mg = sg / tileSize, mb = sb / tileSize;
+      let v = 0;
+      for (let x = 0; x < tileSize; x++) {
+        const i = (row * srcW + x) * 4;
+        const dr = S[i] - mr, dg = S[i + 1] - mg, db = S[i + 2] - mb;
+        v += dr * dr + dg * dg + db * db;
+      }
+      v /= tileSize;
+      if (v < bestVar) { bestVar = v; bestRow = row; }
     }
+
+    for (let x = 0; x < tileSize; x++) {
+      const si = (bestRow * srcW + x) * 4;
+      const di = x * 4;
+      hStrips[p][di]     = S[si];
+      hStrips[p][di + 1] = S[si + 1];
+      hStrips[p][di + 2] = S[si + 2];
+      hStrips[p][di + 3] = 255;
+    }
+    console.log(`  H[${p}] (${p >> 1}${p & 1}): row ${bestRow}  band ${bandStart}..${bandEnd - 1}  var=${bestVar.toFixed(1)}`);
   }
 
-  // ─────────────────────────────────────────────────────────────────────
-  // PHASE 2 — Corner consistency
-  // ─────────────────────────────────────────────────────────────────────
-  // For each corner position (TL,TR,BR,BL) and colour (0,1), find all
-  // (edge, pair, stripIdx) tuples meeting there and average their pixels.
+  // ── PHASE 1b — Vertical strip search ──────────────────────────────────────
   //
-  // Corner → meeting strips:
-  //   TL:  topEdge[tl=c, tr=0..1].strip[0],  leftEdge[bl=0..1, tl=c].strip[0]
-  //   TR:  topEdge[tl=0..1, tr=c].strip[-1], rightEdge[tr=c, br=0..1].strip[0]
-  //   BR:  bottomEdge[br=c, bl=0..1].strip[-1], rightEdge[tr=0..1, br=c].strip[-1]
-  //   BL:  bottomEdge[br=0..1, bl=c].strip[0], leftEdge[bl=c, tl=0..1].strip[-1]
+  // vStrip[p] = canonical column of tileSize RGBA pixels, used as:
+  //   - left  edge of any tile whose (TL,BL) corner pair == p
+  //   - right edge of any tile whose (TR,BR) corner pair == p
+
+  console.log('\nPhase 1b: Vertical strip search (stratified by column band)...');
+
+  const vStrips = Array.from({ length: 4 }, () => new Float32Array(tileSize * 4));
+  const vBand   = Math.floor(srcW / 4);
+
+  for (let p = 0; p < 4; p++) {
+    const bandStart = p * vBand;
+    const bandEnd   = p === 3 ? srcW : bandStart + vBand;
+
+    let bestVar = Infinity;
+    let bestCol = bandStart;
+
+    for (let col = bandStart; col < bandEnd; col++) {
+      let sr = 0, sg = 0, sb = 0;
+      for (let y = 0; y < tileSize; y++) {
+        const i = (y * srcW + col) * 4;
+        sr += S[i]; sg += S[i + 1]; sb += S[i + 2];
+      }
+      const mr = sr / tileSize, mg = sg / tileSize, mb = sb / tileSize;
+      let v = 0;
+      for (let y = 0; y < tileSize; y++) {
+        const i = (y * srcW + col) * 4;
+        const dr = S[i] - mr, dg = S[i + 1] - mg, db = S[i + 2] - mb;
+        v += dr * dr + dg * dg + db * db;
+      }
+      v /= tileSize;
+      if (v < bestVar) { bestVar = v; bestCol = col; }
+    }
+
+    for (let y = 0; y < tileSize; y++) {
+      const si = (y * srcW + bestCol) * 4;
+      const di = y * 4;
+      vStrips[p][di]     = S[si];
+      vStrips[p][di + 1] = S[si + 1];
+      vStrips[p][di + 2] = S[si + 2];
+      vStrips[p][di + 3] = 255;
+    }
+    console.log(`  V[${p}] (${p >> 1}${p & 1}): col ${bestCol}  band ${bandStart}..${bandEnd - 1}  var=${bestVar.toFixed(1)}`);
+  }
+
+  // ── PHASE 2 — Corner consistency ──────────────────────────────────────────
+  //
+  // For each corner color c in {0,1}: collect the current pixel value of every
+  // strip endpoint that represents "corner color c":
+  //   hStrip[p][0]         (x=0)         if (p >> 1) == c
+  //   hStrip[p][tileSize-1](x=tileSize-1)if (p & 1)  == c
+  //   vStrip[p][0]         (y=0)         if (p >> 1) == c
+  //   vStrip[p][tileSize-1](y=tileSize-1)if (p & 1)  == c
+  //
+  // Average all those pixels -> canonical corner pixel.
+  // Write back to every endpoint so H[p][0] == V[q][0] whenever both encode
+  // the same corner color.
 
   console.log('\nPhase 2: Corner consistency...');
 
-  const CORNER_NAMES = ['TL', 'TR', 'BR', 'BL'];
+  for (let c = 0; c < 2; c++) {
+    let sr = 0, sg = 0, sb = 0, n = 0;
 
-  // cornerRefs[corner][colour] = [{ edge, pair, stripIdx }, ...]
-  const cornerRefs = [
-    // TL
-    [
-      [{ e: 0, p0: 0, p1: 1, si: 0 }, { e: 3, p0: 0, p1: 2, si: 0 }],  // colour 0
-      [{ e: 0, p0: 2, p1: 3, si: 0 }, { e: 3, p0: 1, p1: 3, si: 0 }],  // colour 1
-    ],
-    // TR
-    [
-      [{ e: 0, p0: 0, p1: 2, si: -1 }, { e: 1, p0: 0, p1: 1, si: 0 }],  // colour 0
-      [{ e: 0, p0: 1, p1: 3, si: -1 }, { e: 1, p0: 2, p1: 3, si: 0 }],  // colour 1
-    ],
-    // BR
-    [
-      [{ e: 2, p0: 0, p1: 1, si: -1 }, { e: 1, p0: 0, p1: 2, si: -1 }],  // colour 0
-      [{ e: 2, p0: 2, p1: 3, si: -1 }, { e: 1, p0: 1, p1: 3, si: -1 }],  // colour 1
-    ],
-    // BL
-    [
-      [{ e: 2, p0: 0, p1: 2, si: 0 }, { e: 3, p0: 0, p1: 1, si: -1 }],  // colour 0
-      [{ e: 2, p0: 1, p1: 3, si: 0 }, { e: 3, p0: 2, p1: 3, si: -1 }],  // colour 1
-    ],
-  ];
-
-  for (let cn = 0; cn < 4; cn++) {
-    for (let colour = 0; colour <= 1; colour++) {
-      const refs = cornerRefs[cn][colour];
-      // Collect all pairs and their strip indices
-      const entries = [];
-      for (const r of refs) {
-        // r.e has pairs r.p0 and r.p1 that both meet at this corner with this colour
-        entries.push({ edge: r.e, pair: r.p0, stripIdx: r.si });
-        entries.push({ edge: r.e, pair: r.p1, stripIdx: r.si });
-      }
-
-      // Read pixel values
-      let rSum = 0, gSum = 0, bSum = 0;
-      for (const ent of entries) {
-        const strip = edgeStrips[ent.edge][ent.pair];
-        const pxIdx = ent.stripIdx === 0 ? 0 : tileSize - 1;
-        const o = pxIdx * 4;
-        rSum += strip[o]; gSum += strip[o + 1]; bSum += strip[o + 2];
-      }
-      const n = entries.length;
-      const r = Math.round(rSum / n);
-      const g = Math.round(gSum / n);
-      const b = Math.round(bSum / n);
-
-      // Propagate back
-      for (const ent of entries) {
-        const strip = edgeStrips[ent.edge][ent.pair];
-        const pxIdx = ent.stripIdx === 0 ? 0 : tileSize - 1;
-        const o = pxIdx * 4;
-        strip[o] = r; strip[o + 1] = g; strip[o + 2] = b; strip[o + 3] = 255;
-      }
-    }
-  }
-
-  console.log('  Corner pixels averaged and propagated ✓');
-
-  // ─────────────────────────────────────────────────────────────────────
-  // PHASE 3 — Edge band extraction
-  // ─────────────────────────────────────────────────────────────────────
-  // Each edge gets a BLEND-px-wide band sampled inward from the edge strip.
-  //
-  // Band storage: for a horizontal edge (top/bottom), storage is
-  //   band[bandRow * tileSize + pixelCol]
-  // For a vertical edge (left/right), storage is
-  //   band[pixelRow * BLEND + bandCol]
-
-  console.log('\nPhase 3: Edge band extraction...');
-
-  // edgeBands[e][p] = Float64Array(tileSize * BLEND * 4)
-  const edgeBands = Array.from({ length: 4 }, () => Array(4));
-
-  for (let e = 0; e < 4; e++) {
-    const h = isHoriz[e];
     for (let p = 0; p < 4; p++) {
-      const off = edgeOffsets[e][p];
-      const buf = new Float64Array(tileSize * BLEND * 4);
+      const c1 = p >> 1, c2 = p & 1;
+      const last = (tileSize - 1) * 4;
 
-      for (let i = 0; i < tileSize; i++) {
-        for (let b = 0; b < BLEND; b++) {
-          // Band extends INWARD from the edge strip
-          //   top(e=0):    strip row = off, band rows = off+1 .. off+BLEND
-          //   right(e=1):  strip col = off, band cols = off-1 .. off-BLEND
-          //   bottom(e=2): strip row = off, band rows = off-1 .. off-BLEND
-          //   left(e=3):   strip col = off, band cols = off+1 .. off+BLEND
-          let sx, sy;
-          if (e === 0)      { sx = i; sy = off + 1 + b; }           // top, downward
-          else if (e === 1) { sx = off - 1 - b; sy = i; }           // right, leftward
-          else if (e === 2) { sx = i; sy = off - 1 - b; }           // bottom, upward
-          else              { sx = off + 1 + b; sy = i; }           // left, rightward
-
-          const si = srcIdx(srcW, sx, sy);
-          const di = h ? (b * tileSize + i) * 4 : (i * BLEND + b) * 4;
-          buf[di]     = S[si];
-          buf[di + 1] = S[si + 1];
-          buf[di + 2] = S[si + 2];
-          buf[di + 3] = 255;
-        }
+      if (c1 === c) {
+        sr += hStrips[p][0]; sg += hStrips[p][1]; sb += hStrips[p][2]; n++;
+        sr += vStrips[p][0]; sg += vStrips[p][1]; sb += vStrips[p][2]; n++;
       }
-      edgeBands[e][p] = buf;
+      if (c2 === c) {
+        sr += hStrips[p][last]; sg += hStrips[p][last + 1]; sb += hStrips[p][last + 2]; n++;
+        sr += vStrips[p][last]; sg += vStrips[p][last + 1]; sb += vStrips[p][last + 2]; n++;
+      }
     }
+
+    const r = sr / n, g = sg / n, b = sb / n;
+
+    for (let p = 0; p < 4; p++) {
+      const c1 = p >> 1, c2 = p & 1;
+      const last = (tileSize - 1) * 4;
+
+      if (c1 === c) {
+        hStrips[p][0] = r; hStrips[p][1] = g; hStrips[p][2] = b;
+        vStrips[p][0] = r; vStrips[p][1] = g; vStrips[p][2] = b;
+      }
+      if (c2 === c) {
+        hStrips[p][last]     = r; hStrips[p][last + 1] = g; hStrips[p][last + 2] = b;
+        vStrips[p][last]     = r; vStrips[p][last + 1] = g; vStrips[p][last + 2] = b;
+      }
+    }
+
+    console.log(`  Corner color ${c}: canonical=(${r.toFixed(0)},${g.toFixed(0)},${b.toFixed(0)})  n=${n}`);
   }
 
-  // ─────────────────────────────────────────────────────────────────────
-  // PHASE 4 — Interior search
-  // ─────────────────────────────────────────────────────────────────────
-  // For each of the 16 corner permutations, search the source for a
-  // (tileSize - 2*BLEND - 2)² interior patch whose border best matches
-  // the innermost row/col of the 4 edge bands.
+  // ── PHASE 3 — Patch search (stratified) ───────────────────────────────────
+  //
+  // For each tile (tl,tr,br,bl), search for the tileSize*tileSize source patch
+  // whose 4 edges best match the 4 canonical strips (minimum MSE).
+  //
+  // Stratification: the 16 tiles are mapped to a 4×4 grid of source regions.
+  // Each tile searches only in its assigned grid cell.  This guarantees all 16
+  // tiles use different interior crops, providing visual variety even when all
+  // edge strips have similar colors (e.g., a uniform grass texture).
+  //
+  // The search within each cell still uses STRIDE for speed.
 
-  console.log('\nPhase 4: Interior search...');
+  console.log('\nPhase 3: Patch search (stratified 4x4 grid, MSE against canonical strips)...');
 
-  const innerSize = tileSize - 2 * BLEND - 2; // interior excludes strip(1) + band(BLEND) on each side
-  const CORNER_CONFIGS = [];
+  const CONFIGS = [];
   for (let tl = 0; tl <= 1; tl++)
     for (let tr = 0; tr <= 1; tr++)
       for (let br = 0; br <= 1; br++)
         for (let bl = 0; bl <= 1; bl++)
-          CORNER_CONFIGS.push({ tl, tr, br, bl });
+          CONFIGS.push({ tl, tr, br, bl });
 
-  const tileData = []; // { tl, tr, br, bl, interior: Float64Array, ix, iy, mse }
+  const patches = [];   // { sx, sy, mse }
 
-  for (const cfg of CORNER_CONFIGS) {
-    const { tl, tr, br, bl } = cfg;
-    const tileIdx = tl * 8 + tr * 4 + br * 2 + bl;
+  // Usable search range (patch must fit within source)
+  const maxSx = srcW - tileSize;
+  const maxSy = srcH - tileSize;
 
-    // The 4 bands for this tile
-    const topB   = edgeBands[0][pairIdx(tl, tr)];
-    const rightB = edgeBands[1][pairIdx(tr, br)];
-    const bottomB= edgeBands[2][pairIdx(br, bl)];
-    const leftB  = edgeBands[3][pairIdx(bl, tl)];
+  // 4×4 grid cells over the usable search space
+  const cellW = Math.max(1, Math.floor(maxSx / 4));
+  const cellH = Math.max(1, Math.floor(maxSy / 4));
 
-    let bestMSE = Infinity;
-    let bestIx = 0, bestIy = 0;
+  for (let ci = 0; ci < CONFIGS.length; ci++) {
+    const { tl, tr, br, bl } = CONFIGS[ci];
 
-    // Search source for best interior position with STRIDE for performance.
-    // The MSE landscape is smooth (nearby positions have similar error), so
-    // striding by STRIDE pixels does not miss the global minimum by much.
-    for (let iy = 0; iy < srcH; iy += STRIDE) {
-      for (let ix = 0; ix < srcW; ix += STRIDE) {
-        let mse = 0;
-        let count = 0;
+    const H_top = hStrips[pairIdx(tl, tr)];
+    const H_bot = hStrips[pairIdx(bl, br)];
+    const V_lft = vStrips[pairIdx(tl, bl)];
+    const V_rgt = vStrips[pairIdx(tr, br)];
 
-        // Compare interior border with band inner edge (band row/col BLEND-1)
+    // Assign this tile to grid cell (gridCol, gridRow) based on its index
+    const gridCol = ci % 4;
+    const gridRow = Math.floor(ci / 4);
+    const sxStart = gridCol * cellW;
+    const syStart = gridRow * cellH;
+    const sxEnd   = Math.min(maxSx, sxStart + cellW);
+    const syEnd   = Math.min(maxSy, syStart + cellH);
 
-        // Top border: interior row 0 vs band[BLEND-1][col]
-        for (let i = 0; i < innerSize; i++) {
-          const si = srcIdx(srcW, ix + i, iy);
-          const bo = ((BLEND - 1) * tileSize + i) * 4;
-          const dr = S[si] - topB[bo], dg = S[si + 1] - topB[bo + 1], db = S[si + 2] - topB[bo + 2];
-          mse += dr * dr + dg * dg + db * db;
-          count++;
+    let bestMSE = Infinity, bestSx = sxStart, bestSy = syStart;
+
+    for (let sy = syStart; sy <= syEnd; sy += STRIDE) {
+      for (let sx = sxStart; sx <= sxEnd; sx += STRIDE) {
+        let mse = 0, cnt = 0;
+
+        // Top row
+        for (let x = 0; x < tileSize; x += STRIDE) {
+          const si = (sy * srcW + sx + x) * 4;
+          const dx = S[si] - H_top[x * 4], dy = S[si + 1] - H_top[x * 4 + 1], dz = S[si + 2] - H_top[x * 4 + 2];
+          mse += dx * dx + dy * dy + dz * dz; cnt++;
         }
 
-        // Bottom border: interior row innerSize-1 vs band[BLEND-1][col]
-        for (let i = 0; i < innerSize; i++) {
-          const si = srcIdx(srcW, ix + i, iy + innerSize - 1);
-          const bo = ((BLEND - 1) * tileSize + i) * 4;
-          const dr = S[si] - bottomB[bo], dg = S[si + 1] - bottomB[bo + 1], db = S[si + 2] - bottomB[bo + 2];
-          mse += dr * dr + dg * dg + db * db;
-          count++;
+        // Bottom row
+        for (let x = 0; x < tileSize; x += STRIDE) {
+          const si = ((sy + tileSize - 1) * srcW + sx + x) * 4;
+          const dx = S[si] - H_bot[x * 4], dy = S[si + 1] - H_bot[x * 4 + 1], dz = S[si + 2] - H_bot[x * 4 + 2];
+          mse += dx * dx + dy * dy + dz * dz; cnt++;
         }
 
-        // Left border: interior col 0 vs band[BLEND-1][row] — but for vertical bands,
-        // the storage is [row * BLEND + bandCol], so band inner edge = row * BLEND + (BLEND-1)
-        for (let i = 0; i < innerSize; i++) {
-          const si = srcIdx(srcW, ix, iy + i);
-          const bo = (i * BLEND + (BLEND - 1)) * 4;
-          const dr = S[si] - leftB[bo], dg = S[si + 1] - leftB[bo + 1], db = S[si + 2] - leftB[bo + 2];
-          mse += dr * dr + dg * dg + db * db;
-          count++;
+        // Left column
+        for (let y = 0; y < tileSize; y += STRIDE) {
+          const si = ((sy + y) * srcW + sx) * 4;
+          const dx = S[si] - V_lft[y * 4], dy = S[si + 1] - V_lft[y * 4 + 1], dz = S[si + 2] - V_lft[y * 4 + 2];
+          mse += dx * dx + dy * dy + dz * dz; cnt++;
         }
 
-        // Right border: interior col innerSize-1 vs band[BLEND-1][row]
-        for (let i = 0; i < innerSize; i++) {
-          const si = srcIdx(srcW, ix + innerSize - 1, iy + i);
-          const bo = (i * BLEND + (BLEND - 1)) * 4;
-          const dr = S[si] - rightB[bo], dg = S[si + 1] - rightB[bo + 1], db = S[si + 2] - rightB[bo + 2];
-          mse += dr * dr + dg * dg + db * db;
-          count++;
+        // Right column
+        for (let y = 0; y < tileSize; y += STRIDE) {
+          const si = ((sy + y) * srcW + sx + tileSize - 1) * 4;
+          const dx = S[si] - V_rgt[y * 4], dy = S[si + 1] - V_rgt[y * 4 + 1], dz = S[si + 2] - V_rgt[y * 4 + 2];
+          mse += dx * dx + dy * dy + dz * dz; cnt++;
         }
 
-        if (count > 0) mse /= count;
-        if (mse < bestMSE) {
-          bestMSE = mse;
-          bestIx  = ix;
-          bestIy  = iy;
-        }
+        const score = mse / cnt;
+        if (score < bestMSE) { bestMSE = score; bestSx = sx; bestSy = sy; }
       }
     }
 
-    // Extract interior pixels
-    const interior = new Float64Array(innerSize * innerSize * 4);
-    for (let y = 0; y < innerSize; y++) {
-      for (let x = 0; x < innerSize; x++) {
-        const si = srcIdx(srcW, bestIx + x, bestIy + y);
-        const di = (y * innerSize + x) * 4;
-        interior[di]     = S[si];
-        interior[di + 1] = S[si + 1];
-        interior[di + 2] = S[si + 2];
-        interior[di + 3] = 255;
-      }
-    }
-
-    tileData.push({ tl, tr, br, bl, interior, ix: bestIx, iy: bestIy, mse: bestMSE });
-    console.log(`  Tile ${tileIdx} (${tl}${tr}${br}${bl}): interior at (${bestIx},${bestIy}), MSE=${bestMSE.toFixed(2)}`);
+    patches.push({ sx: bestSx, sy: bestSy, mse: bestMSE });
+    const idx = tl * 8 + tr * 4 + br * 2 + bl;
+    console.log(`  Tile ${idx} (${tl}${tr}${br}${bl}): cell (${gridCol},${gridRow}) patch (${bestSx},${bestSy})  MSE=${bestMSE.toFixed(1)}`);
   }
 
-  // ─────────────────────────────────────────────────────────────────────
-  // PHASE 5 — Assembly
-  // ─────────────────────────────────────────────────────────────────────
-  // Tile pixel layout:
+  // ── PHASE 4 — Assembly ─────────────────────────────────────────────────────
   //
-  //   Rows 0 … 0:                    top edge strip (1 px)
-  //   Rows 1 … BLEND:                top edge band (BLEND px)
-  //   Rows BLEND+1 … BLEND+innerSize: interior (innerSize px)
-  //   Rows BLEND+innerSize+1 … tileSize-2: bottom edge band (BLEND px)
-  //   Row tileSize-1:                bottom edge strip (1 px)
+  // For each tile:
+  //   1. Copy the best-matching source patch verbatim.
+  //   2. For every pixel within `blend` px of any tile edge, smoothstep-blend
+  //      toward the canonical strip pixel for the nearest edge.
+  //      d=0 (tile boundary)  -> 100% canonical strip  -> guaranteed seamless
+  //      d=blend (blend end)  -> 100% source patch     -> no modification
   //
-  // Same for columns with left/right.
+  // "Nearest edge wins" for corner-blend regions: when two edges are equidistant
+  // the priority is top > bottom > left > right.  Phase 2 made all strip endpoints
+  // at the same corner color identical, so any choice yields the same pixel value.
 
-  console.log('\nPhase 5: Assembling tiles...');
-
-  const innerTop    = BLEND + 1;               // first interior pixel row/col
-  const bandBottom  = tileSize - BLEND - 1;    // first bottom band pixel row/col (its strip-adjacent edge)
-  const stripBottom = tileSize - 1;            // bottom edge strip row/col
+  console.log('\nPhase 4: Assembling tiles...');
 
   let generated = 0;
-  for (const tile of tileData) {
-    const tileIdx = tile.tl * 8 + tile.tr * 4 + tile.br * 2 + tile.bl;
-    const outBuf = Buffer.alloc(tileSize * tileSize * 4);
 
-    // Helper: set output pixel
-    function setPx(x, y, buf, idx) {
-      const o = (y * tileSize + x) * 4;
-      outBuf[o]     = buf[idx];
-      outBuf[o + 1] = buf[idx + 1];
-      outBuf[o + 2] = buf[idx + 2];
-      outBuf[o + 3] = buf[idx + 3];
-    }
+  for (let ci = 0; ci < CONFIGS.length; ci++) {
+    const { tl, tr, br, bl } = CONFIGS[ci];
+    const { sx, sy }         = patches[ci];
+    const tileIdx = tl * 8 + tr * 4 + br * 2 + bl;
 
-    // ── 5a. Place edge strips (1px border) ───────────────────────────
-    const topS   = edgeStrips[0][pairIdx(tile.tl, tile.tr)];
-    const rightS = edgeStrips[1][pairIdx(tile.tr, tile.br)];
-    const bottomS= edgeStrips[2][pairIdx(tile.br, tile.bl)];
-    const leftS  = edgeStrips[3][pairIdx(tile.bl, tile.tl)];
+    const H_top = hStrips[pairIdx(tl, tr)];
+    const H_bot = hStrips[pairIdx(bl, br)];
+    const V_lft = vStrips[pairIdx(tl, bl)];
+    const V_rgt = vStrips[pairIdx(tr, br)];
 
-    for (let i = 0; i < tileSize; i++) {
-      const to = i * 4;
-      setPx(i, 0, topS, to);
-      setPx(i, stripBottom, bottomS, to);
-      setPx(0, i, leftS, to);
-      setPx(stripBottom, i, rightS, to);
-    }
+    const outBuf = Buffer.allocUnsafe(tileSize * tileSize * 4);
 
-    // ── 5b. Place edge bands ─────────────────────────────────────────
-    const topB   = edgeBands[0][pairIdx(tile.tl, tile.tr)];
-    const rightB = edgeBands[1][pairIdx(tile.tr, tile.br)];
-    const bottomB= edgeBands[2][pairIdx(tile.br, tile.bl)];
-    const leftB  = edgeBands[3][pairIdx(tile.bl, tile.tl)];
+    for (let y = 0; y < tileSize; y++) {
+      for (let x = 0; x < tileSize; x++) {
+        // Source patch pixel
+        const si = ((sy + y) * srcW + (sx + x)) * 4;
+        let r = S[si], g = S[si + 1], b = S[si + 2];
 
-    // Top band: rows 1..BLEND
-    for (let b = 0; b < BLEND; b++) {
-      const row = 1 + b;
-      for (let i = 0; i < tileSize; i++) {
-        const bo = (b * tileSize + i) * 4;
-        setPx(i, row, topB, bo);
-      }
-    }
+        // Distances to each tile edge
+        const dTop = y;
+        const dBot = tileSize - 1 - y;
+        const dLft = x;
+        const dRgt = tileSize - 1 - x;
 
-    // Bottom band: rows tileSize-1-BLEND .. tileSize-2
-    // Storage b=0 is strip-adjacent (sampled at off-1), b=BLEND-1 is interior-adjacent.
-    // Place so b=0 → tileSize-2 (strip-adjacent), b=BLEND-1 → tileSize-1-BLEND (interior-adjacent).
-    for (let b = 0; b < BLEND; b++) {
-      const row = tileSize - 2 - b;
-      for (let i = 0; i < tileSize; i++) {
-        const bo = (b * tileSize + i) * 4;
-        setPx(i, row, bottomB, bo);
-      }
-    }
+        // Minimum distance to any edge
+        const d = dTop < dBot
+          ? (dTop < dLft ? (dTop < dRgt ? dTop : dRgt) : (dLft < dRgt ? dLft : dRgt))
+          : (dBot < dLft ? (dBot < dRgt ? dBot : dRgt) : (dLft < dRgt ? dLft : dRgt));
 
-    // Left band: cols 1..BLEND
-    for (let b = 0; b < BLEND; b++) {
-      const col = 1 + b;
-      for (let i = 0; i < tileSize; i++) {
-        const bo = (i * BLEND + b) * 4;
-        setPx(col, i, leftB, bo);
-      }
-    }
-
-    // Right band: cols tileSize-1-BLEND .. tileSize-2
-    // Storage b=0 is strip-adjacent (col tileSize-2), b=BLEND-1 is interior-adjacent (col tileSize-1-BLEND).
-    for (let b = 0; b < BLEND; b++) {
-      const col = tileSize - 2 - b;
-      for (let i = 0; i < tileSize; i++) {
-        const bo = (i * BLEND + b) * 4;
-        setPx(col, i, rightB, bo);
-      }
-    }
-
-    // ── 5c. Place interior ───────────────────────────────────────────
-    for (let y = 0; y < innerSize; y++) {
-      for (let x = 0; x < innerSize; x++) {
-        const di = (y * innerSize + x) * 4;
-        const px = tile.interior[di];
-        const py = tile.interior[di + 1];
-        const pz = tile.interior[di + 2];
-        const pw = tile.interior[di + 3];
-        const o = ((innerTop + y) * tileSize + (innerTop + x)) * 4;
-        outBuf[o]     = px;
-        outBuf[o + 1] = py;
-        outBuf[o + 2] = pz;
-        outBuf[o + 3] = pw;
-      }
-    }
-
-    // ── 5d. Feather band → interior transition ───────────────────────
-    // Blend FEATHER pixels at the band-interior boundary to hide any
-    // residual mismatch from the search not finding a perfect match.
-    //
-    // For each feather step f (0 = band edge, FEATHER-1 = interior edge),
-    // alpha = f/(FEATHER-1) transitions from full-band to full-interior.
-    const FEATHER = Math.min(2, BLEND);
-    if (FEATHER > 0) {
-      for (let f = 0; f < FEATHER; f++) {
-        const alpha = FEATHER > 1 ? f / (FEATHER - 1) : 0.5;
-
-        // Top: band row innerTop-1-f blends with interior row innerTop+f
-        for (let i = innerTop; i < innerTop + innerSize; i++) {
-          const bandRow = innerTop - 1 - f;
-          const intRow  = innerTop + f;
-          if (bandRow >= 1 && intRow < innerTop + innerSize) {
-            for (let c = 0; c < 3; c++) {
-              const bo = (bandRow * tileSize + i) * 4 + c;
-              const io = (intRow  * tileSize + i) * 4 + c;
-              outBuf[bo] = Math.round(outBuf[bo] * (1 - alpha) + outBuf[io] * alpha);
-            }
+        if (d < blend) {
+          // Nearest-edge wins: determines the canonical strip pixel to blend toward
+          let cr, cg, cb;
+          if (dTop <= dBot && dTop <= dLft && dTop <= dRgt) {
+            cr = H_top[x * 4]; cg = H_top[x * 4 + 1]; cb = H_top[x * 4 + 2];
+          } else if (dBot <= dLft && dBot <= dRgt) {
+            cr = H_bot[x * 4]; cg = H_bot[x * 4 + 1]; cb = H_bot[x * 4 + 2];
+          } else if (dLft <= dRgt) {
+            cr = V_lft[y * 4]; cg = V_lft[y * 4 + 1]; cb = V_lft[y * 4 + 2];
+          } else {
+            cr = V_rgt[y * 4]; cg = V_rgt[y * 4 + 1]; cb = V_rgt[y * 4 + 2];
           }
+
+          // alpha=0 -> canonical strip pixel, alpha=1 -> source patch pixel
+          const alpha = smoothstep(d / blend);
+          r = Math.round(lerp(cr, r, alpha));
+          g = Math.round(lerp(cg, g, alpha));
+          b = Math.round(lerp(cb, b, alpha));
         }
 
-        // Bottom: band row bandBottom+f blends with interior row bandBottom-1-f
-        for (let i = innerTop; i < innerTop + innerSize; i++) {
-          const bandRow = tileSize - 2 - f;
-          const intRow  = tileSize - 2 - BLEND - f;
-          if (bandRow <= tileSize - 2 && intRow >= innerTop) {
-            for (let c = 0; c < 3; c++) {
-              const bo = (bandRow * tileSize + i) * 4 + c;
-              const io = (intRow  * tileSize + i) * 4 + c;
-              outBuf[bo] = Math.round(outBuf[bo] * (1 - alpha) + outBuf[io] * alpha);
-            }
-          }
-        }
-
-        // Left: band col innerTop-1-f blends with interior col innerTop+f
-        for (let i = innerTop; i < innerTop + innerSize; i++) {
-          const bandCol = innerTop - 1 - f;
-          const intCol  = innerTop + f;
-          if (bandCol >= 1 && intCol < innerTop + innerSize) {
-            for (let c = 0; c < 3; c++) {
-              const bo = (i * tileSize + bandCol) * 4 + c;
-              const io = (i * tileSize + intCol)  * 4 + c;
-              outBuf[bo] = Math.round(outBuf[bo] * (1 - alpha) + outBuf[io] * alpha);
-            }
-          }
-        }
-
-        // Right: band col tileSize-2-f blends with interior col tileSize-2-BLEND-f
-        for (let i = innerTop; i < innerTop + innerSize; i++) {
-          const bandCol = tileSize - 2 - f;
-          const intCol  = tileSize - 2 - BLEND - f;
-          if (bandCol >= 1 && intCol >= innerTop) {
-            for (let c = 0; c < 3; c++) {
-              const bo = (i * tileSize + bandCol) * 4 + c;
-              const io = (i * tileSize + intCol)  * 4 + c;
-              outBuf[bo] = Math.round(outBuf[bo] * (1 - alpha) + outBuf[io] * alpha);
-            }
-          }
-        }
+        const oi = (y * tileSize + x) * 4;
+        outBuf[oi]     = clamp(r, 0, 255);
+        outBuf[oi + 1] = clamp(g, 0, 255);
+        outBuf[oi + 2] = clamp(b, 0, 255);
+        outBuf[oi + 3] = 255;
       }
     }
 
-    // ── Write output ─────────────────────────────────────────────────
-    const fileName = `wang_${tileIdx}.png`;
-    const outputPath = path.join(wangDir, fileName);
-
-    await sharp(outBuf, {
-      raw: { width: tileSize, height: tileSize, channels: 4 },
-    })
+    const outputPath = path.join(wangDir, `wang_${tileIdx}.png`);
+    await sharp(outBuf, { raw: { width: tileSize, height: tileSize, channels: 4 } })
       .png()
       .toFile(outputPath);
 
     generated++;
   }
 
-  console.log(`\n✓ Done — ${generated} Cohen-style Wang tiles written to ${wangDir}/\n`);
+  console.log(`\nDone -- ${generated} tiles written to ${wangDir}/\n`);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+main().catch(err => { console.error(err); process.exit(1); });
