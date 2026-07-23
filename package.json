@@ -9,7 +9,15 @@
     "preview": "vite preview",
     "tiles": "node --watch --watch-path=tools/tile-generator tools/tile-generator/server.mjs",
     "wang-tiles": "node tools/wang-tiles/generate-all.mjs",
-    "wang-tiles-cohen": "node tools/wang-tiles/generate-all.mjs --cohen"
+    "wang-tiles-cohen": "node tools/wang-tiles/generate-all.mjs --cohen",
+    "wang-tiles-cohen2": "node tools/wang-tiles/generate-all.mjs --cohen2",
+    "wang-tiles-cohen3": "node tools/wang-tiles/generate-all.mjs --cohen3",
+    "wang-tiles-cohen4": "node tools/wang-tiles/generate-all.mjs --cohen4",
+    "wang-tiles-cohen6": "node tools/wang-tiles/generate-all.mjs --cohen6",
+    "wang-tiles-cohen5": "node tools/wang-tiles/generate-all.mjs --cohen5",
+    "wang-tiles-cohen7": "node tools/wang-tiles/generate-all.mjs --cohen7",
+    "wang-tiles-new1": "node tools/wang-tiles/generate-all.mjs --new1",
+    "wang-tiles-new2": "node tools/wang-tiles/generate-all.mjs --new2"
   },
   "devDependencies": {
     "typescript": "~6.0.2",

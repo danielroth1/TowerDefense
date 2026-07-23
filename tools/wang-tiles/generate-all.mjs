@@ -9,6 +9,7 @@
  * Usage:
  *   node tools/wang-tiles/generate-all.mjs [tileSize]            # default algorithm, force (overwrite existing)
  *   node tools/wang-tiles/generate-all.mjs --new1 [tileSize]     # bilinear corner-weighted blending
+ *   node tools/wang-tiles/generate-all.mjs --new2 [tileSize]     # frequency-separated edge blending
  *   node tools/wang-tiles/generate-all.mjs --cohen [tileSize]    # Cohen et al. search
  *   node tools/wang-tiles/generate-all.mjs --cohen2 [tileSize]   # Cohen DP cut paths
  *   node tools/wang-tiles/generate-all.mjs --cohen3 [tileSize]   # Cohen O(W·H) DP (best)
@@ -27,6 +28,7 @@ const TILES_DIR = 'public/assets/tiles';
 // Parse args: --cohen/--cohen2/--cohen3/--cohen4/--cohen5/--cohen6 flag can be anywhere, tileSize is first numeric arg
 const args = process.argv.slice(2);
 const useNew1   = args.includes('--new1');
+const useNew2   = args.includes('--new2');
 const useCohen  = args.includes('--cohen');
 const useCohen2 = args.includes('--cohen2');
 const useCohen3 = args.includes('--cohen3');
@@ -39,6 +41,8 @@ const tileSize  = parseInt(args.find(a => /^\d+$/.test(a)), 10) || 192;
 
 const SCRIPT = useNew1
   ? 'tools/wang-tiles/generate-new1.mjs'
+  : useNew2
+  ? 'tools/wang-tiles/generate-new2.mjs'
   : useCohen7
   ? 'tools/wang-tiles/generate-cohen7.mjs'
   : useCohen6
@@ -55,7 +59,7 @@ const SCRIPT = useNew1
         ? 'tools/wang-tiles/generate-cohen.mjs'
         : 'tools/wang-tiles/generate.mjs';
 
-const algoName = useNew1 ? 'bilinear corner-weighted blending' : useCohen7 ? 'Cohen et al. diamond-cut quilting (graph-cut DP on overlap bands + diagonal centre)' : useCohen6 ? 'Cohen et al. diamond sample + seam cutting (DP quilting)' : useCohen5 ? 'Cohen et al. sample-diamond quilting (16 corner-bit adaptation)' : useCohen4 ? 'Cohen et al. v4 proper decoupled mapping' : useCohen3 ? 'Cohen et al. O(W·H) DP' : useCohen2 ? 'Cohen et al. DP cut paths' : useCohen ? 'Cohen et al. search' : 'diagonal swap';
+const algoName = useNew1 ? 'bilinear corner-weighted blending' : useNew2 ? 'frequency-separated edge blending' : useCohen7 ? 'Cohen et al. diamond-cut quilting (graph-cut DP on overlap bands + diagonal centre)' : useCohen6 ? 'Cohen et al. diamond sample + seam cutting (DP quilting)' : useCohen5 ? 'Cohen et al. sample-diamond quilting (16 corner-bit adaptation)' : useCohen4 ? 'Cohen et al. v4 proper decoupled mapping' : useCohen3 ? 'Cohen et al. O(W·H) DP' : useCohen2 ? 'Cohen et al. DP cut paths' : useCohen ? 'Cohen et al. search' : 'diagonal swap';
 console.log(`Using ${algoName} algorithm (${SCRIPT})`);
 console.log(`Mode: ${force ? '--force (overwrite existing)' : '--no-force (skip existing)'}`);
 
