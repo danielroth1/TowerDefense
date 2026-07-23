@@ -177,8 +177,8 @@ export class GameScene extends Phaser.Scene {
     this.registerEvents();
     this.initResizeHandler();
 
-    // Sound init on first interaction
-    this.sfx.init();
+    // Sound init on first interaction — disable BGM by default in debug mode
+    this.sfx.init({ musicEnabled: false });
 
     // 4s countdown before first wave
     this.waveManager.countdown = 4000;

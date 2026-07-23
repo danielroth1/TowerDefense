@@ -24,8 +24,11 @@ export class SoundSystem {
   musicEnabled = true;
 
   /** Call once from a user-gesture handler (pointerdown etc.) */
-  init() {
+  init(options?: { musicEnabled?: boolean }) {
     if (this.ctx) { this.ctx.resume(); return; }
+    if (options?.musicEnabled !== undefined) {
+      this.musicEnabled = options.musicEnabled;
+    }
     try {
       this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
       this.masterGain = this.ctx.createGain();
@@ -33,14 +36,14 @@ export class SoundSystem {
       this.masterGain.connect(this.ctx.destination);
 
       this.bgmGain = this.ctx.createGain();
-      this.bgmGain.gain.value = 0.12;
+      this.bgmGain.gain.value = this.musicEnabled ? 0.12 : 0;
       this.bgmGain.connect(this.masterGain);
 
       this.sfxGain = this.ctx.createGain();
       this.sfxGain.gain.value = 0.75;
       this.sfxGain.connect(this.masterGain);
 
-      this.startBGM();
+      if (this.musicEnabled) this.startBGM();
     } catch (_e) {
       console.warn('Web Audio API unavailable');
     }
