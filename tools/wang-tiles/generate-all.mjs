@@ -7,16 +7,17 @@
  * tile_path, tile_spawn, tile_goal.
  *
  * Usage:
- *   node tools/wang-tiles/generate-all.mjs [tileSize]            # default algorithm, force (overwrite existing)
- *   node tools/wang-tiles/generate-all.mjs --new1 [tileSize]     # bilinear corner-weighted blending
- *   node tools/wang-tiles/generate-all.mjs --new2 [tileSize]     # frequency-separated edge blending
- *   node tools/wang-tiles/generate-all.mjs --cohen [tileSize]    # Cohen et al. search
- *   node tools/wang-tiles/generate-all.mjs --cohen2 [tileSize]   # Cohen DP cut paths
- *   node tools/wang-tiles/generate-all.mjs --cohen3 [tileSize]   # Cohen O(W·H) DP (best)
- *   node tools/wang-tiles/generate-all.mjs --cohen4 [tileSize]   # Cohen proper decoupled mapping
- *   node tools/wang-tiles/generate-all.mjs --cohen5 [tileSize]   # Cohen sample-diamond quilting for 16 corner-bit tiles
- *   node tools/wang-tiles/generate-all.mjs --cohen6 [tileSize]   # Cohen diamond sample + seam cutting (DP quilting)
- *   node tools/wang-tiles/generate-all.mjs --no-force [tileSize] # skip if Wang tiles already exist
+ *   node tools/wang-tiles/generate-all.mjs [tileSize]              # default algorithm, force (overwrite existing)
+ *   node tools/wang-tiles/generate-all.mjs --blend-crop [tileSize]  # bilinear corner-weighted blending
+ *   node tools/wang-tiles/generate-all.mjs --blend-freq [tileSize]  # frequency-separated edge blending
+ *   node tools/wang-tiles/generate-all.mjs --strips [tileSize]      # Cohen et al. strip search
+ *   node tools/wang-tiles/generate-all.mjs --cutpaths [tileSize]    # Cohen DP cut paths
+ *   node tools/wang-tiles/generate-all.mjs --canonical [tileSize]   # Cohen O(W·H) DP (best)
+ *   node tools/wang-tiles/generate-all.mjs --coons [tileSize]       # Cohen proper decoupled mapping
+ *   node tools/wang-tiles/generate-all.mjs --diamond [tileSize]     # Cohen sample-diamond quilting for 16 corner-bit tiles
+ *   node tools/wang-tiles/generate-all.mjs --diamondcut [tileSize]  # Cohen diamond sample + seam cutting (DP quilting)
+ *   node tools/wang-tiles/generate-all.mjs --quilt [tileSize]       # Cohen diamond-cut image quilting
+ *   node tools/wang-tiles/generate-all.mjs --no-force [tileSize]    # skip if Wang tiles already exist
  */
 
 import fs from 'node:fs';
@@ -25,41 +26,41 @@ import { execSync } from 'node:child_process';
 
 const TILES_DIR = 'public/assets/tiles';
 
-// Parse args: --cohen/--cohen2/--cohen3/--cohen4/--cohen5/--cohen6 flag can be anywhere, tileSize is first numeric arg
+// Parse args: --blend-crop/--blend-freq/--strips/--cutpaths/--canonical/--coons/--diamond/--diamondcut/--quilt flags, tileSize is first numeric arg
 const args = process.argv.slice(2);
-const useNew1   = args.includes('--new1');
-const useNew2   = args.includes('--new2');
-const useCohen  = args.includes('--cohen');
-const useCohen2 = args.includes('--cohen2');
-const useCohen3 = args.includes('--cohen3');
-const useCohen4 = args.includes('--cohen4');
-const useCohen5 = args.includes('--cohen5');
-const useCohen6 = args.includes('--cohen6');
-const useCohen7 = args.includes('--cohen7');
+const useBlendCrop  = args.includes('--blend-crop');
+const useBlendFreq  = args.includes('--blend-freq');
+const useStrips     = args.includes('--strips');
+const useCutpaths   = args.includes('--cutpaths');
+const useCanonical  = args.includes('--canonical');
+const useCoons      = args.includes('--coons');
+const useDiamond    = args.includes('--diamond');
+const useDiamondcut = args.includes('--diamondcut');
+const useQuilt      = args.includes('--quilt');
 const force     = !args.includes('--no-force');  // default: true (overwrite existing)
 const tileSize  = parseInt(args.find(a => /^\d+$/.test(a)), 10) || 192;
 
-const SCRIPT = useNew1
-  ? 'tools/wang-tiles/generate-new1.mjs'
-  : useNew2
-  ? 'tools/wang-tiles/generate-new2.mjs'
-  : useCohen7
-  ? 'tools/wang-tiles/generate-cohen7.mjs'
-  : useCohen6
-  ? 'tools/wang-tiles/generate-cohen6.mjs'
-  : useCohen5
-  ? 'tools/wang-tiles/generate-cohen5.mjs'
-  : useCohen4
-  ? 'tools/wang-tiles/generate-cohen4.mjs'
-  : useCohen3
-    ? 'tools/wang-tiles/generate-cohen3.mjs'
-    : useCohen2
-      ? 'tools/wang-tiles/generate-cohen2.mjs'
-      : useCohen
-        ? 'tools/wang-tiles/generate-cohen.mjs'
-        : 'tools/wang-tiles/generate.mjs';
+const SCRIPT = useBlendCrop
+  ? 'tools/wang-tiles/generate-blend-crop.mjs'
+  : useBlendFreq
+  ? 'tools/wang-tiles/generate-blend-freq.mjs'
+  : useQuilt
+  ? 'tools/wang-tiles/generate-cohen-quilt.mjs'
+  : useDiamondcut
+  ? 'tools/wang-tiles/generate-cohen-diamondcut.mjs'
+  : useDiamond
+  ? 'tools/wang-tiles/generate-cohen-diamond.mjs'
+  : useCoons
+  ? 'tools/wang-tiles/generate-cohen-coons.mjs'
+  : useCanonical
+    ? 'tools/wang-tiles/generate-cohen-canonical.mjs'
+    : useCutpaths
+      ? 'tools/wang-tiles/generate-cohen-cutpaths.mjs'
+      : useStrips
+        ? 'tools/wang-tiles/generate-cohen-strips.mjs'
+        : 'tools/wang-tiles/generate-quadrant.mjs';
 
-const algoName = useNew1 ? 'bilinear corner-weighted blending' : useNew2 ? 'frequency-separated edge blending' : useCohen7 ? 'Cohen et al. diamond-cut quilting (graph-cut DP on overlap bands + diagonal centre)' : useCohen6 ? 'Cohen et al. diamond sample + seam cutting (DP quilting)' : useCohen5 ? 'Cohen et al. sample-diamond quilting (16 corner-bit adaptation)' : useCohen4 ? 'Cohen et al. v4 proper decoupled mapping' : useCohen3 ? 'Cohen et al. O(W·H) DP' : useCohen2 ? 'Cohen et al. DP cut paths' : useCohen ? 'Cohen et al. search' : 'diagonal swap';
+const algoName = useBlendCrop ? 'bilinear corner-weighted blending' : useBlendFreq ? 'frequency-separated edge blending' : useQuilt ? 'Cohen et al. diamond-cut quilting (graph-cut DP on overlap bands + diagonal centre)' : useDiamondcut ? 'Cohen et al. diamond sample + seam cutting (DP quilting)' : useDiamond ? 'Cohen et al. sample-diamond quilting (16 corner-bit adaptation)' : useCoons ? 'Cohen et al. v4 proper decoupled mapping' : useCanonical ? 'Cohen et al. O(W·H) DP' : useCutpaths ? 'Cohen et al. DP cut paths' : useStrips ? 'Cohen et al. strip search' : 'diagonal swap';
 console.log(`Using ${algoName} algorithm (${SCRIPT})`);
 console.log(`Mode: ${force ? '--force (overwrite existing)' : '--no-force (skip existing)'}`);
 
