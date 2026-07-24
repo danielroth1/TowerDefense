@@ -117,6 +117,11 @@ export class GameScene extends Phaser.Scene {
   // Pause
   private isPaused: boolean = false;
 
+  // Win condition — set when all waves have been dispatched, checked each frame
+  // while enemies remain alive; the victory screen only appears once every enemy
+  // sprite is destroyed.
+  private allWavesCompleted: boolean = false;
+
   // Current bottom bar height (updated on resize)
   private _barH: number = 200;
 
@@ -567,7 +572,7 @@ export class GameScene extends Phaser.Scene {
 
     // ── Main camera: renders the game world in the viewport between UI bars ──
     this.cameras.main.setBounds(0, 0, W, H);
-    this.cameras.main.setZoom(2.0);
+    this.cameras.main.setZoom(1.75);
     this.cameras.main.setViewport(0, 0, this.scale.width, this.scale.height - this.bottomBar.barHeight);
     // Main camera ignores UI objects
     this.cameras.main.ignore(this.uiGroup);
@@ -806,16 +811,9 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.events.on('all_waves_cleared', () => {
-      this.sfx.play('game_win');
-      this.time.delayedCall(800, () => {
-        this.weatherSystem.destroy();
-        this.scene.start('GameOverScene', {
-          wave: TOTAL_WAVES,
-          kills: this.totalKills,
-          gold: this.economy.totalEarned,
-          won: true,
-        });
-      });
+      // Mark that all waves are done — don't transition yet; wait until every
+      // enemy sprite is actually dead so the player sees a clean victory.
+      this.allWavesCompleted = true;
     });
 
     this.events.on('toggle_pause', () => this.togglePause());
@@ -1657,6 +1655,25 @@ export class GameScene extends Phaser.Scene {
     this.updateFloatingAbilities();
 
     // Update HUD
+    // Win condition: all waves dispatched AND no enemy sprites remain alive.
+    if (this.allWavesCompleted) {
+      const alive =
+        this.enemyGroup.countActive() + this.flyerGroup.countActive();
+      if (alive === 0) {
+        this.allWavesCompleted = false; // prevent re-trigger
+        this.sfx.play('game_win');
+        this.time.delayedCall(800, () => {
+          this.weatherSystem.destroy();
+          this.scene.start('GameOverScene', {
+            wave: TOTAL_WAVES,
+            kills: this.totalKills,
+            gold: this.economy.totalEarned,
+            won: true,
+          });
+        });
+      }
+    }
+
     this.hud.update(
       this.economy.gold,
       this.economy.lives,

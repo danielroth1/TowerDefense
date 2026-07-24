@@ -1,6 +1,6 @@
 // ─── Grid ───────────────────────────────────────────────────────────────────
 export const TILE_SIZE = 48;
-export const GRID_COLS = 37;
+export const GRID_COLS = 30;
 export const GRID_ROWS = 19;
 export const GAME_WIDTH = TILE_SIZE * GRID_COLS;  // 1776
 export const GAME_HEIGHT = TILE_SIZE * GRID_ROWS; // 912
