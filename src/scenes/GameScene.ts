@@ -17,6 +17,7 @@ import { HUD } from '../ui/HUD';
 import { BottomBar } from '../ui/BottomBar';
 import { SoundSystem } from '../systems/SoundSystem';
 import { generateCityDecorations } from '../systems/CityDecorator';
+import { generateCityRoads, drawCityRoads } from '../systems/CityRoadNetwork';
 import { createPRNG } from '../utils/helpers';
 import {
   TILE_SIZE, GRID_COLS, GRID_ROWS, COLORS,
@@ -104,6 +105,7 @@ export class GameScene extends Phaser.Scene {
   private uiCam!: Phaser.Cameras.Scene2D.Camera;
   private uiGroup!: Phaser.GameObjects.Group;
   private wallDecorations: Phaser.GameObjects.Image[] = [];
+  private cityRoadGraphics: Phaser.GameObjects.Graphics | null = null;
 
   // Cells occupied by city decorations — blocks tower placement
   private decorationBlockedCells: Set<string> = new Set();
@@ -468,6 +470,22 @@ export class GameScene extends Phaser.Scene {
     // Track decoration cells so tower placement is blocked without
     // changing the tile type (keeps grass rendering underneath).
     this.decorationBlockedCells = result.blockedCells;
+
+    // Generate decorative roads between buildings
+    if (result.placements.length >= 2) {
+      const roadResult = generateCityRoads(
+        this.mapData.grid,
+        result.placements,
+        result.blockedCells,
+        this.mapData.seed,
+      );
+      if (roadResult.roads.length > 0) {
+        const roadG = this.add.graphics().setDepth(0.19);
+        const roadRng = createPRNG(this.mapData.seed + 0xC0DE);
+        drawCityRoads(roadG, roadResult, roadRng);
+        this.cityRoadGraphics = roadG;
+      }
+    }
   }
 
   private createGroups() {
@@ -671,6 +689,9 @@ export class GameScene extends Phaser.Scene {
 
     // Synergy lines (created directly via scene.add.graphics(), not in a group)
     if (this.synergySystem) this.uiCam.ignore(this.synergySystem.getLines());
+
+    // Decorative city roads (static graphics)
+    if (this.cityRoadGraphics) this.uiCam.ignore(this.cityRoadGraphics);
   }
 
   private setupInput() {
