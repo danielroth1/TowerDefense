@@ -505,7 +505,9 @@ function drawTransitionSDF(
       od[i]     = src[i];
       od[i + 1] = src[i + 1];
       od[i + 2] = src[i + 2];
-      od[i + 3] = Math.round(alpha * 255);
+      // Multiply SDF alpha by source alpha so transparent background pixels
+      // (e.g. spawn/goal PNGs with RGBA) stay transparent inside the blob.
+      od[i + 3] = Math.round(alpha * src[i + 3]);
     }
   }
 

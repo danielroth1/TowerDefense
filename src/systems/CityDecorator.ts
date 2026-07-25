@@ -367,11 +367,13 @@ function placeMarkets(
         const sr = shuffled[h].row, sc = shuffled[h].col;
         if (sr + soloGroup.h > GRID_ROWS || sc + soloGroup.w > GRID_COLS) continue;
 
-        // All cells in the solo group's footprint must be free
+        // All cells in the solo group's footprint must be buildable and unoccupied
         let canPlace = true;
         for (let dr = 0; dr < soloGroup.h && canPlace; dr++) {
           for (let dc = 0; dc < soloGroup.w && canPlace; dc++) {
-            if (used[sr + dr][sc + dc]) {
+            const nr = sr + dr, nc = sc + dc;
+            if (nr >= GRID_ROWS || nc >= GRID_COLS ||
+                !cellIsBuildableOnly(grid[nr][nc]) || used[nr][nc]) {
               canPlace = false;
             }
           }

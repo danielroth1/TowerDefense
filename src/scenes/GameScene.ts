@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { generateMap, type MapData, type GridTile } from '../systems/MapGenerator';
 import { computeBlobMask, blobTileKey } from '../systems/BlobTileset';
-import { computeTerrainBlobMask, transitionTileKey } from '../systems/TerrainTransition';
+import { computeTerrainBlobMask } from '../systems/TerrainTransition';
 import { Tower } from '../entities/Tower';
 import { Enemy } from '../entities/Enemy';
 import { Projectile, type ProjectileConfig } from '../entities/Projectile';
@@ -332,13 +332,14 @@ export class GameScene extends Phaser.Scene {
    * top of the Wang tile to hide grass in the water area.
    */
   private resolveTile(tile: GridTile): { key: string; depth: number; overlayKey?: string; overlayDepth?: number } {
-    if (tile.type === 'spawn') {
-      const mask = computeTerrainBlobMask(this.mapData.grid, tile.row, tile.col);
-      return { key: mask === 15 ? 'tile_spawn' : transitionTileKey('spawn', mask), depth: 0.15 };
-    }
-    if (tile.type === 'goal') {
-      const mask = computeTerrainBlobMask(this.mapData.grid, tile.row, tile.col);
-      return { key: mask === 15 ? 'tile_goal' : transitionTileKey('goal', mask), depth: 0.15 };
+    if (tile.type === 'spawn' || tile.type === 'goal') {
+      // Render a grass Wang tile underneath + spawn/goal design as overlay.
+      // Same two-layer pattern as paths: the Wang tile provides terrain
+      // underneath, and the spawn/goal PNG (with RGBA transparency) sits
+      // on top, letting the grass show through transparent areas.
+      const grassKey = this.pickVariationKey('tile_buildable', tile.row, tile.col);
+      const designKey = tile.type === 'spawn' ? 'tile_spawn' : 'tile_goal';
+      return { key: grassKey, depth: 0.1, overlayKey: designKey, overlayDepth: 0.15 };
     }
     if (tile.type === 'path') {
       const mask = computeBlobMask(this.mapData.grid, tile.row, tile.col);
