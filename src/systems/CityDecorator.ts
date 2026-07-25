@@ -56,6 +56,8 @@ export interface DecorationPlacement {
   h: number;
   textureKey: string;
   depth: number;
+  /** Additional rotation in radians (applied on top of random jitter). */
+  rotation?: number;
 }
 
 export interface CityDecorResult {
@@ -223,7 +225,18 @@ function placeHarbors(
     const w = cand.grassCol === cand.waterCol ? 1 : 2;
     const h = cand.grassRow === cand.waterRow ? 1 : 2;
 
-    placements.push({ row, col, w, h, textureKey: group.textureKey, depth: DEPTH_HARBOR });
+    // Compute rotation: texture is 2:1 with land on right, water on left.
+    // Rotate so the land side faces the grass cell.
+    let rot = 0;
+    if (cand.grassRow === cand.waterRow) {
+      // Horizontal: same row
+      if (cand.grassCol < cand.waterCol) rot = Math.PI;  // grass on left → flip 180°
+    } else {
+      // Vertical: same column
+      rot = cand.grassRow < cand.waterRow ? -Math.PI / 2 : Math.PI / 2;
+    }
+
+    placements.push({ row, col, w, h, textureKey: group.textureKey, depth: DEPTH_HARBOR, rotation: rot });
     markUsed(cand.grassRow, cand.grassCol);
     markUsed(cand.waterRow, cand.waterCol);
   }

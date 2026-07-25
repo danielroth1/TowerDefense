@@ -441,14 +441,25 @@ export class GameScene extends Phaser.Scene {
 
       const rng = createPRNG(this.mapData.seed + p.row * GRID_COLS + p.col);
       const sizeVar = 0.95 + rng() * 0.10;
-      const displayW = p.w * TILE_SIZE * sizeVar;
-      const displayH = p.h * TILE_SIZE * sizeVar;
-      const rotVar = (rng() - 0.5) * 0.06;
+      let displayW = p.w * TILE_SIZE * sizeVar;
+      let displayH = p.h * TILE_SIZE * sizeVar;
+      let rotation = (rng() - 0.5) * 0.06;
+
+      // Harbor texture is 2:1 (land on left, water on right).
+      // For vertical placements, display at native 2:1 size before rotating.
+      // The placement carries the exact rotation so land faces the grass cell.
+      if (p.textureKey === 'deco_city_harbor') {
+        if (p.w < p.h) {
+          displayW = p.h * TILE_SIZE * sizeVar;
+          displayH = p.w * TILE_SIZE * sizeVar;
+        }
+        if (p.rotation !== undefined) rotation += p.rotation;
+      }
 
       const sprite = this.add.image(px, py, p.textureKey)
         .setDepth(p.depth)
         .setDisplaySize(displayW, displayH)
-        .setRotation(rotVar);
+        .setRotation(rotation);
 
       this.wallDecorations.push(sprite);
     }

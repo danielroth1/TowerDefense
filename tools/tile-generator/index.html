@@ -491,7 +491,8 @@
       <h3>🤖 Model</h3>
       <div style="display:flex; gap:6px;">
         <select class="model-select" id="modelSelect" style="flex:1;">
-          <option value="fal-ai/fast-sdxl" selected>Fast SDXL ⚡</option>
+          <option value="fal-ai/flux.2-turbo" selected>Flux 2 Turbo 🚀</option>
+          <option value="fal-ai/fast-sdxl">Fast SDXL ⚡</option>
           <option value="fal-ai/flux/schnell">Flux Schnell</option>
           <option value="fal-ai/flux/dev">Flux Dev</option>
           <option value="fal-ai/stable-diffusion-v3.5">SD 3.5</option>
@@ -596,11 +597,11 @@
       <div class="size-row">
         <div class="size-input">
           <label>Width</label>
-          <input type="number" id="tileWidth" value="1024" min="64" max="2048" step="64" />
+          <input type="number" id="tileWidth" value="512" min="64" max="2048" step="64" />
         </div>
         <div class="size-input">
           <label>Height</label>
-          <input type="number" id="tileHeight" value="1024" min="64" max="2048" step="64" />
+          <input type="number" id="tileHeight" value="512" min="64" max="2048" step="64" />
         </div>
       </div>
     </div>
@@ -677,7 +678,7 @@
 
     const TOWER_PRESETS = {
       arrow: {
-        label: 'Arrow Tower', color: '#5ab050',
+        label: 'Arrow Tower', color: '#5ab050', w: 256, h: 256,
         variants: [
           { label: 'Mk I',  file: 'tower_arrow_0', prompt: `A completely flat 2D pixel art icon of a basic arrow tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a flat green triangle arrowhead shape, with a single straight arrow barrel graphic pointing directly to the top of the frame (12 o\'clock). Rough timber construction, basic level. ${STYLE_SUFFIX}` },
           { label: 'Mk II', file: 'tower_arrow_1', prompt: `A completely flat 2D pixel art icon of a reinforced arrow tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a flat green triangle shape, two arrow barrel graphics pointing upward (12 o\'clock), battle-worn iron tip details. Mk II upgraded. ${STYLE_SUFFIX}` },
@@ -687,7 +688,7 @@
         ],
       },
       cannon: {
-        label: 'Cannon Tower', color: '#8899aa',
+        label: 'Cannon Tower', color: '#8899aa', w: 256, h: 256,
         variants: [
           { label: 'Mk I',  file: 'tower_cannon_0', prompt: `A completely flat 2D pixel art icon of a basic cannon tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a flat grey circular fortress shape, short iron cannon barrel graphic pointing to the top of the frame (12 o\'clock). Mk I basic heavy cannon. ${STYLE_SUFFIX}` },
           { label: 'Mk II', file: 'tower_cannon_1', prompt: `A completely flat 2D pixel art icon of an iron cannon tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a dark grey flat circular fortress shape, medium-length cannon barrel graphic pointing to 12 o\'clock, cannonball slot graphics on sides. Mk II upgraded. ${STYLE_SUFFIX}` },
@@ -697,7 +698,7 @@
         ],
       },
       ice: {
-        label: 'Ice Tower', color: '#44aaee',
+        label: 'Ice Tower', color: '#44aaee', w: 256, h: 256,
         variants: [
           { label: 'Mk I',  file: 'tower_ice_0', prompt: `A completely flat 2D pixel art icon of an ice tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a pale blue flat 4-pointed diamond cross shape, thin frost crystal tip graphics at the four points. Mk I basic cold. ${STYLE_SUFFIX}` },
           { label: 'Mk II', file: 'tower_ice_1', prompt: `A completely flat 2D pixel art icon of a frost tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a mid blue flat diamond shape with jagged ice shard tip graphics, snowflake pattern graphic on the surface, cold blue glow. Mk II upgraded. ${STYLE_SUFFIX}` },
@@ -707,7 +708,7 @@
         ],
       },
       lightning: {
-        label: 'Lightning Tower', color: '#ffdd22',
+        label: 'Lightning Tower', color: '#ffdd22', w: 256, h: 256,
         variants: [
           { label: 'Mk I',  file: 'tower_lightning_0', prompt: `A completely flat 2D pixel art icon of a lightning rod tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a yellow flat 5-pointed star shape, small electric spark graphics at each tip, lightning rod spike graphic pointing upward (12 o\'clock). Mk I basic electric. ${STYLE_SUFFIX}` },
           { label: 'Mk II', file: 'tower_lightning_1', prompt: `A completely flat 2D pixel art icon of a tesla coil tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a golden yellow flat star shape with electric arc graphics between each tip, glowing orange orb graphic at center. Mk II upgraded. ${STYLE_SUFFIX}` },
@@ -717,7 +718,7 @@
         ],
       },
       poison: {
-        label: 'Poison Tower', color: '#66cc33',
+        label: 'Poison Tower', color: '#66cc33', w: 256, h: 256,
         variants: [
           { label: 'Mk I',  file: 'tower_poison_0', prompt: `A completely flat 2D pixel art icon of a poison cauldron tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a lime green flat hexagonal shape (6-sided), small green bubble graphics on the surface. Mk I basic toxic. ${STYLE_SUFFIX}` },
           { label: 'Mk II', file: 'tower_poison_1', prompt: `A completely flat 2D pixel art icon of a poison vat tower, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a medium green flat hexagon shape with toxic fume wisp graphics and spore particle graphics swirling around it, green glow. Mk II upgraded. ${STYLE_SUFFIX}` },
@@ -727,7 +728,7 @@
         ],
       },
       boomerang: {
-        label: 'Boomerang Tower', color: '#cc88ff',
+        label: 'Boomerang Tower', color: '#cc88ff', w: 256, h: 256,
         variants: [
           { label: 'Mk I',  file: 'tower_boomerang_0', prompt: `A completely flat 2D pixel art icon of a boomerang throwing platform, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a purple flat square shape, single curved boomerang graphic on the surface ready to throw. Wooden throwing station, Mk I basic. ${STYLE_SUFFIX}` },
           { label: 'Mk II', file: 'tower_boomerang_1', prompt: `A completely flat 2D pixel art icon of a reinforced boomerang station, viewed from absolute 90-degree top-down. Dark circular stone base, inside it a deep purple flat square shape with decorative carving graphics, two boomerang graphics crossed on the surface. Mk II upgraded. ${STYLE_SUFFIX}` },
@@ -744,87 +745,94 @@
         prompt: 'perfectly seamless tileable top-down water texture, no visible seams or edges, uniform color distribution, cartoon fantasy style, deep blue ocean with soft ripples, game tile isometric rpg, 2d sprite texture map',
         color: '#1e5099',
         file: 'tile_water',
+        w: 512, h: 512,
       },
       grass: {
         name: 'Grass',
         prompt: 'perfectly seamless tileable top-down grass texture, no visible seams or edges, uniform color distribution, cartoon fantasy style, lush green meadow with tiny flowers and grass blades, game tile isometric rpg, 2d sprite texture map',
         color: '#3a8a22',
         file: 'tile_grass',
+        w: 512, h: 512,
       },
       sand: {
         name: 'Sand',
         prompt: 'perfectly seamless tileable top-down sand texture, no visible seams or edges, uniform color distribution, cartoon fantasy style, warm golden beach sand with subtle dunes and pebbles, game tile isometric rpg, 2d sprite texture map',
         color: '#c4b078',
         file: 'tile_sand',
+        w: 512, h: 512,
       },
       path: {
         name: 'Path',
         prompt: 'perfectly seamless tileable top-down cobblestone road texture, no visible seams or edges, uniform stone distribution, cartoon fantasy style, medieval grey-brown cobblestone with moss between stones, game tile isometric rpg, 2d sprite texture map',
         color: '#7a6e58',
         file: 'tile_path',
+        w: 512, h: 512,
       },
       spawn: {
         name: 'Spawn',
         prompt: 'perfectly seamless tileable top-down dark magical portal texture, no visible seams or edges, uniform color distribution, cartoon fantasy style, fiery demon spawn rune circle on scorched ground, game tile isometric rpg, 2d sprite texture map',
         color: '#cc3300',
         file: 'tile_spawn',
+        w: 512, h: 512,
       },
       goal: {
         name: 'Goal',
         prompt: 'perfectly seamless tileable top-down sacred ground texture, no visible seams or edges, uniform color distribution, cartoon fantasy style, golden glowing holy sanctuary with ornate runes, game tile isometric rpg, 2d sprite texture map',
         color: '#d4a017',
         file: 'tile_goal',
+        w: 512, h: 512,
       },
       custom: {
         name: 'Custom',
         prompt: 'perfectly seamless tileable top-down texture, no visible seams or edges, uniform color distribution, cartoon fantasy style, game tile isometric rpg, 2d sprite texture map',
         color: '#666666',
         file: 'tile_custom',
+        w: 512, h: 512,
       },
     };
 
     const CITY_PRESETS = {
       dense: {
         name: 'Dense Buildings',
-        prompt: 'top-down game asset, dense cluster of medieval stone buildings with varied roof colors, narrow alleys between structures, stylized fantasy art, sharp edges, on dark transparent background, 48x48 game sprite',
+        prompt: 'top-down game asset, dense cluster of medieval stone buildings with varied roof colors, narrow alleys between structures, stylized fantasy art, sharp edges, on dark transparent background',
         color: '#8B7355',
         file: 'deco_city_dense',
-        w: 48, h: 48,
+        w: 256, h: 256,
       },
       market: {
         name: 'Market Square',
-        prompt: 'top-down game asset, open medieval marketplace square with colorful stalls and awnings, cobblestone ground, surrounded by small buildings, stylized fantasy art, sharp details, on dark transparent background, 96x96 game sprite',
+        prompt: 'top-down game asset, open medieval marketplace square with colorful stalls and awnings, cobblestone ground, surrounded by small buildings, stylized fantasy art, sharp details, on dark transparent background',
         color: '#d4a017',
         file: 'deco_city_market',
-        w: 96, h: 96,
+        w: 256, h: 256,
       },
       harbor: {
         name: 'Harbor',
-        prompt: 'top-down game asset, wooden pier and harbor with small boats docked, blue water on one side, stone quay, crates and barrels, stylized fantasy art, clean edges, on dark transparent background, 96x48 game sprite',
+        prompt: 'top-down game asset, wooden pier and harbor with small boats docked, blue water on left side, stone quay, crates and barrels, stylized fantasy art, clean edges, on dark transparent background',
         color: '#4488cc',
         file: 'deco_city_harbor',
-        w: 96, h: 48,
+        w: 256, h: 128,
       },
       house01: {
         name: 'House 01',
-        prompt: 'top-down game asset, single medieval stone cottage with red tile roof and chimney, small garden, stylized vector art, sharp edges, isolated on dark background, 48x48 game sprite',
+        prompt: 'top-down game asset, single medieval stone cottage with red tile roof and chimney, small garden, stylized vector art, sharp edges, isolated on dark background',
         color: '#8B7355',
         file: 'deco_city_house_01',
-        w: 48, h: 48,
+        w: 256, h: 256,
       },
       house02: {
         name: 'House 02',
-        prompt: 'top-down game asset, single medieval timber-framed house with brown roof, slightly larger than cottage, stylized fantasy art, sharp details, isolated on dark background, 48x48 game sprite',
+        prompt: 'top-down game asset, single medieval timber-framed house with brown roof, slightly larger than cottage, stylized fantasy art, sharp details, isolated on dark background',
         color: '#A08060',
         file: 'deco_city_house_02',
-        w: 48, h: 48,
+        w: 256, h: 256,
       },
       tower: {
         name: 'Watchtower',
-        prompt: 'top-down game asset, round medieval watchtower with conical blue roof, stone base, stylized vector art, sharp details, isolated on dark background, 48x48 game sprite',
+        prompt: 'top-down game asset, round medieval watchtower with conical blue roof, stone base, stylized vector art, sharp details, isolated on dark background',
         color: '#3355aa',
         file: 'deco_city_tower',
-        w: 48, h: 48,
+        w: 256, h: 256,
       },
     };
 
@@ -999,9 +1007,8 @@
       const variant = tower.variants[index];
       $prompt.value = variant.prompt;
       $filename.value = variant.file;
-      // Tower sprites are 256x256 (not the 1024×1024 used for terrain crop variation)
-      $width.value = 256;
-      $height.value = 256;
+      $width.value = tower.w;
+      $height.value = tower.h;
       $generateBtn.disabled = false;
       scheduleEstimate();
 
@@ -1015,9 +1022,8 @@
       const preset = PRESETS[name];
       $prompt.value = preset.prompt;
       $filename.value = preset.file;
-      // Terrain tiles use 1024×1024 for crop-variation; restore if coming from tower presets
-      $width.value = 1024;
-      $height.value = 1024;
+      $width.value = preset.w;
+      $height.value = preset.h;
       // Terrain tiles are full-bleed — background removal not needed
       $autoRemoveBg.checked = false;
       document.querySelectorAll('.preset-btn[data-preset]').forEach((b) => b.classList.toggle('active', b.dataset.preset === name));

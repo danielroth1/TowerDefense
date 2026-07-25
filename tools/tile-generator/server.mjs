@@ -321,6 +321,7 @@ const server = createServer(async (req, res) => {
       // They may be inactive or miscategorized in the API — include them
       // anyway so the browser list is exhaustive.
       const QUICK_SELECT_IDS = [
+        'fal-ai/flux.2-turbo',
         'fal-ai/fast-sdxl',
         'fal-ai/flux/schnell',
         'fal-ai/flux/dev',
@@ -521,7 +522,7 @@ async function callFalAI(model, prompt, width, height) {
     body: JSON.stringify({
       prompt,
       image_size: { width, height },
-      num_inference_steps: falModel.includes('schnell') ? 4 : falModel.includes('flux-2') ? 8 : 28,
+      num_inference_steps: falModel.includes('schnell') ? 4 : (falModel.includes('flux-2') || falModel.includes('flux.2')) ? 8 : 28,
     }),
   });
 

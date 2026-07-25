@@ -1061,47 +1061,48 @@ export class BootScene extends Phaser.Scene {
 
   private generateCityHarbor() {
     const S = TILE_SIZE, g = this.add.graphics();
-    // Bottom half = water
-    for (let y = 0; y < S; y++) {
-      const t = y / S;
-      if (y < S * 0.55) {
-        // Land/pier — brown stone
-        const r = Math.floor((0.40 + 0.05 * t) * 255);
-        const gr = Math.floor((0.35 + 0.04 * t) * 255);
-        const b = Math.floor((0.25 + 0.03 * t) * 255);
-        g.fillStyle(Phaser.Display.Color.GetColor(r, gr, b), 1);
-      } else {
-        // Water
-        const r = Math.floor((0.12 + 0.03 * t) * 255);
-        const gr = Math.floor((0.22 + 0.04 * t) * 255);
-        const b = Math.floor((0.48 + 0.05 * t) * 255);
-        g.fillStyle(Phaser.Display.Color.GetColor(r, gr, b), 1);
-      }
+    const W = S * 2, H = S;
+    // ── Left half: Land/pier ──
+    for (let y = 0; y < H; y++) {
+      const t = y / H;
+      const r = Math.floor((0.40 + 0.05 * t) * 255);
+      const gr = Math.floor((0.35 + 0.04 * t) * 255);
+      const b = Math.floor((0.25 + 0.03 * t) * 255);
+      g.fillStyle(Phaser.Display.Color.GetColor(r, gr, b), 1);
       g.fillRect(0, y, S, 1);
     }
-    // Pier planks
+    // ── Right half: Water ──
+    for (let y = 0; y < H; y++) {
+      const t = y / H;
+      const r = Math.floor((0.12 + 0.03 * t) * 255);
+      const gr = Math.floor((0.22 + 0.04 * t) * 255);
+      const b = Math.floor((0.48 + 0.05 * t) * 255);
+      g.fillStyle(Phaser.Display.Color.GetColor(r, gr, b), 1);
+      g.fillRect(S, y, S, 1);
+    }
+    // Pier planks (left half)
     g.fillStyle(0x8B7355, 1);
-    g.fillRect(8, S * 0.3, S - 16, S * 0.25);
+    g.fillRect(8, H * 0.3, S - 16, H * 0.25);
     for (let px = 10; px < S - 10; px += 8) {
       g.fillStyle(0x7a6345, 0.5);
-      g.fillRect(px, S * 0.3, 3, S * 0.25);
+      g.fillRect(px, H * 0.3, 3, H * 0.25);
     }
-    // Small boat
+    // Small boat (right half)
     g.fillStyle(0x6B4226, 1);
-    g.fillTriangle(S * 0.25, S * 0.78, S * 0.15, S * 0.68, S * 0.35, S * 0.68);
+    g.fillTriangle(S + S * 0.25, H * 0.78, S + S * 0.15, H * 0.68, S + S * 0.35, H * 0.68);
     // Mast
     g.lineStyle(1, 0x333333, 1);
-    g.lineBetween(S * 0.25, S * 0.68, S * 0.25, S * 0.55);
+    g.lineBetween(S + S * 0.25, H * 0.68, S + S * 0.25, H * 0.55);
     // Sail
     g.fillStyle(0xffffff, 0.7);
-    g.fillTriangle(S * 0.26, S * 0.56, S * 0.26, S * 0.66, S * 0.36, S * 0.62);
-    // Crates
+    g.fillTriangle(S + S * 0.26, H * 0.56, S + S * 0.26, H * 0.66, S + S * 0.36, H * 0.62);
+    // Crates (left half)
     g.fillStyle(0xA08060, 1);
-    g.fillRect(34, 16, 8, 8);
+    g.fillRect(20, 8, 8, 8);
     g.fillStyle(0x8B7355, 1);
-    g.fillRect(30, 18, 8, 8);
+    g.fillRect(16, 10, 8, 8);
 
-    g.generateTexture('deco_city_harbor', S, S);
+    g.generateTexture('deco_city_harbor', W, H);
     g.destroy();
   }
 
