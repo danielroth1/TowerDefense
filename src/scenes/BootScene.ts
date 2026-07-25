@@ -478,14 +478,24 @@ export class BootScene extends Phaser.Scene {
   private generateSpawnTile() {
     const g = this.add.graphics();
     const S = TILE_SIZE;
-    g.fillStyle(0x1a0a00, 1); g.fillRect(0, 0, S, S);
-    for (let i = 0; i < 5; i++) {
-      g.fillStyle(0xff2200 + i * 0x331100, 0.5 - i * 0.08);
-      g.fillCircle(S / 2, S / 2, (S / 2) - i * 4);
+    const C = S / 2;
+    const R = C - 2;
+
+    // Outer glow ring
+    g.lineStyle(2, 0xff4400, 0.3); g.strokeCircle(C, C, R + 1);
+    // Thick outer ring
+    g.lineStyle(4, 0xff3300, 1); g.strokeCircle(C, C, R);
+    // Concentric fiery rings (transparent centre)
+    for (let i = 0; i < 4; i++) {
+      g.fillStyle(0xff2200 + i * 0x331100, 0.35 - i * 0.06);
+      g.fillCircle(C, C, R - i * 5);
     }
-    g.lineStyle(3, 0xff3300, 1); g.strokeCircle(S/2, S/2, S/2 - 2);
-    g.fillStyle(0xff8800, 1);
-    g.fillTriangle(S*0.22, S*0.28, S*0.80, S*0.5, S*0.22, S*0.72);
+    // Bright core
+    g.fillStyle(0xff6600, 0.8);
+    g.fillCircle(C, C, R * 0.3);
+    // Spawn-direction arrow (points north)
+    g.fillStyle(0xffaa44, 0.9);
+    g.fillTriangle(C, C - R * 0.55, C + 5, C - R * 0.2, C - 5, C - R * 0.2);
     g.generateTexture('tile_spawn', S, S);
     g.destroy();
   }
@@ -493,19 +503,26 @@ export class BootScene extends Phaser.Scene {
   private generateGoalTile() {
     const g = this.add.graphics();
     const S = TILE_SIZE;
-    g.fillStyle(0x0a1a08, 1); g.fillRect(0, 0, S, S);
-    for (let i = 0; i < 4; i++) {
-      g.fillStyle(0x006622 + i * 0x004411, 0.45 - i * 0.09);
-      g.fillCircle(S / 2, S / 2, (S / 2) - i * 4);
+    const C = S / 2;
+    const R = C - 2;
+
+    // Outer glow ring
+    g.lineStyle(2, 0x00ff66, 0.3); g.strokeCircle(C, C, R + 1);
+    // Thick outer ring
+    g.lineStyle(4, 0x00ff66, 1); g.strokeCircle(C, C, R);
+    // Concentric green rings (transparent centre)
+    for (let i = 0; i < 3; i++) {
+      g.fillStyle(0x008833 + i * 0x004422, 0.35 - i * 0.08);
+      g.fillCircle(C, C, R - i * 5);
     }
-    g.lineStyle(3, 0x00ff66, 1); g.strokeCircle(S/2, S/2, S/2 - 3);
+    // Bright golden core star shape
     g.fillStyle(0xffd700, 0.9);
-    g.fillRect(S*0.34, S*0.26, S*0.32, S*0.46);
-    g.fillStyle(0x0a1a08, 1);
-    g.fillRect(S*0.37, S*0.29, S*0.12, S*0.22);
-    g.fillRect(S*0.52, S*0.29, S*0.12, S*0.22);
-    for (let ci = 0; ci < 3; ci++)
-      g.fillRect(S*(0.34 + ci*0.11), S*0.20, S*0.06, S*0.08);
+    g.fillCircle(C, C, R * 0.25);
+    // Crosshair / compass lines
+    g.lineStyle(2, 0xffd700, 0.7);
+    g.strokeCircle(C, C, R * 0.45);
+    g.lineBetween(C - R * 0.5, C, C + R * 0.5, C);
+    g.lineBetween(C, C - R * 0.5, C, C + R * 0.5);
     g.generateTexture('tile_goal', S, S);
     g.destroy();
   }

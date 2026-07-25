@@ -47,6 +47,8 @@ export interface DecorationGroupDef {
   h: number;
   textureKey: string;
   rarity: number;
+  /** Relative weight for weighted random selection among same-size groups. */
+  weight?: number;
 }
 
 export interface DecorationPlacement {
@@ -72,7 +74,7 @@ const CITY_GROUPS: DecorationGroupDef[] = [
   {
     id: 'market',
     label: 'Market Square',
-    w: 2, h: 2,
+    w: 1, h: 1,
     textureKey: 'deco_city_market',
     rarity: CITY_PARAMS.marketRarity,
   },
@@ -82,6 +84,39 @@ const CITY_GROUPS: DecorationGroupDef[] = [
     w: 2, h: 1,
     textureKey: 'deco_city_harbor',
     rarity: CITY_PARAMS.harborRarity,
+  },
+  // ── Solo building groups (1×1) ────────────────────────────────────────
+  {
+    id: 'house01',
+    label: 'Small House',
+    w: 1, h: 1,
+    textureKey: 'deco_city_house_01',
+    rarity: 1.0,
+    weight: CITY_PARAMS.soloWeights.house01,
+  },
+  {
+    id: 'house02',
+    label: 'Large House',
+    w: 1, h: 1,
+    textureKey: 'deco_city_house_02',
+    rarity: 1.0,
+    weight: CITY_PARAMS.soloWeights.house02,
+  },
+  {
+    id: 'dense',
+    label: 'Dense Housing',
+    w: 2, h: 2,
+    textureKey: 'deco_city_dense',
+    rarity: 1.0,
+    weight: CITY_PARAMS.soloWeights.dense,
+  },
+  {
+    id: 'tower',
+    label: 'Watch Tower',
+    w: 1, h: 1,
+    textureKey: 'deco_city_tower',
+    rarity: 1.0,
+    weight: CITY_PARAMS.soloWeights.tower,
   },
 ];
 
@@ -128,14 +163,17 @@ function adjacentWaterDir(
   return null;
 }
 
-function pickSoloBuilding(rng: () => number): string {
-  const w = CITY_PARAMS.soloWeights;
-  const total = w.house01 + w.house02 + w.dense + w.tower;
-  const roll = rng() * total;
-  if (roll < w.house01) return 'deco_city_house_01';
-  if (roll < w.house01 + w.house02) return 'deco_city_house_02';
-  if (roll < w.house01 + w.house02 + w.dense) return 'deco_city_dense';
-  return 'deco_city_tower';
+/** Pick a decoration group using weighted random selection from CITY_GROUPS.
+ *  Only groups with a `weight` field are eligible, regardless of their w/h size. */
+function pickWeightedGroup(rng: () => number): DecorationGroupDef {
+  const solo = CITY_GROUPS.filter(g => g.weight !== undefined);
+  const total = solo.reduce((sum, g) => sum + (g.weight ?? 0), 0);
+  let roll = rng() * total;
+  for (const g of solo) {
+    roll -= g.weight ?? 0;
+    if (roll <= 0) return g;
+  }
+  return solo[solo.length - 1];
 }
 
 // ─── Main generator ─────────────────────────────────────────────────────────
@@ -176,9 +214,26 @@ export function generateCityDecorations(
       if (!hasWaterNeighbor(grid, r, c)) continue;
       if (rng() > CITY_PARAMS.soloFillChance) continue;
 
-      const key = pickSoloBuilding(rng);
-      placements.push({ row: r, col: c, w: 1, h: 1, textureKey: key, depth: DEPTH_BUILDING });
-      markUsed(r, c);
+      const group = pickWeightedGroup(rng);
+      if (r + group.h > GRID_ROWS || c + group.w > GRID_COLS) continue;
+
+      // All cells in the group's footprint must be buildable and unoccupied
+      let canPlace = true;
+      for (let dr = 0; dr < group.h && canPlace; dr++) {
+        for (let dc = 0; dc < group.w && canPlace; dc++) {
+          if (!cellIsBuildableOnly(grid[r + dr][c + dc]) || used[r + dr][c + dc]) {
+            canPlace = false;
+          }
+        }
+      }
+      if (!canPlace) continue;
+
+      placements.push({ row: r, col: c, w: group.w, h: group.h, textureKey: group.textureKey, depth: DEPTH_BUILDING });
+      for (let dr = 0; dr < group.h; dr++) {
+        for (let dc = 0; dc < group.w; dc++) {
+          markUsed(r + dr, c + dc);
+        }
+      }
     }
   }
 
@@ -222,8 +277,11 @@ function placeHarbors(
 
     const row = Math.min(cand.grassRow, cand.waterRow);
     const col = Math.min(cand.grassCol, cand.waterCol);
-    const w = cand.grassCol === cand.waterCol ? 1 : 2;
-    const h = cand.grassRow === cand.waterRow ? 1 : 2;
+
+    // Use group.w/group.h: swap dimensions for vertical placement
+    const isVertical = cand.grassCol === cand.waterCol;
+    const spanW = isVertical ? group.h : group.w;
+    const spanH = isVertical ? group.w : group.h;
 
     // Compute rotation: texture is 2:1 with land on right, water on left.
     // Rotate so the land side faces the grass cell.
@@ -236,9 +294,12 @@ function placeHarbors(
       rot = cand.grassRow < cand.waterRow ? -Math.PI / 2 : Math.PI / 2;
     }
 
-    placements.push({ row, col, w, h, textureKey: group.textureKey, depth: DEPTH_HARBOR, rotation: rot });
-    markUsed(cand.grassRow, cand.grassCol);
-    markUsed(cand.waterRow, cand.waterCol);
+    placements.push({ row, col, w: spanW, h: spanH, textureKey: group.textureKey, depth: DEPTH_HARBOR, rotation: rot });
+    for (let dr = 0; dr < spanH; dr++) {
+      for (let dc = 0; dc < spanW; dc++) {
+        markUsed(row + dr, col + dc);
+      }
+    }
   }
 }
 
@@ -252,13 +313,14 @@ function placeMarkets(
   placements: DecorationPlacement[],
   markUsed: (r: number, c: number) => void,
 ) {
+  const gw = group.w, gh = group.h;
   const candidates: { row: number; col: number }[] = [];
 
-  for (let r = 0; r <= GRID_ROWS - 2; r++) {
-    for (let c = 0; c <= GRID_COLS - 2; c++) {
+  for (let r = 0; r <= GRID_ROWS - gh; r++) {
+    for (let c = 0; c <= GRID_COLS - gw; c++) {
       let valid = true;
-      for (let dr = 0; dr < 2 && valid; dr++) {
-        for (let dc = 0; dc < 2 && valid; dc++) {
+      for (let dr = 0; dr < gh && valid; dr++) {
+        for (let dc = 0; dc < gw && valid; dc++) {
           if (!cellIsBuildableOnly(grid[r + dr][c + dc]) || used[r + dr][c + dc]) {
             valid = false;
           }
@@ -275,22 +337,22 @@ function placeMarkets(
     const { row, col } = candidates.splice(idx, 1)[0];
     if (rng() > group.rarity) continue;
 
-    placements.push({ row, col, w: 2, h: 2, textureKey: group.textureKey, depth: DEPTH_BUILDING });
-    for (let dr = 0; dr < 2; dr++) {
-      for (let dc = 0; dc < 2; dc++) {
+    placements.push({ row, col, w: gw, h: gh, textureKey: group.textureKey, depth: DEPTH_BUILDING });
+    for (let dr = 0; dr < gh; dr++) {
+      for (let dc = 0; dc < gw; dc++) {
         markUsed(row + dr, col + dc);
       }
     }
 
-    // ── Optional: surround market with houses ────────────────────────────
+    // ── Optional: surround with houses ────────────────────────────────
     if (rng() < CITY_PARAMS.groupChance) {
       const houseCount = CITY_PARAMS.groupHouseMin +
         Math.floor(rng() * (CITY_PARAMS.groupHouseMax - CITY_PARAMS.groupHouseMin + 1));
 
       const adjCells: { row: number; col: number }[] = [];
-      for (let dr = -1; dr <= 2; dr++) {
-        for (let dc = -1; dc <= 2; dc++) {
-          if (dr >= 0 && dr < 2 && dc >= 0 && dc < 2) continue;
+      for (let dr = -1; dr <= gh; dr++) {
+        for (let dc = -1; dc <= gw; dc++) {
+          if (dr >= 0 && dr < gh && dc >= 0 && dc < gw) continue;
           const ar = row + dr, ac = col + dc;
           if (ar < 0 || ar >= GRID_ROWS || ac < 0 || ac >= GRID_COLS) continue;
           if (!cellIsBuildableOnly(grid[ar][ac]) || used[ar][ac]) continue;
@@ -301,12 +363,30 @@ function placeMarkets(
       const shuffled = [...adjCells].sort(() => rng() - 0.5);
       const placed = Math.min(houseCount, shuffled.length);
       for (let h = 0; h < placed; h++) {
-        const key = pickSoloBuilding(rng);
+        const soloGroup = pickWeightedGroup(rng);
+        const sr = shuffled[h].row, sc = shuffled[h].col;
+        if (sr + soloGroup.h > GRID_ROWS || sc + soloGroup.w > GRID_COLS) continue;
+
+        // All cells in the solo group's footprint must be free
+        let canPlace = true;
+        for (let dr = 0; dr < soloGroup.h && canPlace; dr++) {
+          for (let dc = 0; dc < soloGroup.w && canPlace; dc++) {
+            if (used[sr + dr][sc + dc]) {
+              canPlace = false;
+            }
+          }
+        }
+        if (!canPlace) continue;
+
         placements.push({
-          row: shuffled[h].row, col: shuffled[h].col,
-          w: 1, h: 1, textureKey: key, depth: DEPTH_BUILDING,
+          row: sr, col: sc,
+          w: soloGroup.w, h: soloGroup.h, textureKey: soloGroup.textureKey, depth: DEPTH_BUILDING,
         });
-        markUsed(shuffled[h].row, shuffled[h].col);
+        for (let dr = 0; dr < soloGroup.h; dr++) {
+          for (let dc = 0; dc < soloGroup.w; dc++) {
+            markUsed(sr + dr, sc + dc);
+          }
+        }
       }
     }
   }
