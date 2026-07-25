@@ -16,6 +16,7 @@ import { ComboSystem } from '../systems/ComboSystem';
 import { HUD } from '../ui/HUD';
 import { BottomBar } from '../ui/BottomBar';
 import { SoundSystem } from '../systems/SoundSystem';
+import { generateCityDecorations } from '../systems/CityDecorator';
 import { createPRNG } from '../utils/helpers';
 import {
   TILE_SIZE, GRID_COLS, GRID_ROWS, COLORS,
@@ -104,6 +105,9 @@ export class GameScene extends Phaser.Scene {
   private uiGroup!: Phaser.GameObjects.Group;
   private wallDecorations: Phaser.GameObjects.Image[] = [];
 
+  // Cells occupied by city decorations — blocks tower placement
+  private decorationBlockedCells: Set<string> = new Set();
+
   // Interaction state
   private placingTower: TowerType | null = null;
   private placingBarricade: boolean = false;
@@ -173,6 +177,7 @@ export class GameScene extends Phaser.Scene {
 
     this.setupPhysics();
     this.buildMap();
+    this.placeCityDecorations();
     this.createGroups();
     this.createHero();
     this.createSystems();
@@ -424,6 +429,33 @@ export class GameScene extends Phaser.Scene {
       this.overlaySprites[row][col] = newOverlay;
       if (this.uiCam) this.uiCam.ignore(newOverlay);
     }
+  }
+
+  /** Place city building decorations and mark cells as non-buildable. */
+  private placeCityDecorations(): void {
+    const result = generateCityDecorations(this.mapData.grid, this.mapData.seed);
+
+    for (const p of result.placements) {
+      const px = (p.col + p.w / 2) * TILE_SIZE;
+      const py = (p.row + p.h / 2) * TILE_SIZE;
+
+      const rng = createPRNG(this.mapData.seed + p.row * GRID_COLS + p.col);
+      const sizeVar = 0.95 + rng() * 0.10;
+      const displayW = p.w * TILE_SIZE * sizeVar;
+      const displayH = p.h * TILE_SIZE * sizeVar;
+      const rotVar = (rng() - 0.5) * 0.06;
+
+      const sprite = this.add.image(px, py, p.textureKey)
+        .setDepth(p.depth)
+        .setDisplaySize(displayW, displayH)
+        .setRotation(rotVar);
+
+      this.wallDecorations.push(sprite);
+    }
+
+    // Track decoration cells so tower placement is blocked without
+    // changing the tile type (keeps grass rendering underneath).
+    this.decorationBlockedCells = result.blockedCells;
   }
 
   private createGroups() {
@@ -900,6 +932,7 @@ export class GameScene extends Phaser.Scene {
     // Placing tower
     if (this.placingTower) {
       if (tile.type !== 'buildable') return;
+      if (this.decorationBlockedCells.has(`${row},${col}`)) return;
       if (this.synergySystem.getTowerAt(col, row)) return;
       const def = TOWER_DEFS[this.placingTower];
       if (!this.economy.spend(def.baseCost)) return;
@@ -943,6 +976,7 @@ export class GameScene extends Phaser.Scene {
     const tile = this.mapData.grid[row][col];
     const canPlace = (this.placingTower || this.placingBarricade) &&
       (tile.type === 'buildable') &&
+      !this.decorationBlockedCells.has(`${row},${col}`) &&
       !this.synergySystem.getTowerAt(col, row);
 
     if (canPlace) {

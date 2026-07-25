@@ -559,6 +559,31 @@
       </div>
     </div>
 
+    <!-- City decoration presets -->
+    <div class="sidebar-section">
+      <h3>🏙️ City Decoration</h3>
+      <div class="preset-grid" id="cityPresetGrid">
+        <button class="preset-btn" data-city="dense">
+          <span class="preset-dot" style="background:#8B7355"></span> Dense Buildings
+        </button>
+        <button class="preset-btn" data-city="market">
+          <span class="preset-dot" style="background:#d4a017"></span> Market Square
+        </button>
+        <button class="preset-btn" data-city="harbor">
+          <span class="preset-dot" style="background:#4488cc"></span> Harbor
+        </button>
+        <button class="preset-btn" data-city="house01">
+          <span class="preset-dot" style="background:#8B7355"></span> House 01
+        </button>
+        <button class="preset-btn" data-city="house02">
+          <span class="preset-dot" style="background:#A08060"></span> House 02
+        </button>
+        <button class="preset-btn" data-city="tower">
+          <span class="preset-dot" style="background:#3355aa"></span> Watchtower
+        </button>
+      </div>
+    </div>
+
     <!-- Prompt -->
     <div class="sidebar-section">
       <h3>📝 Prompt</h3>
@@ -758,6 +783,51 @@
       },
     };
 
+    const CITY_PRESETS = {
+      dense: {
+        name: 'Dense Buildings',
+        prompt: 'top-down game asset, dense cluster of medieval stone buildings with varied roof colors, narrow alleys between structures, stylized fantasy art, sharp edges, on dark transparent background, 48x48 game sprite',
+        color: '#8B7355',
+        file: 'deco_city_dense',
+        w: 48, h: 48,
+      },
+      market: {
+        name: 'Market Square',
+        prompt: 'top-down game asset, open medieval marketplace square with colorful stalls and awnings, cobblestone ground, surrounded by small buildings, stylized fantasy art, sharp details, on dark transparent background, 96x96 game sprite',
+        color: '#d4a017',
+        file: 'deco_city_market',
+        w: 96, h: 96,
+      },
+      harbor: {
+        name: 'Harbor',
+        prompt: 'top-down game asset, wooden pier and harbor with small boats docked, blue water on one side, stone quay, crates and barrels, stylized fantasy art, clean edges, on dark transparent background, 96x48 game sprite',
+        color: '#4488cc',
+        file: 'deco_city_harbor',
+        w: 96, h: 48,
+      },
+      house01: {
+        name: 'House 01',
+        prompt: 'top-down game asset, single medieval stone cottage with red tile roof and chimney, small garden, stylized vector art, sharp edges, isolated on dark background, 48x48 game sprite',
+        color: '#8B7355',
+        file: 'deco_city_house_01',
+        w: 48, h: 48,
+      },
+      house02: {
+        name: 'House 02',
+        prompt: 'top-down game asset, single medieval timber-framed house with brown roof, slightly larger than cottage, stylized fantasy art, sharp details, isolated on dark background, 48x48 game sprite',
+        color: '#A08060',
+        file: 'deco_city_house_02',
+        w: 48, h: 48,
+      },
+      tower: {
+        name: 'Watchtower',
+        prompt: 'top-down game asset, round medieval watchtower with conical blue roof, stone base, stylized vector art, sharp details, isolated on dark background, 48x48 game sprite',
+        color: '#3355aa',
+        file: 'deco_city_tower',
+        w: 48, h: 48,
+      },
+    };
+
     // Pricing cache — populated from /api/pricing (fal.ai Platform API)
     const modelPricingCache = {};
 
@@ -859,11 +929,15 @@
       document.querySelectorAll('.preset-btn[data-preset]').forEach((btn) => {
         btn.addEventListener('click', () => {
           clearTowerSelection();
+          document.querySelectorAll('.preset-btn[data-city]').forEach(b => b.classList.remove('active'));
           applyPreset(btn.dataset.preset);
         });
       });
       document.querySelectorAll('.preset-btn[data-tower]').forEach((btn) => {
         btn.addEventListener('click', () => applyTowerType(btn.dataset.tower));
+      });
+      document.querySelectorAll('.preset-btn[data-city]').forEach((btn) => {
+        btn.addEventListener('click', () => applyCityPreset(btn.dataset.city));
       });
       $model.addEventListener('change', () => { updateModelInfo(); scheduleEstimate(); });
       $generateBtn.addEventListener('click', generateTile);
@@ -893,8 +967,9 @@
     function applyTowerType(type) {
       currentTowerType = type;
       currentPreset = null;
-      // Deactivate terrain presets
+      // Deactivate terrain and city presets
       document.querySelectorAll('.preset-btn[data-preset]').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.preset-btn[data-city]').forEach(b => b.classList.remove('active'));
       // Activate tower type button
       document.querySelectorAll('.preset-btn[data-tower]').forEach(b =>
         b.classList.toggle('active', b.dataset.tower === type)
@@ -946,6 +1021,25 @@
       // Terrain tiles are full-bleed — background removal not needed
       $autoRemoveBg.checked = false;
       document.querySelectorAll('.preset-btn[data-preset]').forEach((b) => b.classList.toggle('active', b.dataset.preset === name));
+      $generateBtn.disabled = false;
+      scheduleEstimate();
+    }
+
+    function applyCityPreset(name) {
+      currentPreset = null;
+      clearTowerSelection();
+      const preset = CITY_PRESETS[name];
+      $prompt.value = preset.prompt;
+      $filename.value = preset.file;
+      $width.value = preset.w;
+      $height.value = preset.h;
+      $autoRemoveBg.checked = false;
+      // Deactivate terrain and tower buttons
+      document.querySelectorAll('.preset-btn[data-preset]').forEach(b => b.classList.remove('active'));
+      // Activate city button
+      document.querySelectorAll('.preset-btn[data-city]').forEach(b =>
+        b.classList.toggle('active', b.dataset.city === name)
+      );
       $generateBtn.disabled = false;
       scheduleEstimate();
     }

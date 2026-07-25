@@ -196,3 +196,19 @@ runs in `create()`. For base tiles, check the file extension (must be `.png`).
 - `HTTP 405 from status endpoint` — the URL construction bug; make sure the
   server uses `submitData.status_url` from the fal.ai response, not a
   manually constructed URL from the model name
+
+---
+
+## Creating New AI Assets (Non-Terrain)
+
+For ability icons, decorations, buildings, tower sprites, and other
+non-repeating assets, see the detailed workflow in:
+
+**[`.github/instructions/ai-asset-workflow.instructions.md`](.github/instructions/ai-asset-workflow.instructions.md)**
+
+This covers:
+- Crafting prompts for the AI tile generator
+- Loading new textures in `BootScene.preload()`
+- Adding procedural fallback generators
+- Wiring assets into game logic (abilities, decorations, towers, enemies)
+- Naming conventions and common pitfalls

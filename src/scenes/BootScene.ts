@@ -66,6 +66,14 @@ export class BootScene extends Phaser.Scene {
         this.load.image(`tower_${evo.type}`, `assets/tiles/tower_${evo.type}.png`);
       }
     }
+
+    // ── City decoration textures (AI-generated, optional — procedural fallback in create())
+    this.load.image('deco_city_dense',    'assets/tiles/deco_city_dense.png');
+    this.load.image('deco_city_market',   'assets/tiles/deco_city_market.png');
+    this.load.image('deco_city_harbor',   'assets/tiles/deco_city_harbor.png');
+    this.load.image('deco_city_house_01', 'assets/tiles/deco_city_house_01.png');
+    this.load.image('deco_city_house_02', 'assets/tiles/deco_city_house_02.png');
+    this.load.image('deco_city_tower',    'assets/tiles/deco_city_tower.png');
   }
 
   create() {
@@ -88,6 +96,7 @@ export class BootScene extends Phaser.Scene {
     this.generateHeroSheet();
     this.generateProjectileTextures();
     this.generateParticleTextures();
+    this.generateCityDecorTextures();
     this.generateUITextures();
     this.registerAnimations();
 
@@ -965,6 +974,208 @@ export class BootScene extends Phaser.Scene {
     g.destroy();
   }
 
+  // City decoration textures
+  private generateCityDecorTextures() {
+    if (!this.aiLoadedTiles.has('deco_city_dense'))    this.generateCityDense();
+    if (!this.aiLoadedTiles.has('deco_city_market'))   this.generateCityMarket();
+    if (!this.aiLoadedTiles.has('deco_city_harbor'))   this.generateCityHarbor();
+    if (!this.aiLoadedTiles.has('deco_city_house_01')) this.generateCityHouse('deco_city_house_01', 0x8B7355, 0x6B3A2A, 0x4A7A9A);
+    if (!this.aiLoadedTiles.has('deco_city_house_02')) this.generateCityHouse('deco_city_house_02', 0xA08060, 0x8B4513, 0x3A6A8A);
+    if (!this.aiLoadedTiles.has('deco_city_tower'))    this.generateCityTower();
+  }
+
+  private generateCityDense() {
+    const S = TILE_SIZE, g = this.add.graphics();
+    // Base ground
+    g.fillStyle(0x3a3a30, 1); g.fillRect(0, 0, S, S);
+    // 4-6 small buildings packed together
+    const buildings = [
+      { x: 3, y: 4, w: 18, h: 16, roof: 0x8B4513, wall: 0xC4A882 },
+      { x: 24, y: 2, w: 16, h: 20, roof: 0xA0522D, wall: 0xD4B896 },
+      { x: 6, y: 24, w: 14, h: 18, roof: 0x6B3A2A, wall: 0xBFB09A },
+      { x: 28, y: 26, w: 16, h: 16, roof: 0x8B6914, wall: 0xC8B898 },
+      { x: 14, y: 12, w: 10, h: 22, roof: 0x7B3A1A, wall: 0xD0C0A0 },
+      { x: 32, y: 10, w: 12, h: 14, roof: 0x9B5923, wall: 0xC4B492 },
+    ];
+    for (const b of buildings) {
+      // Wall
+      g.fillStyle(b.wall, 1);
+      g.fillRect(b.x, b.y + 4, b.w, b.h - 4);
+      // Roof
+      g.fillStyle(b.roof, 1);
+      g.fillRect(b.x - 1, b.y, b.w + 2, 5);
+      // Window dots
+      if (b.w > 8 && b.h > 16) {
+        g.fillStyle(0x88CCFF, 0.7);
+        g.fillRect(b.x + 4, b.y + 10, 4, 4);
+        g.fillRect(b.x + b.w - 8, b.y + 10, 4, 4);
+      }
+    }
+    g.generateTexture('deco_city_dense', S, S);
+    g.destroy();
+  }
+
+  private generateCityMarket() {
+    const S = TILE_SIZE * 2, g = this.add.graphics();
+    // Cobblestone ground
+    g.fillStyle(0x5a5040, 1); g.fillRect(0, 0, S, S);
+    for (let i = 0; i < 20; i++) {
+      g.fillStyle((i % 3 === 0) ? 0x6a6050 : 0x5a5040, 0.6);
+      g.fillRect((i * 17 + 3) % S, (i * 13 + 5) % S, 5 + (i % 3), 4 + (i % 2));
+    }
+    // Surrounding buildings (corners)
+    const corners = [
+      { x: 2, y: 2, w: 22, h: 18, wall: 0xC4B090, roof: 0x8B4513 },
+      { x: S - 24, y: 2, w: 22, h: 18, wall: 0xD4C0A0, roof: 0x9B5523 },
+      { x: 2, y: S - 20, w: 22, h: 18, wall: 0xC8B898, roof: 0x7B3513 },
+      { x: S - 24, y: S - 20, w: 22, h: 18, wall: 0xD0C0A8, roof: 0x8B6523 },
+    ];
+    for (const b of corners) {
+      g.fillStyle(b.wall, 1);
+      g.fillRect(b.x, b.y + 3, b.w, b.h - 3);
+      g.fillStyle(b.roof, 1);
+      g.fillRect(b.x - 1, b.y, b.w + 2, 4);
+    }
+    // Open center — market stalls (colorful dots)
+    const stallColors = [0xff4444, 0x44ff44, 0x4444ff, 0xffff44, 0xff44ff, 0x44ffff];
+    for (let i = 0; i < 8; i++) {
+      const sx = 30 + (i % 4) * 18;
+      const sy = 26 + Math.floor(i / 4) * 22;
+      g.fillStyle(stallColors[i % stallColors.length], 0.8);
+      g.fillRect(sx, sy, 6, 6);
+      // Tiny canopy
+      g.fillStyle(0xffffff, 0.4);
+      g.fillRect(sx - 2, sy - 2, 10, 3);
+    }
+    // Fountain in center
+    g.fillStyle(0x4488cc, 0.6);
+    g.fillCircle(S / 2, S / 2, 8);
+    g.lineStyle(1, 0x6699cc, 0.8);
+    g.strokeCircle(S / 2, S / 2, 8);
+    g.fillStyle(0x88ccff, 0.4);
+    g.fillCircle(S / 2, S / 2, 4);
+
+    g.generateTexture('deco_city_market', S, S);
+    g.destroy();
+  }
+
+  private generateCityHarbor() {
+    const S = TILE_SIZE, g = this.add.graphics();
+    // Bottom half = water
+    for (let y = 0; y < S; y++) {
+      const t = y / S;
+      if (y < S * 0.55) {
+        // Land/pier — brown stone
+        const r = Math.floor((0.40 + 0.05 * t) * 255);
+        const gr = Math.floor((0.35 + 0.04 * t) * 255);
+        const b = Math.floor((0.25 + 0.03 * t) * 255);
+        g.fillStyle(Phaser.Display.Color.GetColor(r, gr, b), 1);
+      } else {
+        // Water
+        const r = Math.floor((0.12 + 0.03 * t) * 255);
+        const gr = Math.floor((0.22 + 0.04 * t) * 255);
+        const b = Math.floor((0.48 + 0.05 * t) * 255);
+        g.fillStyle(Phaser.Display.Color.GetColor(r, gr, b), 1);
+      }
+      g.fillRect(0, y, S, 1);
+    }
+    // Pier planks
+    g.fillStyle(0x8B7355, 1);
+    g.fillRect(8, S * 0.3, S - 16, S * 0.25);
+    for (let px = 10; px < S - 10; px += 8) {
+      g.fillStyle(0x7a6345, 0.5);
+      g.fillRect(px, S * 0.3, 3, S * 0.25);
+    }
+    // Small boat
+    g.fillStyle(0x6B4226, 1);
+    g.fillTriangle(S * 0.25, S * 0.78, S * 0.15, S * 0.68, S * 0.35, S * 0.68);
+    // Mast
+    g.lineStyle(1, 0x333333, 1);
+    g.lineBetween(S * 0.25, S * 0.68, S * 0.25, S * 0.55);
+    // Sail
+    g.fillStyle(0xffffff, 0.7);
+    g.fillTriangle(S * 0.26, S * 0.56, S * 0.26, S * 0.66, S * 0.36, S * 0.62);
+    // Crates
+    g.fillStyle(0xA08060, 1);
+    g.fillRect(34, 16, 8, 8);
+    g.fillStyle(0x8B7355, 1);
+    g.fillRect(30, 18, 8, 8);
+
+    g.generateTexture('deco_city_harbor', S, S);
+    g.destroy();
+  }
+
+  private generateCityHouse(key: string, wallColor: number, roofColor: number, doorColor: number) {
+    const S = TILE_SIZE, g = this.add.graphics();
+    // Ground
+    g.fillStyle(0x3a3a30, 1); g.fillRect(0, 0, S, S);
+    // Wall
+    g.fillStyle(wallColor, 1);
+    g.fillRect(8, 18, S - 16, S - 26);
+    // Roof (triangle)
+    g.fillStyle(roofColor, 1);
+    g.fillTriangle(S / 2, 3, 4, 20, S - 4, 20);
+    // Roof highlight
+    g.fillStyle(Phaser.Display.Color.IntegerToColor(roofColor).lighten(10).color, 0.6);
+    g.fillTriangle(S / 2, 3, S / 2 + 10, 20, S - 4, 20);
+    // Door
+    g.fillStyle(doorColor, 1);
+    g.fillRect(S / 2 - 5, S - 16, 10, 14);
+    // Door handle
+    g.fillStyle(0xffd700, 0.8);
+    g.fillCircle(S / 2 + 3, S - 10, 1.5);
+    // Window
+    g.fillStyle(0x88CCFF, 0.6);
+    g.fillRect(S / 2 + 8, 24, 8, 8);
+    g.lineStyle(1, wallColor, 0.5);
+    g.strokeRect(S / 2 + 8, 24, 8, 8);
+    // Window cross
+    g.lineBetween(S / 2 + 12, 24, S / 2 + 12, 32);
+    g.lineBetween(S / 2 + 8, 28, S / 2 + 16, 28);
+    // Small chimney
+    g.fillStyle(0x666666, 1);
+    g.fillRect(S / 2 - 10, 8, 4, 10);
+
+    g.generateTexture(key, S, S);
+    g.destroy();
+  }
+
+  private generateCityTower() {
+    const S = TILE_SIZE, g = this.add.graphics();
+    // Ground
+    g.fillStyle(0x3a3a30, 1); g.fillRect(0, 0, S, S);
+    // Circular base
+    g.fillStyle(0x5a5a5a, 1);
+    g.fillCircle(S / 2, S / 2 + 2, 18);
+    // Tower body
+    g.fillStyle(0x7a7a7a, 1);
+    g.fillCircle(S / 2, S / 2 - 2, 14);
+    // Stone texture lines
+    g.lineStyle(1, 0x666666, 0.4);
+    g.strokeCircle(S / 2, S / 2 - 2, 14);
+    g.lineBetween(S / 2 - 14, S / 2 - 2, S / 2 + 14, S / 2 - 2);
+    g.lineBetween(S / 2 - 10, S / 2 - 10, S / 2 + 10, S / 2 + 6);
+    // Conical roof
+    g.fillStyle(0x3355aa, 1);
+    g.fillTriangle(S / 2, 4, S / 2 - 16, S / 2 - 4, S / 2 + 16, S / 2 - 4);
+    // Roof highlight
+    g.fillStyle(0x4477cc, 0.5);
+    g.fillTriangle(S / 2, 4, S / 2, S / 2 - 4, S / 2 + 16, S / 2 - 4);
+    // Flag on top
+    g.lineStyle(1, 0x333333, 1);
+    g.lineBetween(S / 2, 4, S / 2, 0);
+    g.fillStyle(0xff4444, 0.8);
+    g.fillTriangle(S / 2 + 1, 0, S / 2 + 1, 4, S / 2 + 6, 2);
+    // Window slits
+    g.fillStyle(0x333333, 1);
+    g.fillRect(S / 2 - 6, S / 2 - 6, 4, 8);
+    g.fillRect(S / 2 + 2, S / 2 - 6, 4, 8);
+
+    g.generateTexture('deco_city_tower', S, S);
+    g.destroy();
+  }
+
+  // ─── 
   // ─── Projectiles ─────────────────────────────────────────────────────────
   private generateProjectileTextures() {
     const g = this.add.graphics();
