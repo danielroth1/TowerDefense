@@ -355,7 +355,7 @@ export class GameScene extends Phaser.Scene {
           ? `tile_path_overlay_${mask}`
           : undefined;
       if (overlayKey) {
-        return { key: pathGrassWang, depth: 0.15, overlayKey, overlayDepth: 0.2 };
+        return { key: pathGrassWang, depth: 0.13, overlayKey, overlayDepth: 0.2 };
       }
       // Fallback: no overlay available — use the old opaque path tile
       const blobAITileKey = `tile_path_blob_${mask}`;
@@ -480,7 +480,7 @@ export class GameScene extends Phaser.Scene {
         this.mapData.seed,
       );
       if (roadResult.roads.length > 0) {
-        const roadG = this.add.graphics().setDepth(0.19);
+        const roadG = this.add.graphics().setDepth(0.14);
         const roadRng = createPRNG(this.mapData.seed + 0xC0DE);
         drawCityRoads(roadG, roadResult, roadRng);
         this.cityRoadGraphics = roadG;
