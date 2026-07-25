@@ -423,13 +423,71 @@ export function generateCityRoads(
     }
   }
 
+  // ── 6b. Deduplicate overlapping road segments ─────────────────────────
+  // Adjacent buildings in the same cluster can produce nearly identical paths.
+  // Remove segments where >55% of grid cells overlap in the same direction
+  // as an already-kept segment.
+  const cellKey = (r: number, c: number) => `${r},${c}`;
+
+  // Pre-compute cell sets for each segment
+  const segCellSets: Set<string>[] = allSegments.map(seg => {
+    const s = new Set<string>();
+    for (const pt of seg.path) {
+      const cr = Math.round((pt.y - TILE_SIZE / 2) / TILE_SIZE);
+      const cc = Math.round((pt.x - TILE_SIZE / 2) / TILE_SIZE);
+      s.add(cellKey(cr, cc));
+    }
+    return s;
+  });
+
+  const segDirs: Map<string, { dx: number; dy: number }>[] = allSegments.map(seg => {
+    const m = new Map<string, { dx: number; dy: number }>();
+    for (let i = 0; i < seg.path.length - 1; i++) {
+      const cr = Math.round((seg.path[i].y - TILE_SIZE / 2) / TILE_SIZE);
+      const cc = Math.round((seg.path[i].x - TILE_SIZE / 2) / TILE_SIZE);
+      const dx = seg.path[i + 1].x - seg.path[i].x;
+      const dy = seg.path[i + 1].y - seg.path[i].y;
+      m.set(cellKey(cr, cc), { dx, dy });
+    }
+    return m;
+  });
+
+  const kept: boolean[] = new Array(allSegments.length).fill(true);
+  for (let i = 0; i < allSegments.length; i++) {
+    if (!kept[i]) continue;
+    for (let j = i + 1; j < allSegments.length; j++) {
+      if (!kept[j]) continue;
+      // Count shared cells with same direction
+      let shared = 0, sameDir = 0;
+      const smaller = segCellSets[i].size <= segCellSets[j].size ? i : j;
+      const larger = smaller === i ? j : i;
+      for (const ck of segCellSets[smaller]) {
+        if (segCellSets[larger].has(ck)) {
+          shared++;
+          const dA = segDirs[i].get(ck);
+          const dB = segDirs[j].get(ck);
+          if (dA && dB) {
+            const dot = dA.dx * dB.dx + dA.dy * dB.dy;
+            if (dot > 0) sameDir++;
+          }
+        }
+      }
+      const minLen = Math.min(segCellSets[i].size, segCellSets[j].size);
+      if (minLen > 0 && sameDir / minLen > 0.55) {
+        kept[j] = false; // drop the later duplicate
+      }
+    }
+  }
+
+  const dedupedSegments = allSegments.filter((_, i) => kept[i]);
+
   // ── 7. Detect emergent intersections ───────────────────────────────────
   // Where two roads from different segments share a grid cell or pass within
   // 1 tile of each other, mark that as an intersection.
   const cellUsage = new Map<string, number[]>(); // "r,c" → segment indices
 
-  for (let si = 0; si < allSegments.length; si++) {
-    const seg = allSegments[si];
+  for (let si = 0; si < dedupedSegments.length; si++) {
+    const seg = dedupedSegments[si];
     const seen = new Set<string>();
     for (const pt of seg.path) {
       const cr = Math.round((pt.y - TILE_SIZE / 2) / TILE_SIZE);
@@ -465,7 +523,7 @@ export function generateCityRoads(
 
   const roads: CityRoad[] = [];
 
-  for (const seg of allSegments) {
+  for (const seg of dedupedSegments) {
     // Ensure the road starts from the building edge (not center overlap)
     // and ends at the junction
     let points = [...seg.path];
