@@ -75,11 +75,10 @@ function tryGeneratePath(
   visited.add(`${row},${col}`);
 
   for (let step = 0; step < maxSteps; step++) {
-    // At final column, push straight to goal
+    // At final column, walk vertically to goal row
     if (col === endCol - 1) {
-      const finalSteps = endRow > row ? 1 : endRow < row ? -1 : 0;
-      if (finalSteps !== 0) {
-        row += finalSteps;
+      while (row !== endRow) {
+        row += endRow > row ? 1 : -1;
         path.push({ row, col });
         visited.add(`${row},${col}`);
       }
@@ -101,9 +100,11 @@ function tryGeneratePath(
 
     if (candidates.length === 0) return null;
 
-    // Weight: prefer moving right (toward goal), moderate vertical
+    // Weight: vertical bias toward goal row increases as path approaches MAX_PATH_LENGTH
+    const pathRatio = path.length / MAX_PATH_LENGTH;
+    const vertBias  = Math.round(3 + pathRatio * 4);  // 3 → 7
     const weighted = candidates.flatMap(c => {
-      const w = c.dc === 1 ? 4 : c.dc === -1 ? 1 : 2;
+      const w = c.dc === 1 ? 4 : c.dc === -1 ? 2 : vertBias;
       return Array(w).fill(c) as typeof c[];
     });
 
@@ -113,9 +114,36 @@ function tryGeneratePath(
     path.push({ row, col });
     visited.add(`${row},${col}`);
 
-    if (path.length > MAX_PATH_LENGTH) break;
+    // Once past MAX_PATH_LENGTH, stop wandering and force-march toward goal
+    if (path.length > MAX_PATH_LENGTH && col < endCol - 1) {
+      while (col < endCol - 1) {
+        col++;
+        // Gradually drift row toward endRow so we land near it
+        if (row < endRow) row = Math.min(row + 1, GRID_ROWS - 1);
+        if (row > endRow) row = Math.max(row - 1, 0);
+        path.push({ row, col });
+        visited.add(`${row},${col}`);
+      }
+    }
+
+    // Loop top will now catch col === endCol - 1 and finish the path
   }
-  return null;
+  // If loop exhausted without reaching goal, try a straight-line finish
+  if (col < endCol - 1) {
+    while (col < endCol - 1) {
+      col++;
+      path.push({ row, col });
+      visited.add(`${row},${col}`);
+    }
+  }
+  // Final approach: walk vertically to goal row
+  while (row !== endRow) {
+    row += endRow > row ? 1 : -1;
+    path.push({ row, col });
+    visited.add(`${row},${col}`);
+  }
+  path.push({ row: endRow, col: endCol });
+  return path;
 }
 
 function clampInt(v: number, lo: number, hi: number): number {

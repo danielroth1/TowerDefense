@@ -87,8 +87,8 @@ export const SELL_REFUND_RATIO = 0.6;
 export const MAX_TOWER_LEVEL   = 3; // then evolve
 
 // ─── Map generation ──────────────────────────────────────────────────────────
-export const MIN_PATH_LENGTH = 45;
-export const MAX_PATH_LENGTH = 80;
+export const MIN_PATH_LENGTH = 10;
+export const MAX_PATH_LENGTH = 400;
 export const BUILDABLE_RADIUS = 2; // tiles around path that are buildable
 
 // ─── Abilities ───────────────────────────────────────────────────────────────
