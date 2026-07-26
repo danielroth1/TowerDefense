@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import type { EconomyBuildingType, EconomyBuildingDef, EconomyUpgradeTier } from '../data/economy';
-import { ECO_BUILDING_DEFS } from '../data/economy';
+import { ECO_BUILDING_DEFS, WAREHOUSE_CAPACITY } from '../data/economy';
 import { TILE_SIZE } from '../utils/constants';
 
 export class EconomyBuilding extends Phaser.GameObjects.Container {
@@ -57,6 +57,7 @@ export class EconomyBuilding extends Phaser.GameObjects.Container {
     this.gridRow = gridRow;
     this.gridCol = gridCol;
     this.totalSpent = this.def.baseCost;
+    if (this.def.isStorage) this.maxInventory = WAREHOUSE_CAPACITY;
 
     scene.add.existing(this);
     this.setDepth(0.3); // Above terrain, below towers
@@ -97,20 +98,46 @@ export class EconomyBuilding extends Phaser.GameObjects.Container {
     }
 
     // Inventory indicator — colored dots below building
-    if (this.inventory > 0 && this.def.produces) {
+    if (this.inventory > 0 && (this.def.produces || this.def.isStorage)) {
       const dotColors: Record<string, number> = {
         wheat: 0xd4a843, flour: 0xeee8d5, bread: 0xc89a5c, fish: 0x6699cc,
       };
-      const color = dotColors[this.def.produces] ?? 0xffffff;
-      for (let i = 0; i < Math.min(this.inventory, this.maxInventory); i++) {
-        const dot = this.scene.add.graphics();
-        dot.fillStyle(color, 1);
-        dot.fillCircle(
-          -((this.inventory - 1) * 6) / 2 + i * 6,
-          displayH / 2 + 5,
-          2,
-        );
-        this.add(dot);
+      const color = dotColors[this.def.produces ?? 'wheat'] ?? 0xffffff;
+
+      if (this.def.isStorage) {
+        // Warehouse: show fill level bar on the right side
+        const barW = 4, barH = displayH * 0.7;
+        const barX = displayW / 2 + 3, barY = -barH / 2;
+        const fillPct = this.inventory / this.maxInventory;
+
+        // Background
+        const barBg = this.scene.add.graphics();
+        barBg.fillStyle(0x333333, 0.6);
+        barBg.fillRect(barX, barY, barW, barH);
+        this.add(barBg);
+
+        // Fill
+        const barFill = this.scene.add.graphics();
+        barFill.fillStyle(color, 0.9);
+        barFill.fillRect(barX, barY + barH * (1 - fillPct), barW, barH * fillPct);
+        this.add(barFill);
+
+        // Border
+        const barBorder = this.scene.add.graphics();
+        barBorder.lineStyle(1, 0xffffff, 0.3);
+        barBorder.strokeRect(barX, barY, barW, barH);
+        this.add(barBorder);
+      } else {
+        for (let i = 0; i < Math.min(this.inventory, this.maxInventory); i++) {
+          const dot = this.scene.add.graphics();
+          dot.fillStyle(color, 1);
+          dot.fillCircle(
+            -((this.inventory - 1) * 6) / 2 + i * 6,
+            displayH / 2 + 5,
+            2,
+          );
+          this.add(dot);
+        }
       }
     }
   }

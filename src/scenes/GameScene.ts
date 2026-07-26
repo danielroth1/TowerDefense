@@ -9,6 +9,7 @@ import { Hero } from '../entities/Hero';
 import { Barricade } from '../entities/Barricade';
 import { EconomyManager } from '../systems/EconomyManager';
 import { EconomySimulation } from '../systems/EconomySimulation';
+import { TransportSystem } from '../systems/TransportSystem';
 import { EconomyBuilding } from '../entities/EconomyBuilding';
 import { EconomyPanel } from '../ui/EconomyPanel';
 import type { EconomyBuildingType } from '../data/economy';
@@ -99,6 +100,7 @@ export class GameScene extends Phaser.Scene {
   // Systems
   private economy!: EconomyManager;
   private economySim!: EconomySimulation;
+  private transportSys!: TransportSystem;
   private waveManager!: WaveManager;
   private abilitySystem!: AbilitySystem;
   private synergySystem!: SynergySystem;
@@ -595,6 +597,9 @@ export class GameScene extends Phaser.Scene {
   private createSystems() {
     this.economy       = new EconomyManager(this, this._debug ? DEBUG_STARTING_GOLD : undefined);
     this.economySim    = new EconomySimulation(this.economy);
+    this.transportSys  = new TransportSystem(this, this.economySim);
+    // Cart sprites are world-space; ignore on the UI camera so they scroll with the main camera
+    if (this.uiCam) this.uiCam.ignore(this.transportSys.cartGroup);
     this.waveManager   = new WaveManager(this, this.enemyGroup, this.flyerGroup, this.mapData.waypoints, this.mapData.spawnPoint);
     this.abilitySystem = new AbilitySystem(this);
     this.synergySystem = new SynergySystem(this);
@@ -645,6 +650,7 @@ export class GameScene extends Phaser.Scene {
       this.placingBarricade = false;
       this.placingEconomy = null;
       this.economyPanel.hide();
+      this.bottomBar.setEcoMode(false);
     };
 
     this.economyPanel.callback = (type) => {
@@ -690,6 +696,19 @@ export class GameScene extends Phaser.Scene {
     };
 
     this.bottomBar.onSendWave = () => this.waveManager.sendEarlyWave();
+
+    this.bottomBar.onToggleEconomy = () => {
+      if (this.economyPanel.isVisible()) {
+        this.economyPanel.hide();
+        this.placingEconomy = null;
+        this.bottomBar.setEcoMode(false);
+      } else {
+        this.economyPanel.show();
+        this.placingTower = null;
+        this.placingBarricade = false;
+        this.bottomBar.setEcoMode(true);
+      }
+    };
 
     this.createMinimap();
   }
@@ -812,10 +831,12 @@ export class GameScene extends Phaser.Scene {
       if (this.economyPanel.isVisible()) {
         this.economyPanel.hide();
         this.placingEconomy = null;
+        this.bottomBar.setEcoMode(false);
       } else {
         this.economyPanel.show();
         this.placingTower = null;
         this.placingBarricade = false;
+        this.bottomBar.setEcoMode(true);
       }
     });
     kb.on('keydown-B', () => {
@@ -1133,6 +1154,7 @@ export class GameScene extends Phaser.Scene {
     this.placingEconomy = null;
     this._skipNextPlacement = false;
     this.economyPanel.hide();
+    this.bottomBar.setEcoMode(false);
     this.hoverOverlay.setAlpha(0);
   }
 
@@ -1270,6 +1292,7 @@ export class GameScene extends Phaser.Scene {
     const building = new EconomyBuilding(this, col, row, type);
     this.economyBuildings.push(building);
     this.economySim.addBuilding(building);
+    this.transportSys.setBuildings(this.economyBuildings);
 
     // Ignore on UI camera so it doesn't render twice (once on map, once on UI overlay)
     if (this.uiCam) this.uiCam.ignore(building);
@@ -1923,6 +1946,7 @@ export class GameScene extends Phaser.Scene {
 
     this.economy.update(delta);
     this.economySim.update(delta);
+    this.transportSys.update(delta);
     this.waveManager.update(delta);
     this.abilitySystem.update(delta);
     this.weatherSystem.update(delta);

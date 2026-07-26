@@ -61,6 +61,13 @@ export class BottomBar {
   onEvolve:     ((branch: 0 | 1) => void) | null = null;
   onSell:       (() => void) | null = null;
   onSendWave:   (() => void) | null = null;
+  onToggleEconomy: (() => void) | null = null;
+
+  // Economy mode toggle button
+  private ecoBtnBg:  Phaser.GameObjects.Graphics;
+  private ecoBtnTxt: Phaser.GameObjects.Text;
+  private ecoBtnHit: Phaser.GameObjects.Rectangle;
+  private _ecoMode: boolean = false;
 
   constructor(scene: Phaser.Scene, economy: EconomyManager) {
     this.scene   = scene;
@@ -149,6 +156,19 @@ export class BottomBar {
     this.waveHit.on('pointerup',   () => this.onSendWave?.());
 
     this.drawWaveBtn(false);
+
+    // ── Economy mode toggle button ────────────────────────────────────────
+    const ED = D + 1;
+    this.ecoBtnBg = scene.add.graphics().setScrollFactor(0).setDepth(ED);
+    this.ecoBtnTxt = scene.add.text(0, 0, '[V] ECO', {
+      fontSize: '12px', fontFamily: 'monospace', color: '#aabbcc', align: 'center',
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(ED + 1);
+    this.ecoBtnHit = scene.add.rectangle(0, 0, 70, 24, 0, 0)
+      .setScrollFactor(0).setInteractive({ useHandCursor: true }).setDepth(ED + 2);
+    this.ecoBtnHit.on('pointerover', () => this.drawEcoBtn(true));
+    this.ecoBtnHit.on('pointerout',  () => this.drawEcoBtn(false));
+    this.ecoBtnHit.on('pointerup',   () => this.onToggleEconomy?.());
+    this.drawEcoBtn(false);
 
     // Gold listener
     scene.events.on('gold_changed', () => {
@@ -289,6 +309,7 @@ export class BottomBar {
       ...this.hotkeyLabels,
       this.waveHit,
       ...this.upgBtnList.flatMap(b => [b.bg, b.txt, b.hit]),
+      this.ecoBtnBg, this.ecoBtnTxt, this.ecoBtnHit,
     ];
   }
 
@@ -365,6 +386,13 @@ export class BottomBar {
     this.waveLabel.setPosition(this._WAVE_CX, this._WAVE_CY + Math.round(waveH * 0.1));
     this.waveHit.setPosition(this._WAVE_CX, this._WAVE_CY).setSize(waveW - 6, waveH - 4);
     this.drawWaveBtn(false);
+
+    // ── Economy mode toggle ────────────────────────────────────────────────
+    const ecoBtnX = TLEFT + 40;
+    const ecoBtnY = this._BAR_Y + 16;
+    this.ecoBtnHit.setPosition(ecoBtnX, ecoBtnY);
+    this.ecoBtnTxt.setPosition(ecoBtnX, ecoBtnY);
+    this.drawEcoBtn(false);
 
     // ── Upgrade section ────────────────────────────────────────────────────
     if (this.upgRoot.visible && this.currentUpgradeTower) {
@@ -605,6 +633,24 @@ export class BottomBar {
       w: this._WAVE_W, h: this._WAVE_H,
       theme: 'wave', hover, radius: 10,
     });
+  }
+
+  // ─── Economy mode toggle ────────────────────────────────────────────────
+
+  private drawEcoBtn(hover: boolean) {
+    const g = this.ecoBtnBg;
+    g.clear();
+    const active = this._ecoMode || hover;
+    g.fillStyle(active ? 0x2a5a2a : 0x1a2a1a, 0.9);
+    g.fillRoundedRect(this.ecoBtnHit.x - 35, this.ecoBtnHit.y - 12, 70, 24, 5);
+    g.lineStyle(1, this._ecoMode ? 0x44ff88 : 0x334433, 0.7);
+    g.strokeRoundedRect(this.ecoBtnHit.x - 35, this.ecoBtnHit.y - 12, 70, 24, 5);
+    this.ecoBtnTxt.setColor(this._ecoMode ? '#44ff88' : '#aabbcc');
+  }
+
+  setEcoMode(active: boolean) {
+    this._ecoMode = active;
+    this.drawEcoBtn(false);
   }
 
   private clearUpgHits() {
