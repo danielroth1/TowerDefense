@@ -18,6 +18,7 @@ import { BottomBar } from '../ui/BottomBar';
 import { SoundSystem } from '../systems/SoundSystem';
 import { generateCityDecorations } from '../systems/CityDecorator';
 import { generateCityRoads, drawCityRoads } from '../systems/CityRoadNetwork';
+import { PerfTest } from '../systems/PerfTest';
 import { createPRNG } from '../utils/helpers';
 import {
   TILE_SIZE, GRID_COLS, GRID_ROWS, COLORS,
@@ -159,11 +160,13 @@ export class GameScene extends Phaser.Scene {
 
   constructor() { super('GameScene'); }
 
-  init(data: { seed: number; seedStr?: string; debug?: boolean }) {
+  init(data: { seed: number; seedStr?: string; debug?: boolean; perfTest?: boolean }) {
     this.mapData = generateMap(data.seed ?? 12345);
     this._debug = data.debug ?? false;
+    this._perfTest = data.perfTest ?? false;
   }
   private _debug: boolean = false;
+  private _perfTest: boolean = false;
 
   create() {
     // Read AI tile keys + Wang tile availability from BootScene
@@ -191,6 +194,15 @@ export class GameScene extends Phaser.Scene {
 
     // Sound init on first interaction — disable BGM by default in debug mode
     this.sfx.init({ musicEnabled: false });
+
+    // Perf test: fill every buildable tile with a random tower + spawn 200 enemies
+    if (this._perfTest) {
+      new PerfTest(
+        this, this.mapData, this.decorationBlockedCells,
+        this.synergySystem, this.enemyGroup, this.flyerGroup,
+        this.uiCam, (type, col, row) => this.placeTower(type, col, row),
+      ).run();
+    }
 
     // 4s countdown before first wave
     this.waveManager.countdown = 4000;
@@ -1046,7 +1058,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ─── Tower management ────────────────────────────────────────────────────
-  private placeTower(type: TowerType, col: number, row: number) {
+  public placeTower(type: TowerType, col: number, row: number) {
     this.sfx.play('tower_place');
     const tower = new Tower(this, col, row, type);
     this.towerGroup.add(tower);

@@ -124,6 +124,10 @@ export class MenuScene extends Phaser.Scene {
     const playBtn = this.makeButton(W / 2, H * 0.60, 200, 50, 'PLAY', 0x1e3a5f, 0x2a5080);
     playBtn.on('pointerup', () => this.startGame());
 
+    // Perf Test button
+    const perfBtn = this.makeButton(W / 2, H * 0.66, 200, 40, 'PERF TEST', 0x5f1e1e, 0x802a2a);
+    perfBtn.on('pointerup', () => this.startGamePerfTest());
+
     // How to play button
     const helpBtn = this.makeButton(W / 2, H * 0.72, 200, 50, 'HOW TO PLAY', 0x1a2a1a, 0x2a4a2a);
     helpBtn.on('pointerup', () => this.showHelp());
@@ -185,6 +189,13 @@ export class MenuScene extends Phaser.Scene {
     const debug = this.debugInput?.checked ?? false;
     this.cleanupInput();
     this.scene.start('GameScene', { seed, seedStr: raw, debug });
+  }
+
+  private startGamePerfTest() {
+    const raw = this.seedInput?.value.trim() || String(Math.floor(Math.random() * 999999));
+    const seed = hashSeed(raw || String(Date.now()));
+    this.cleanupInput();
+    this.scene.start('GameScene', { seed, seedStr: raw, perfTest: true });
   }
 
   private showHelp() {
