@@ -92,9 +92,9 @@ export class PerfTest {
 
   private spawnEnemies(rng: () => number, enemyTypes: EnemyType[]): void {
     const { spawnPoint, waypoints } = this.mapData;
-    const delayMs = 40; // small gap so enemies don't stack
+    const delayMs = 4; // small gap so enemies don't stack
 
-    for (let i = 0; i < 2000; i++) {
+    for (let i = 0; i < 20000; i++) {
       this.scene.time.delayedCall(i * delayMs, () => {
         const typeIdx = Math.floor(rng() * enemyTypes.length);
         const rawDef = ENEMY_DEFS[enemyTypes[typeIdx]];

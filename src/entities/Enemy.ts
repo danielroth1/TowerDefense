@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import type { EnemyDef } from '../data/enemies';
-import { COLORS, TILE_SIZE, GRID_COLS, GRID_ROWS } from '../utils/constants';
+import { TILE_SIZE, GRID_COLS, GRID_ROWS } from '../utils/constants';
 
 export class Enemy extends Phaser.Physics.Arcade.Sprite {
   def: EnemyDef;
@@ -22,9 +22,6 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
   poisonStacks: PoisonStack[] = [];
   armorReduction: number = 0; // permanent from acid
   isPhased: boolean = false;  // Phantom boss phase
-
-  private hpBarBg: Phaser.GameObjects.Graphics;
-  private hpBarFg: Phaser.GameObjects.Graphics;
 
   // Boss state
   bossSpawnTimer: number = 0;
@@ -58,10 +55,6 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
 
     // Start walk animation
     this.play(`enemy_${def.type}_walk`);
-
-    // HP bars (world-space graphics, updated each frame)
-    this.hpBarBg = scene.add.graphics().setDepth(5);
-    this.hpBarFg = scene.add.graphics().setDepth(6);
   }
 
   takeDamage(amount: number, ignoreArmor = false): number {
@@ -186,7 +179,6 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
       this.setPosition(wp.x, wp.y);
     }
 
-    this.updateHPBar();
   }
 
   private followPath(_delta: number) {
@@ -214,35 +206,11 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     }
   }
 
-  /** Returns HP bar graphics for dual-camera UI ignoring. */
-  getHpBars(): Phaser.GameObjects.Graphics[] {
-    return [this.hpBarBg, this.hpBarFg];
-  }
-
-  private updateHPBar() {
-    const bw = 28;
-    const bh = 4;
-    const bx = this.x - bw / 2;
-    const by = this.y - this.def.radius - 10;
-    const frac = Math.max(0, this.hp / this.maxHp);
-    const col = frac > 0.6 ? COLORS.HP_HIGH : frac > 0.3 ? COLORS.HP_MED : COLORS.HP_LOW;
-
-    this.hpBarBg.clear();
-    this.hpBarBg.fillStyle(0x000000, 0.7);
-    this.hpBarBg.fillRect(bx, by, bw, bh);
-
-    this.hpBarFg.clear();
-    this.hpBarFg.fillStyle(col, 1);
-    this.hpBarFg.fillRect(bx, by, bw * frac, bh);
-  }
-
   die(awardGold = true) {
     if (!this.active) return;
     // MUST set inactive BEFORE emitting event so countActive() is correct
     this.setActive(false).setVisible(false);
     this.body?.stop();
-    this.hpBarBg.destroy();
-    this.hpBarFg.destroy();
     if (awardGold) {
       this.scene.events.emit('enemy_died', this);
     }
@@ -256,8 +224,6 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
   }
 
   destroy(fromScene?: boolean) {
-    this.hpBarBg?.destroy();
-    this.hpBarFg?.destroy();
     super.destroy(fromScene);
   }
 }

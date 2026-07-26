@@ -20,6 +20,7 @@ import { generateCityDecorations } from '../systems/CityDecorator';
 import { generateCityRoads, drawCityRoads } from '../systems/CityRoadNetwork';
 import { PerfTest } from '../systems/PerfTest';
 import { EnemyGrid } from '../systems/EnemyGrid';
+import { HPBarPool } from '../systems/HPBarPool';
 import { createPRNG } from '../utils/helpers';
 import {
   TILE_SIZE, GRID_COLS, GRID_ROWS, COLORS,
@@ -124,6 +125,8 @@ export class GameScene extends Phaser.Scene {
 
   // Spatial grid for efficient enemy lookups
   private enemyGrid!: EnemyGrid;
+  /** Pooled HP bar renderer — 2 shared Graphics for all enemies. */
+  private hpBarPool!: HPBarPool;
   /** Cached boss enemy reference (avoids full scan each frame). */
   private currentBoss: Enemy | null = null;
 
@@ -201,6 +204,8 @@ export class GameScene extends Phaser.Scene {
     this.enemyGrid = new EnemyGrid();
     this.createUI();
     this.setupCamera();
+    // Pooled HP bar renderer (replaces 2 Graphics per enemy with 2 shared)
+    this.hpBarPool = new HPBarPool(this);
     // VFX graphics pool (after setupCamera so uiCam is available)
     this.vfxPool = [];
     this.vfxPoolIndex = 0;
@@ -208,6 +213,10 @@ export class GameScene extends Phaser.Scene {
       const g = this.add.graphics().setVisible(false);
       if (this.uiCam) this.uiCam.ignore(g);
       this.vfxPool.push(g);
+    }
+    // Ignore HP bar pool graphics on UI camera
+    if (this.uiCam) {
+      for (const g of this.hpBarPool.getGraphics()) this.uiCam.ignore(g);
     }
     this.setupInput();
     this.registerEvents();
@@ -542,9 +551,6 @@ export class GameScene extends Phaser.Scene {
         const result = origAdd(child, addToScene);
         if (this.uiCam) {
           this.uiCam.ignore(child);
-          if (child instanceof Enemy) {
-            for (const bar of child.getHpBars()) this.uiCam.ignore(bar);
-          }
           if (child instanceof Barricade) {
             this.uiCam.ignore(child.getHpBar());
           }
@@ -805,18 +811,15 @@ export class GameScene extends Phaser.Scene {
     this.events.on('check_can_afford', (cost: number, cb: (v: boolean) => void) => cb(this.economy.canAfford(cost)));
     this.events.on('ability_spend',    (cost: number) => this.economy.spend(cost));
 
-    // Tower targeting (uses spatial grid — O(cells in range) instead of O(all enemies))
+    // Tower targeting (uses spatial grid for both ground and flying enemies)
     this.events.on('tower_find_target', (tower: Tower, cb: (e: Enemy) => void) => {
       const range = tower.range;
-      this.enemyGrid.query(tower.x, tower.y, range, e => { cb(e); });
-      if (tower.def.targetsFlying) {
-        this.flyerGroup.getChildren().forEach(e => {
-          const enemy = e as Enemy;
-          if (!enemy.active) return;
-          const d = Phaser.Math.Distance.Between(tower.x, tower.y, enemy.x, enemy.y);
-          if (d <= range) cb(enemy);
-        });
-      }
+      const targetsFlying = tower.def.targetsFlying;
+      this.enemyGrid.query(tower.x, tower.y, range, e => {
+        // Skip flyers if this tower doesn't target them
+        if (!targetsFlying && e.def.isFlying) return;
+        cb(e);
+      });
     });
 
     this.events.on('tower_shoot', (tower: Tower, target: Enemy) => {
@@ -1640,20 +1643,18 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ─── Boss tracking ───────────────────────────────────────────────────────
-  private updateBossBar() {
+  private updateBossBar(allGround: Enemy[], allFliers: Enemy[]) {
     // Refresh cached boss if it became inactive
     if (this.currentBoss && (!this.currentBoss.active || this.currentBoss.hp <= 0)) {
       this.currentBoss = null;
     }
     // Scan for a new boss only when we don't have one cached
     if (!this.currentBoss) {
-      const allGround = this.enemyGroup.getChildren() as Enemy[];
       for (let i = 0; i < allGround.length; i++) {
         const e = allGround[i];
         if (e.active && e.def.isBoss) { this.currentBoss = e; break; }
       }
       if (!this.currentBoss) {
-        const allFliers = this.flyerGroup.getChildren() as Enemy[];
         for (let i = 0; i < allFliers.length; i++) {
           const e = allFliers[i];
           if (e.active && e.def.isBoss) { this.currentBoss = e; break; }
@@ -1666,10 +1667,19 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ─── Healer aura ────────────────────────────────────────────────────────
-  private processHealerAura(delta: number) {
-    const allGround = this.enemyGroup.getChildren() as Enemy[];
+  private processHealerAura(delta: number, allGround: Enemy[], allFliers: Enemy[]) {
+    // Check ground healers
     for (let i = 0; i < allGround.length; i++) {
       const healer = allGround[i];
+      if (!healer.active || healer.def.special !== 'heal_aura') continue;
+      this.enemyGrid.query(healer.x, healer.y, 100, e => {
+        if (e === healer || !e.active) return;
+        e.hp = Math.min(e.maxHp, e.hp + healer.def.specialValue * (delta / 1000));
+      });
+    }
+    // Check flying healers
+    for (let i = 0; i < allFliers.length; i++) {
+      const healer = allFliers[i];
       if (!healer.active || healer.def.special !== 'heal_aura') continue;
       this.enemyGrid.query(healer.x, healer.y, 100, e => {
         if (e === healer || !e.active) return;
@@ -1706,14 +1716,16 @@ export class GameScene extends Phaser.Scene {
     this.weatherSystem.update(delta);
     this.comboSystem.update(delta);
 
+    // Cache enemy arrays once per frame (avoids repeated getChildren() calls)
+    const allGround = this.enemyGroup.getChildren() as Enemy[];
+    const allFliers = this.flyerGroup.getChildren() as Enemy[];
+
     // Rebuild spatial grid once per frame
     this.enemyGrid.clear();
-    const allGround = this.enemyGroup.getChildren() as Enemy[];
     for (let i = 0; i < allGround.length; i++) {
       const e = allGround[i];
       if (e.active) this.enemyGrid.insert(e);
     }
-    const allFliers = this.flyerGroup.getChildren() as Enemy[];
     for (let i = 0; i < allFliers.length; i++) {
       const e = allFliers[i];
       if (e.active) this.enemyGrid.insert(e);
@@ -1722,8 +1734,8 @@ export class GameScene extends Phaser.Scene {
     // Update towers
     this.towerGroup.getChildren().forEach(t => (t as Tower).preUpdate(time, delta));
     this.processAuraTowers();
-    this.processHealerAura(delta);
-    this.updateBossBar();
+    this.processHealerAura(delta, allGround, allFliers);
+    this.updateBossBar(allGround, allFliers);
     this.bottomBar.update();
     this.bottomBar.setWaveInfo(
       this.waveManager.currentWave,
@@ -1731,6 +1743,9 @@ export class GameScene extends Phaser.Scene {
       this.waveManager.countdown,
     );
     this.updateFloatingAbilities();
+
+    // Render all HP bars in a single pass (pooled — 2 Graphics objects total)
+    this.hpBarPool.render(allGround, allFliers);
 
     // Update HUD
     // Win condition: all waves dispatched AND no enemy sprites remain alive.
