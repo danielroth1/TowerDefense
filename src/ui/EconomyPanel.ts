@@ -6,7 +6,7 @@ import type { EconomyManager } from '../systems/EconomyManager';
 import type { EconomySimulation } from '../systems/EconomySimulation';
 
 const PANEL_W = 220;
-const PANEL_H = 340;
+const PANEL_H = 400;
 /** Position to the right of the floating ability buttons (x=12, w=62). */
 const PANEL_X = 84;
 const PANEL_Y = 8;

@@ -598,8 +598,6 @@ export class GameScene extends Phaser.Scene {
     this.economy       = new EconomyManager(this, this._debug ? DEBUG_STARTING_GOLD : undefined);
     this.economySim    = new EconomySimulation(this.economy);
     this.transportSys  = new TransportSystem(this, this.economySim);
-    // Cart sprites are world-space; ignore on the UI camera so they scroll with the main camera
-    if (this.uiCam) this.uiCam.ignore(this.transportSys.cartGroup);
     this.waveManager   = new WaveManager(this, this.enemyGroup, this.flyerGroup, this.mapData.waypoints, this.mapData.spawnPoint);
     this.abilitySystem = new AbilitySystem(this);
     this.synergySystem = new SynergySystem(this);
@@ -782,6 +780,9 @@ export class GameScene extends Phaser.Scene {
     for (const b of this.economyBuildings) {
       this.uiCam.ignore(b);
     }
+
+    // Cart sprites are world-space; ignore on the UI camera so they scroll with the main camera
+    if (this.transportSys) this.uiCam.ignore(this.transportSys.cartGroup);
   }
 
   private setupInput() {

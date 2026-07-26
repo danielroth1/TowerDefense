@@ -74,6 +74,18 @@ export class TransportSystem {
     if (e.type !== 'consumed') return;
     if (!e.resource) return;
 
+    // Warehouse → Market delivery: cart from a warehouse to the market
+    if (e.buildingType === 'market') {
+      const warehouse = this.buildings.find(
+        b => ECO_BUILDING_DEFS[b.buildingType].isStorage,
+      );
+      const market = this.buildings.find(b => b.buildingType === 'market');
+      if (warehouse && market) {
+        this.spawnCart(warehouse, market, e.resource);
+      }
+      return;
+    }
+
     // Find the producer (building that produced this resource)
     const producer = this.findProducer(e.resource);
     // Find the consumer (building that consumed this resource)

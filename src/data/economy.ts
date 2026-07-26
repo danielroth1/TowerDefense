@@ -7,6 +7,7 @@ export type EconomyBuildingType =
   | 'fishery'
   | 'harbor'
   | 'warehouse'
+  | 'market'
   | 'lighthouse';
 
 export type EconomyResource = 'wheat' | 'flour' | 'bread' | 'fish';
@@ -125,7 +126,7 @@ export const ECO_BUILDING_DEFS: Record<EconomyBuildingType, EconomyBuildingDef> 
   bakery: {
     type: 'bakery',
     label: 'Bakery',
-    description: 'Bakes flour into bread and sells it. Needs a road connection.',
+    description: 'Bakes flour into bread. Needs a road connection.',
     baseCost: 160,
     color: 0xe8a850,
     width: 1, height: 1,
@@ -133,10 +134,10 @@ export const ECO_BUILDING_DEFS: Record<EconomyBuildingType, EconomyBuildingDef> 
     produces: 'bread',
     consumes: 'flour',
     baseCycleTime: 10000,
-    goldPerUnit: 15,
+    goldPerUnit: 0, // Bread goes to warehouse → market for gold
     upgrades: [
       { cost: 120, cycleTime: 7000,  label: 'Artisan Oven',  valueMultiplier: 1.0 },
-      { cost: 180, cycleTime: 5000,  label: 'Brick Oven',    valueMultiplier: 1.25 },
+      { cost: 180, cycleTime: 5000,  label: 'Brick Oven',    valueMultiplier: 1.0 },
     ],
     placement: {
       tileType: 'buildable',
@@ -145,7 +146,7 @@ export const ECO_BUILDING_DEFS: Record<EconomyBuildingType, EconomyBuildingDef> 
       requireRoadAdjacent: true,
       straddlesWater: false,
     },
-    isEndpoint: true,
+    isEndpoint: false, // Market is the endpoint now
     isStorage: false,
     isStretchGoal: false,
   },
@@ -234,6 +235,34 @@ export const ECO_BUILDING_DEFS: Record<EconomyBuildingType, EconomyBuildingDef> 
     isStretchGoal: false,
   },
 
+  market: {
+    type: 'market',
+    label: 'Market',
+    description: 'Slowly sells warehouse goods for gold. Needs a road connection.',
+    baseCost: 180,
+    color: 0xe8c864,
+    width: 1, height: 1,
+    textureKey: 'eco_market',
+    produces: null,
+    consumes: null,
+    baseCycleTime: 3000,  // Converts 1 unit every 3s
+    goldPerUnit: 18,
+    upgrades: [
+      { cost: 130, cycleTime: 2200, label: 'Trade Post',  valueMultiplier: 1.0 },
+      { cost: 200, cycleTime: 1500, label: 'Grand Bazaar', valueMultiplier: 1.25 },
+    ],
+    placement: {
+      tileType: 'buildable',
+      requireWaterAdjacent: false,
+      forbidWaterAdjacent: false,
+      requireRoadAdjacent: true,
+      straddlesWater: false,
+    },
+    isEndpoint: true,
+    isStorage: false,
+    isStretchGoal: false,
+  },
+
   lighthouse: {
     type: 'lighthouse',
     label: 'Lighthouse',
@@ -267,7 +296,7 @@ export const ECO_BUILDING_DEFS: Record<EconomyBuildingType, EconomyBuildingDef> 
 
 /** Buildings available for placement (excludes stretch goals). */
 export const ECO_BUILDING_TYPES: EconomyBuildingType[] = [
-  'farm', 'fishery', 'mill', 'bakery', 'harbor', 'warehouse',
+  'farm', 'fishery', 'mill', 'bakery', 'harbor', 'warehouse', 'market',
 ];
 
 // ─── Escalating cost ─────────────────────────────────────────────────────────

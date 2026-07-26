@@ -109,6 +109,7 @@ export class BootScene extends Phaser.Scene {
     this.load.image('eco_fishery',    'assets/tiles/eco_fishery.png');
     this.load.image('eco_harbor',     'assets/tiles/eco_harbor.png');
     this.load.image('eco_warehouse',  'assets/tiles/eco_warehouse.png');
+    this.load.image('eco_market',     'assets/tiles/eco_market.png');
     this.load.image('eco_lighthouse', 'assets/tiles/eco_lighthouse.png');
     this.load.image('eco_cart',       'assets/tiles/eco_cart.png');
   }
@@ -1318,6 +1319,7 @@ export class BootScene extends Phaser.Scene {
     if (!this.aiLoadedTiles.has('eco_fishery'))    this.generateEcoFishery();
     if (!this.aiLoadedTiles.has('eco_harbor'))     this.generateEcoHarbor();
     if (!this.aiLoadedTiles.has('eco_warehouse'))  this.generateEcoWarehouse();
+    if (!this.aiLoadedTiles.has('eco_market'))     this.generateEcoMarket();
     if (!this.aiLoadedTiles.has('eco_lighthouse')) this.generateEcoLighthouse();
     if (!this.aiLoadedTiles.has('eco_cart'))       this.generateEcoCart();
   }
@@ -1516,6 +1518,38 @@ export class BootScene extends Phaser.Scene {
     g.fillRect(S - 4, 10, 2, S - 18);
 
     g.generateTexture('eco_warehouse', S, S);
+    g.destroy();
+  }
+
+  private generateEcoMarket() {
+    const S = TILE_SIZE, g = this.add.graphics();
+    // Cobblestone ground
+    g.fillStyle(0x6a6a50, 1); g.fillRect(0, 0, S, S);
+    // Main building — warm sandstone
+    g.fillStyle(0xd4b870, 1);
+    g.fillRoundedRect(4, 10, S - 8, S - 16, 3);
+    // Domed roof
+    g.fillStyle(0xc49a50, 1);
+    g.fillCircle(S / 2, 10, 10);
+    // Entrance arch
+    g.fillStyle(0x5a3a1a, 1);
+    g.fillRoundedRect(S / 2 - 8, S / 2 + 2, 16, S / 2 - 8, 4);
+    // Coin piles (gold circles near entrance)
+    g.fillStyle(0xffd700, 0.8);
+    g.fillCircle(S / 2 - 14, S - 8, 5);
+    g.fillCircle(S / 2 + 12, S - 6, 4);
+    g.fillCircle(S / 2 - 8, S - 4, 3);
+    // Stall awning (striped)
+    g.fillStyle(0xdd4444, 0.7);
+    g.fillRect(2, 6, S - 16, 6);
+    g.fillStyle(0xeeeeee, 0.7);
+    g.fillRect(8, 6, 4, 6);
+    g.fillRect(18, 6, 4, 6);
+    // Scale icon (justice/trade symbol)
+    g.lineStyle(1.5, 0x886644, 0.8);
+    g.lineBetween(S / 2, 2, S / 2 + 8, -2);
+
+    g.generateTexture('eco_market', S, S);
     g.destroy();
   }
 

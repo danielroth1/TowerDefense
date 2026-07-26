@@ -98,7 +98,7 @@ export class EconomyBuilding extends Phaser.GameObjects.Container {
     }
 
     // Inventory indicator — colored dots below building
-    if (this.inventory > 0 && (this.def.produces || this.def.isStorage)) {
+    if (this.inventory > 0 && (this.def.produces || this.def.isStorage || this.def.isEndpoint)) {
       const dotColors: Record<string, number> = {
         wheat: 0xd4a843, flour: 0xeee8d5, bread: 0xc89a5c, fish: 0x6699cc,
       };

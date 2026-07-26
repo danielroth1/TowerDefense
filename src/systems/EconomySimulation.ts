@@ -106,8 +106,37 @@ export class EconomySimulation {
       }
     }
 
+    // Tick markets: slowly convert inventory to gold
+    this.tickMarkets(delta);
+
     // Try to consume goods: move inventory from producers to consumers
     this.processConsumption();
+  }
+
+  /** Markets convert stored goods to gold over time (tick-based, not instant). */
+  private tickMarkets(delta: number): void {
+    for (const b of this.buildings) {
+      if (!ECO_BUILDING_DEFS[b.buildingType].isEndpoint) continue;
+      if (b.buildingType !== 'market') continue; // Only market is tick-based
+      if (b.inventory <= 0) continue;
+
+      b.cycleTimer += delta;
+      if (b.cycleTimer >= b.cycleTime) {
+        b.cycleTimer -= b.cycleTime;
+        b.inventory--;
+        b.redraw();
+
+        const def = ECO_BUILDING_DEFS[b.buildingType];
+        const gold = Math.floor(def.goldPerUnit * b.valueMultiplier);
+        this.economy.earn(gold);
+        this.emit({
+          type: 'delivered',
+          buildingType: b.buildingType,
+          resource: def.consumes ?? def.produces,
+          amount: gold,
+        });
+      }
+    }
   }
 
   // ─── Consumption / transport ────────────────────────────────────────────
@@ -121,23 +150,22 @@ export class EconomySimulation {
       if (!resource) continue;
 
       const consumerType = CONSUMER_MAP[resource];
-      if (!consumerType) continue;
 
-      // Try warehouse first — find one that has space and either is empty
-      // or already stores this resource type.
-      const warehouse = this.findAvailableWarehouse(resource);
-      if (warehouse) {
-        // Route to warehouse
-        producer.inventory--;
-        warehouse.inventory++;
-        this.warehouseResources.set(warehouse, resource);
-        producer.redraw();
-        warehouse.redraw();
-        this.emit({ type: 'consumed', buildingType: 'warehouse', resource, amount: 1 });
+      // Goods with no consumer (e.g. bread from bakery) go to warehouse → market.
+      if (!consumerType) {
+        const warehouse = this.findAvailableWarehouse(resource);
+        if (warehouse) {
+          producer.inventory--;
+          warehouse.inventory++;
+          this.warehouseResources.set(warehouse, resource);
+          producer.redraw();
+          warehouse.redraw();
+          this.emit({ type: 'consumed', buildingType: 'warehouse', resource, amount: 1 });
+        }
         continue;
       }
 
-      // No warehouse available — deliver directly to consumer
+      // Raw materials: deliver directly to consumer (production chain).
       const consumers = this.buildings.filter(
         b => b.buildingType === consumerType && b.inventory < b.maxInventory,
       );
@@ -175,7 +203,7 @@ export class EconomySimulation {
     return null;
   }
 
-  /** Bulk-deliver goods from full warehouses to their consumers. */
+  /** Bulk-deliver goods from full warehouses to market (if available) or directly to consumer. */
   private processWarehouses(): void {
     for (const warehouse of this.buildings) {
       if (!ECO_BUILDING_DEFS[warehouse.buildingType].isStorage) continue;
@@ -184,52 +212,92 @@ export class EconomySimulation {
       const resource = this.warehouseResources.get(warehouse);
       if (!resource) continue;
 
-      const consumerType = CONSUMER_MAP[resource];
-      if (!consumerType) continue;
-
-      const consumer = this.buildings.find(
-        b => b.buildingType === consumerType && b.inventory < b.maxInventory,
+      // Try market first — market slowly converts goods to gold
+      const market = this.buildings.find(
+        b => b.buildingType === 'market' && b.inventory < b.maxInventory,
       );
-      if (!consumer) continue; // Consumer is full, warehouse waits
 
-      // Bulk deliver: transfer all inventory with 50% bonus
-      const count = warehouse.inventory;
-      const bonusCount = Math.floor(count * (WAREHOUSE_BULK_BONUS - 1));
+      if (market) {
+        // Bulk deliver to market
+        const count = warehouse.inventory;
+        const bonusCount = Math.floor(count * (WAREHOUSE_BULK_BONUS - 1));
 
-      warehouse.inventory = 0;
-      this.warehouseResources.delete(warehouse);
-      warehouse.redraw();
+        warehouse.inventory = 0;
+        this.warehouseResources.delete(warehouse);
+        warehouse.redraw();
 
-      // Deliver base units to consumer
-      consumer.inventory += Math.min(count, consumer.maxInventory - consumer.inventory + count);
-      // Clamp to max
-      if (consumer.inventory > consumer.maxInventory) {
-        consumer.inventory = consumer.maxInventory;
+        // Transfer to market (with bonus units)
+        const space = market.maxInventory - market.inventory;
+        const transfer = Math.min(count + bonusCount, space);
+        market.inventory += transfer;
+        market.redraw();
+
+        this.emit({ type: 'consumed', buildingType: 'market', resource, amount: transfer });
+        continue;
       }
-      consumer.redraw();
 
-      this.emit({ type: 'consumed', buildingType: consumer.buildingType, resource, amount: count });
+      // No market — try direct consumer (legacy path), else fallback gold.
+      let delivered = false;
+      const consumerType = CONSUMER_MAP[resource];
+      if (consumerType) {
+        const consumer = this.buildings.find(
+          b => b.buildingType === consumerType && b.inventory < b.maxInventory,
+        );
+        if (consumer) {
+          const count = warehouse.inventory;
+          const bonusCount = Math.floor(count * (WAREHOUSE_BULK_BONUS - 1));
 
-      // If consumer is an endpoint, deliver bonus gold too
-      const consumerDef = ECO_BUILDING_DEFS[consumer.buildingType];
-      if (consumerDef.isEndpoint && consumerDef.goldPerUnit > 0) {
-        // Deliver base gold for each unit
-        for (let i = 0; i < count; i++) {
-          if (consumer.inventory > 0) {
-            this.deliverToEndpoint(consumer);
+          warehouse.inventory = 0;
+          this.warehouseResources.delete(warehouse);
+          warehouse.redraw();
+
+          consumer.inventory += Math.min(count, consumer.maxInventory - consumer.inventory + count);
+          if (consumer.inventory > consumer.maxInventory) {
+            consumer.inventory = consumer.maxInventory;
           }
+          consumer.redraw();
+
+          this.emit({ type: 'consumed', buildingType: consumer.buildingType, resource, amount: count });
+
+          const consumerDef = ECO_BUILDING_DEFS[consumer.buildingType];
+          if (consumerDef.isEndpoint && consumerDef.goldPerUnit > 0) {
+            for (let i = 0; i < count; i++) {
+              if (consumer.inventory > 0) {
+                this.deliverToEndpoint(consumer);
+              }
+            }
+            if (bonusCount > 0) {
+              const bonusGold = consumerDef.goldPerUnit * consumer.valueMultiplier * bonusCount;
+              this.economy.earn(Math.floor(bonusGold));
+              this.emit({
+                type: 'delivered',
+                buildingType: consumer.buildingType,
+                resource,
+                amount: Math.floor(bonusGold),
+              });
+            }
+          }
+          delivered = true;
         }
-        // Bonus gold from warehouse bulk delivery
-        if (bonusCount > 0) {
-          const bonusGold = consumerDef.goldPerUnit * consumer.valueMultiplier * bonusCount;
-          this.economy.earn(Math.floor(bonusGold));
-          this.emit({
-            type: 'delivered',
-            buildingType: consumer.buildingType,
-            resource,
-            amount: Math.floor(bonusGold),
-          });
-        }
+      }
+
+      if (!delivered) {
+        // No market and no available consumer — sell directly for gold
+        const count = warehouse.inventory;
+        const bonusCount = Math.floor(count * (WAREHOUSE_BULK_BONUS - 1));
+        const totalGold = 12 * (count + bonusCount);
+
+        warehouse.inventory = 0;
+        this.warehouseResources.delete(warehouse);
+        warehouse.redraw();
+
+        this.economy.earn(totalGold);
+        this.emit({
+          type: 'delivered',
+          buildingType: 'warehouse',
+          resource,
+          amount: totalGold,
+        });
       }
     }
   }
