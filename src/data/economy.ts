@@ -10,7 +10,7 @@ export type EconomyBuildingType =
   | 'market'
   | 'lighthouse';
 
-export type EconomyResource = 'wheat' | 'flour' | 'bread' | 'fish';
+export type EconomyResource = 'wheat' | 'flour' | 'bread' | 'fish' | 'goods';
 
 // ─── Upgrade Tier ────────────────────────────────────────────────────────────
 
@@ -182,18 +182,18 @@ export const ECO_BUILDING_DEFS: Record<EconomyBuildingType, EconomyBuildingDef> 
   harbor: {
     type: 'harbor',
     label: 'Harbor',
-    description: 'Sells fish and attracts trade ships. Straddles water and grass.',
+    description: 'Processes fish into trade goods. Straddles water and grass.',
     baseCost: 200,
     color: 0x8b7355,
     width: 2, height: 1,
     textureKey: 'eco_harbor',
-    produces: null,
+    produces: 'goods',
     consumes: 'fish',
-    baseCycleTime: 0, // Passive — converts fish as they arrive
-    goldPerUnit: 10,
+    baseCycleTime: 8000, // Processes fish into goods
+    goldPerUnit: 0, // Value comes from market via warehouse
     upgrades: [
-      { cost: 150, cycleTime: 0, label: 'Trade Dock',     valueMultiplier: 1.5 },
-      { cost: 250, cycleTime: 0, label: 'Grand Harbor',   valueMultiplier: 2.0 },
+      { cost: 150, cycleTime: 5500, label: 'Trade Dock',     valueMultiplier: 1.0 },
+      { cost: 250, cycleTime: 4000, label: 'Grand Harbor',   valueMultiplier: 1.0 },
     ],
     placement: {
       tileType: 'buildable',
@@ -202,7 +202,7 @@ export const ECO_BUILDING_DEFS: Record<EconomyBuildingType, EconomyBuildingDef> 
       requireRoadAdjacent: false,
       straddlesWater: true,
     },
-    isEndpoint: true,
+    isEndpoint: false,
     isStorage: false,
     isStretchGoal: false,
   },
@@ -294,9 +294,9 @@ export const ECO_BUILDING_DEFS: Record<EconomyBuildingType, EconomyBuildingDef> 
 
 // ─── Helper: ordered list for UI panels ──────────────────────────────────────
 
-/** Buildings available for placement (excludes stretch goals). */
+/** Buildings available for placement (excludes stretch goals and markets which are decoration-only). */
 export const ECO_BUILDING_TYPES: EconomyBuildingType[] = [
-  'farm', 'fishery', 'mill', 'bakery', 'harbor', 'warehouse', 'market',
+  'farm', 'fishery', 'mill', 'bakery', 'harbor', 'warehouse',
 ];
 
 // ─── Escalating cost ─────────────────────────────────────────────────────────

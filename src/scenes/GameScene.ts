@@ -22,7 +22,7 @@ import { ComboSystem } from '../systems/ComboSystem';
 import { HUD } from '../ui/HUD';
 import { BottomBar } from '../ui/BottomBar';
 import { SoundSystem } from '../systems/SoundSystem';
-import { generateCityDecorations } from '../systems/CityDecorator';
+import { generateCityDecorations, type DecorationPlacement } from '../systems/CityDecorator';
 import { generateCityRoads, drawCityRoads } from '../systems/CityRoadNetwork';
 import { PerfTest } from '../systems/PerfTest';
 import { EnemyGrid } from '../systems/EnemyGrid';
@@ -122,6 +122,10 @@ export class GameScene extends Phaser.Scene {
   // Cells occupied by city decorations — blocks tower placement
   private decorationBlockedCells: Set<string> = new Set();
 
+  /** Stored decorative placements for road regeneration (avoid re-running
+   *  CityDecorator on a mutated grid after economy building placement). */
+  private decoPlacements: DecorationPlacement[] = [];
+
   // Interaction state
   private placingTower: TowerType | null = null;
   private placingBarricade: boolean = false;
@@ -211,6 +215,12 @@ export class GameScene extends Phaser.Scene {
 
     this.setupPhysics();
     this.buildMap();
+
+    // Create economy systems early — markets from city decorations need them
+    this.economy    = new EconomyManager(this, this._debug ? DEBUG_STARTING_GOLD : undefined);
+    this.economySim = new EconomySimulation(this.economy);
+    this.transportSys = new TransportSystem(this, this.economySim);
+
     this.placeCityDecorations();
     this.createGroups();
     this.createHero();
@@ -496,25 +506,29 @@ export class GameScene extends Phaser.Scene {
   private placeCityDecorations(): void {
     const result = generateCityDecorations(this.mapData.grid, this.mapData.seed);
 
+    // Store placements for later road regeneration (avoids re-running
+    // CityDecorator on a grid mutated by economy building placement).
+    this.decoPlacements = result.placements;
+
     for (const p of result.placements) {
       const px = (p.col + p.w / 2) * TILE_SIZE;
       const py = (p.row + p.h / 2) * TILE_SIZE;
 
       const rng = createPRNG(this.mapData.seed + p.row * GRID_COLS + p.col);
       const sizeVar = 0.95 + rng() * 0.10;
-      let displayW = p.w * TILE_SIZE * sizeVar;
-      let displayH = p.h * TILE_SIZE * sizeVar;
-      let rotation = (rng() - 0.5) * 0.06;
+      const displayW = p.w * TILE_SIZE * sizeVar;
+      const displayH = p.h * TILE_SIZE * sizeVar;
+      const rotation = (rng() - 0.5) * 0.06;
 
-      // Harbor texture is 2:1 (land on left, water on right).
-      // For vertical placements, display at native 2:1 size before rotating.
-      // The placement carries the exact rotation so land faces the grass cell.
-      if (p.textureKey === 'deco_city_harbor') {
-        if (p.w < p.h) {
-          displayW = p.h * TILE_SIZE * sizeVar;
-          displayH = p.w * TILE_SIZE * sizeVar;
-        }
-        if (p.rotation !== undefined) rotation += p.rotation;
+      if (p.isEcoMarket) {
+        // Create an invisible economy building for the simulation
+        // (the sprite above handles visuals). Markets are not player-buildable
+        // — they only exist as pre-placed decorations.
+        const market = new EconomyBuilding(this, p.col, p.row, 'market');
+        market.setAlpha(0); // Hidden — the decorative sprite is the visual
+        this.economyBuildings.push(market);
+        this.economySim.addBuilding(market);
+        if (this.uiCam) this.uiCam.ignore(market);
       }
 
       const sprite = this.add.image(px, py, p.textureKey)
@@ -528,6 +542,9 @@ export class GameScene extends Phaser.Scene {
     // Track decoration cells so tower placement is blocked without
     // changing the tile type (keeps grass rendering underneath).
     this.decorationBlockedCells = result.blockedCells;
+
+    // Set transport system buildings now that markets are created
+    this.transportSys.setBuildings(this.economyBuildings);
 
     // Generate decorative roads between buildings
     if (result.placements.length >= 2) {
@@ -595,9 +612,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private createSystems() {
-    this.economy       = new EconomyManager(this, this._debug ? DEBUG_STARTING_GOLD : undefined);
-    this.economySim    = new EconomySimulation(this.economy);
-    this.transportSys  = new TransportSystem(this, this.economySim);
+    // economy, economySim, transportSys are created before placeCityDecorations
     this.waveManager   = new WaveManager(this, this.enemyGroup, this.flyerGroup, this.mapData.waypoints, this.mapData.spawnPoint);
     this.abilitySystem = new AbilitySystem(this);
     this.synergySystem = new SynergySystem(this);
@@ -1298,12 +1313,31 @@ export class GameScene extends Phaser.Scene {
     // Ignore on UI camera so it doesn't render twice (once on map, once on UI overlay)
     if (this.uiCam) this.uiCam.ignore(building);
 
-    // Mark cells as occupied
     const def = ECO_BUILDING_DEFS[type];
-    for (let dr = 0; dr < def.height; dr++) {
-      for (let dc = 0; dc < def.width; dc++) {
-        this.mapData.grid[row + dr][col + dc].type = 'path'; // unbuildable
-        this.refreshTileSprite(row + dr, col + dc);
+
+    if (def.placement.straddlesWater) {
+      // Harbor: rotate 180°, only mark the grass cell as occupied.
+      // The water cell stays 'ground' so the background water tile is preserved.
+      building.setRotation(Math.PI);
+
+      // Determine which cell is grass and mark only that one
+      const tile1 = this.mapData.grid[row][col];
+      const tile2 = this.mapData.grid[row][col + 1];
+      if (tile1.type === 'buildable') {
+        this.mapData.grid[row][col].type = 'path';
+        this.refreshTileSprite(row, col);
+      }
+      if (tile2.type === 'buildable') {
+        this.mapData.grid[row][col + 1].type = 'path';
+        this.refreshTileSprite(row, col + 1);
+      }
+    } else {
+      // Mark all cells as occupied
+      for (let dr = 0; dr < def.height; dr++) {
+        for (let dc = 0; dc < def.width; dc++) {
+          this.mapData.grid[row + dr][col + dc].type = 'path'; // unbuildable
+          this.refreshTileSprite(row + dr, col + dc);
+        }
       }
     }
 
@@ -1312,36 +1346,34 @@ export class GameScene extends Phaser.Scene {
     this.tweens.add({ targets: building, scaleX: 1, scaleY: 1, duration: 200, ease: 'Back.easeOut' });
 
     // Regenerate decorative roads to include the new economy building.
-    // Collect all building positions (decorative + economy) and re-run road generation.
     this.regenerateAllRoads();
   }
 
-  /** Destroy existing road graphics and regenerate from all buildings. */
+  /** Destroy existing road graphics and regenerate from all buildings.
+   *  Uses the stored decoPlacements from initial map creation (not re-running
+   *  CityDecorator, which would produce wrong results on the mutated grid). */
   private regenerateAllRoads(): void {
     // Collect economy building positions as DecorationPlacement-compatible objects
-    const ecoPlacements: Array<{ row: number; col: number; w: number; h: number }> =
+    const ecoPlacements: DecorationPlacement[] =
       this.economyBuildings.map(b => ({
         row: b.gridRow, col: b.gridCol,
         w: b.def.width, h: b.def.height,
+        textureKey: b.def.textureKey,
+        depth: 0.3,
       }));
 
-    // Re-fetch decorative placements (CityDecorator result is not stored,
-    // but blockedCells are; re-run the generator to get placements back)
-    const decoResult = generateCityDecorations(this.mapData.grid, this.mapData.seed);
-
-    // Merge all placements for road generation
-    const allPlacements: Array<{ row: number; col: number; w: number; h: number }> = [
-      ...decoResult.placements,
+    // Merge stored decorative placements with economy placements
+    const allPlacements: DecorationPlacement[] = [
+      ...this.decoPlacements,
       ...ecoPlacements,
     ];
 
-    const allBlocked = new Set([...decoResult.blockedCells]);
+    const allBlocked = new Set(this.decorationBlockedCells);
 
     if (allPlacements.length >= 2) {
-      // Cast to any — generateCityRoads only uses row/col/w/h from placements
       const roadResult = generateCityRoads(
         this.mapData.grid,
-        allPlacements as any,
+        allPlacements,
         allBlocked,
         this.mapData.seed,
       );

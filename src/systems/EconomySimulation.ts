@@ -26,7 +26,11 @@ export interface EconomyEvent {
 
 // ─── Production chain graph ─────────────────────────────────────────────────
 
-/** Which building consumes which resource. */
+/**
+ * Which building consumes which resource.
+ * 'goods' has no direct consumer — they go to warehouse, which
+ * bulk-delivers to markets.
+ */
 const CONSUMER_MAP: Partial<Record<EconomyResource, EconomyBuildingType>> = {
   wheat: 'mill',
   flour: 'bakery',

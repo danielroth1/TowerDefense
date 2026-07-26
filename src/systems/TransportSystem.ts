@@ -22,6 +22,7 @@ const CARGO_TINTS: Record<EconomyResource, number> = {
   flour: 0xeee8d5,
   bread: 0xc89a5c,
   fish:  0x6699cc,
+  goods: 0xc8a050,
 };
 
 // ─── Cart entity ────────────────────────────────────────────────────────────
@@ -103,6 +104,7 @@ export class TransportSystem {
       flour: 'bakery',
       fish:  'harbor',
       bread: null!, // endpoint, no further consumer
+      goods: null!, // goes to warehouse → market
     };
     return map[resource] ?? null;
   }

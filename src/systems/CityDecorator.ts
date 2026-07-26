@@ -60,6 +60,8 @@ export interface DecorationPlacement {
   depth: number;
   /** Additional rotation in radians (applied on top of random jitter). */
   rotation?: number;
+  /** If true, this placement represents an economy market (not just decorative). */
+  isEcoMarket?: boolean;
 }
 
 export interface CityDecorResult {
@@ -75,15 +77,8 @@ const CITY_GROUPS: DecorationGroupDef[] = [
     id: 'market',
     label: 'Market Square',
     w: 1, h: 1,
-    textureKey: 'deco_city_market',
+    textureKey: 'eco_market',
     rarity: CITY_PARAMS.marketRarity,
-  },
-  {
-    id: 'harbor',
-    label: 'Harbor Pier',
-    w: 2, h: 1,
-    textureKey: 'deco_city_harbor',
-    rarity: CITY_PARAMS.harborRarity,
   },
   // ── Solo building groups (1×1) ────────────────────────────────────────
   {
@@ -123,7 +118,6 @@ const CITY_GROUPS: DecorationGroupDef[] = [
 // ─── Depth constants ────────────────────────────────────────────────────────
 
 const DEPTH_BUILDING = 0.25;
-const DEPTH_HARBOR = 0.22;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -145,23 +139,6 @@ function hasWaterNeighbor(grid: GridTile[][], row: number, col: number): boolean
   return false;
 }
 
-/** Return the direction (dr, dc) of an adjacent water cell, or null. */
-function adjacentWaterDir(
-  grid: GridTile[][], row: number, col: number,
-): { dr: number; dc: number } | null {
-  const dirs: { dr: number; dc: number }[] = [
-    { dr: -1, dc: 0 }, { dr: 1, dc: 0 },
-    { dr: 0, dc: -1 }, { dr: 0, dc: 1 },
-  ];
-  const shuffled = [...dirs].sort(() => Math.random() - 0.5);
-  for (const d of shuffled) {
-    const nr = row + d.dr, nc = col + d.dc;
-    if (nr >= 0 && nr < GRID_ROWS && nc >= 0 && nc < GRID_COLS && cellIsWater(grid[nr][nc])) {
-      return d;
-    }
-  }
-  return null;
-}
 
 /** Pick a decoration group using weighted random selection from CITY_GROUPS.
  *  Only groups with a `weight` field are eligible, regardless of their w/h size. */
@@ -198,9 +175,7 @@ export function generateCityDecorations(
   // ── Phase A: Place multi-cell groups ──────────────────────────────────
 
   for (const group of CITY_GROUPS) {
-    if (group.id === 'harbor') {
-      placeHarbors(group, grid, used, rng, placements, markUsed);
-    } else if (group.id === 'market') {
+    if (group.id === 'market') {
       placeMarkets(group, grid, used, rng, placements, markUsed);
     }
   }
@@ -240,70 +215,7 @@ export function generateCityDecorations(
   return { placements, blockedCells };
 }
 
-// ─── Harbor placement (straddles grass + water) ─────────────────────────────
-
-function placeHarbors(
-  group: DecorationGroupDef,
-  grid: GridTile[][],
-  used: boolean[][],
-  rng: () => number,
-  placements: DecorationPlacement[],
-  markUsed: (r: number, c: number) => void,
-) {
-  const candidates: { grassRow: number; grassCol: number; waterRow: number; waterCol: number }[] = [];
-
-  for (let r = 0; r < GRID_ROWS; r++) {
-    for (let c = 0; c < GRID_COLS; c++) {
-      if (!cellIsBuildableOnly(grid[r][c])) continue;
-      if (used[r][c]) continue;
-
-      const dir = adjacentWaterDir(grid, r, c);
-      if (!dir) continue;
-
-      const wr = r + dir.dr, wc = c + dir.dc;
-      if (!cellIsWater(grid[wr][wc])) continue;
-      if (used[wr][wc]) continue;
-
-      candidates.push({ grassRow: r, grassCol: c, waterRow: wr, waterCol: wc });
-    }
-  }
-
-  const maxPlace = Math.max(1, Math.floor(candidates.length * 0.2));
-  for (let i = 0; i < maxPlace; i++) {
-    if (candidates.length === 0) break;
-    const idx = Math.floor(rng() * candidates.length);
-    const cand = candidates.splice(idx, 1)[0];
-    if (rng() > group.rarity) continue;
-
-    const row = Math.min(cand.grassRow, cand.waterRow);
-    const col = Math.min(cand.grassCol, cand.waterCol);
-
-    // Use group.w/group.h: swap dimensions for vertical placement
-    const isVertical = cand.grassCol === cand.waterCol;
-    const spanW = isVertical ? group.h : group.w;
-    const spanH = isVertical ? group.w : group.h;
-
-    // Compute rotation: texture is 2:1 with land on right, water on left.
-    // Rotate so the land side faces the grass cell.
-    let rot = 0;
-    if (cand.grassRow === cand.waterRow) {
-      // Horizontal: same row
-      if (cand.grassCol < cand.waterCol) rot = Math.PI;  // grass on left → flip 180°
-    } else {
-      // Vertical: same column
-      rot = cand.grassRow < cand.waterRow ? -Math.PI / 2 : Math.PI / 2;
-    }
-
-    placements.push({ row, col, w: spanW, h: spanH, textureKey: group.textureKey, depth: DEPTH_HARBOR, rotation: rot });
-    for (let dr = 0; dr < spanH; dr++) {
-      for (let dc = 0; dc < spanW; dc++) {
-        markUsed(row + dr, col + dc);
-      }
-    }
-  }
-}
-
-// ─── Market placement (2×2 + optional surrounding houses) ───────────────────
+// ─── Market placement (1×1 + optional surrounding houses) ───────────────────
 
 function placeMarkets(
   group: DecorationGroupDef,
@@ -337,7 +249,7 @@ function placeMarkets(
     const { row, col } = candidates.splice(idx, 1)[0];
     if (rng() > group.rarity) continue;
 
-    placements.push({ row, col, w: gw, h: gh, textureKey: group.textureKey, depth: DEPTH_BUILDING });
+    placements.push({ row, col, w: gw, h: gh, textureKey: group.textureKey, depth: DEPTH_BUILDING, isEcoMarket: true });
     for (let dr = 0; dr < gh; dr++) {
       for (let dc = 0; dc < gw; dc++) {
         markUsed(row + dr, col + dc);
