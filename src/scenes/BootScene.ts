@@ -31,6 +31,27 @@ export class BootScene extends Phaser.Scene {
       }
     });
 
+    // ── Boot-loop kick: If animation frames don't fire (e.g. headless
+    // or slow environments), manually drain the Loader and process scene
+    // transitions on a timer so the game never stalls. ──────────────────
+    const kickBoot = () => {
+      const ld = this.load;
+      const sm = this.sys.game.scene;
+      // 1) Keep the Loader moving
+      if (ld.state === 1 && ld.list.size > 0 && ld.inflight.size < ld.maxParallelDownloads) {
+        ld.update();
+      }
+      // 2) Run a scene step so the Loader's update listener fires too
+      this.sys.step(performance.now(), 16);
+      // 3) Process any queued scene transitions
+      sm.processQueue();
+      // Keep kicking until Loader is done AND the next scene is running
+      if (ld.state !== 3 || sm.isProcessing || sm.getScene('MenuScene')?.sys.settings.status !== 5) {
+        setTimeout(kickBoot, 100);
+      }
+    };
+    setTimeout(kickBoot, 250);
+
     // Base terrain tiles
     this.load.image('tile_water',    'assets/tiles/tile_water.png');
     this.load.image('tile_grass',    'assets/tiles/tile_grass.png');
@@ -74,11 +95,18 @@ export class BootScene extends Phaser.Scene {
     this.load.image('deco_city_house_01', 'assets/tiles/deco_city_house_01.png');
     this.load.image('deco_city_house_02', 'assets/tiles/deco_city_house_02.png');
     this.load.image('deco_city_tower',    'assets/tiles/deco_city_tower.png');
+
+    // ── Ability icons (AI-generated, optional — procedural fallback in create())
+    this.load.image('ability_freeze',           'assets/tiles/ability_freeze.png');
+    this.load.image('ability_meteor',           'assets/tiles/ability_meteor.png');
+    this.load.image('ability_lightning_storm',  'assets/tiles/ability_lightning_storm.png');
+    this.load.image('ability_heal_aura',        'assets/tiles/ability_heal_aura.png');
   }
 
   create() {
     this.fillMissingTileTextures();
     this.generateUITileTextures();
+    this.generateAbilityIcons();
 
     // Detect which terrain keys have complete Wang tile sets (all 16 loaded)
     this.detectWangTileSets();
@@ -98,6 +126,7 @@ export class BootScene extends Phaser.Scene {
     this.generateParticleTextures();
     this.generateCityDecorTextures();
     this.generateUITextures();
+    this.generateAbilityIcons();
     this.registerAnimations();
 
     // Share AI tile keys + Wang tile availability so GameScene can use them
@@ -1365,6 +1394,119 @@ export class BootScene extends Phaser.Scene {
       frameRate: 12,
       repeat: 0,
     });
+  }
+
+  // ─── Ability Icons ────────────────────────────────────────────────────────
+  /**
+   * Generate procedural ability icon textures for any abilities whose AI
+   * texture did not load from disk.
+   */
+  private generateAbilityIcons() {
+    if (!this.textures.exists('ability_freeze'))           this.generateProceduralAbilityIcon('freeze');
+    if (!this.textures.exists('ability_meteor'))           this.generateProceduralAbilityIcon('meteor');
+    if (!this.textures.exists('ability_lightning_storm'))  this.generateProceduralAbilityIcon('lightning_storm');
+    if (!this.textures.exists('ability_heal_aura'))        this.generateProceduralAbilityIcon('heal_aura');
+  }
+
+  private generateProceduralAbilityIcon(type: string) {
+    const g = this.add.graphics();
+    const S = 128; // icon size (downscaled at render time)
+    const cx = S / 2;
+    const cy = S / 2;
+    const r = S * 0.38;
+
+    switch (type) {
+      case 'freeze': {
+        // Snowflake — 6 arms with branches
+        g.fillStyle(0x0a1a3a, 1);
+        g.fillCircle(cx, cy, r + 4);
+        g.lineStyle(3, 0x99ddff, 0.9);
+        for (let a = 0; a < 6; a++) {
+          const angle = (a * Math.PI) / 3;
+          const ax = cx + Math.cos(angle) * r;
+          const ay = cy + Math.sin(angle) * r;
+          g.lineBetween(cx, cy, ax, ay);
+          // Side branches
+          const mx = cx + Math.cos(angle) * r * 0.55;
+          const my = cy + Math.sin(angle) * r * 0.55;
+          const branchLen = r * 0.28;
+          for (const side of [-1, 1]) {
+            g.lineBetween(mx, my,
+              mx + Math.cos(angle + side * 0.7) * branchLen,
+              my + Math.sin(angle + side * 0.7) * branchLen);
+          }
+        }
+        g.fillStyle(0xccffff, 1);
+        g.fillCircle(cx, cy, 4);
+        break;
+      }
+      case 'meteor': {
+        // Meteor — fiery triangle with core
+        g.fillStyle(0x2a0800, 1);
+        g.fillCircle(cx, cy, r + 4);
+        // Trail triangle
+        const ax = Math.PI * 0.75;
+        g.fillStyle(0xff5500, 0.9);
+        g.fillTriangle(
+          cx + Math.cos(ax) * r * 1.3, cy + Math.sin(ax) * r * 1.3,
+          cx + Math.cos(ax + 2.6) * r * 0.5, cy + Math.sin(ax + 2.6) * r * 0.5,
+          cx + Math.cos(ax - 2.6) * r * 0.5, cy + Math.sin(ax - 2.6) * r * 0.5,
+        );
+        // Flame core
+        g.fillStyle(0xffcc44, 0.9);
+        g.fillCircle(cx, cy, r * 0.5);
+        // Hot spot
+        g.fillStyle(0xffffff, 0.6);
+        g.fillCircle(cx - r * 0.12, cy - r * 0.12, r * 0.18);
+        break;
+      }
+      case 'lightning_storm': {
+        // Lightning bolt — zigzag shape
+        g.fillStyle(0x160a28, 1);
+        g.fillCircle(cx, cy, r + 4);
+        g.fillStyle(0xffff00, 0.9);
+        const pts = [
+          { x: cx + r * 0.1, y: cy - r },
+          { x: cx - r * 0.05, y: cy - r * 0.1 },
+          { x: cx + r * 0.08, y: cy - r * 0.1 },
+          { x: cx - r * 0.12, y: cy + r },
+          { x: cx + r * 0.03, y: cy + r * 0.08 },
+          { x: cx - r * 0.08, y: cy + r * 0.08 },
+        ];
+        g.fillPoints(pts, true);
+        // Bright tip
+        g.fillStyle(0xffffff, 0.5);
+        g.fillTriangle(
+          cx + r * 0.1, cy - r,
+          cx - r * 0.05, cy - r * 0.1,
+          cx + r * 0.03, cy - r * 0.2,
+        );
+        break;
+      }
+      case 'heal_aura': {
+        // Temporal Rift — clock/rift with cross motif
+        g.fillStyle(0x0a1a0a, 1);
+        g.fillCircle(cx, cy, r + 4);
+        // Outer ring
+        g.lineStyle(3, 0xaa44ff, 0.7);
+        g.strokeCircle(cx, cy, r);
+        // Cross (X shape)
+        g.lineStyle(3, 0x44ff88, 0.7);
+        g.lineBetween(cx - r * 0.65, cy - r * 0.65, cx + r * 0.65, cy + r * 0.65);
+        g.lineBetween(cx + r * 0.65, cy - r * 0.65, cx - r * 0.65, cy + r * 0.65);
+        // Center glow
+        g.fillStyle(0xaa44ff, 0.35);
+        g.fillCircle(cx, cy, r * 0.45);
+        // Clock hand
+        g.lineStyle(3, 0xffffff, 0.85);
+        g.lineBetween(cx, cy, cx + r * 0.45, cy - r * 0.28);
+        g.lineBetween(cx, cy, cx, cy + r * 0.52);
+        break;
+      }
+    }
+
+    g.generateTexture(`ability_${type}`, S, S);
+    g.destroy();
   }
 
   // ─── Shape helpers ────────────────────────────────────────────────────────

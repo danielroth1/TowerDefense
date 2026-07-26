@@ -140,7 +140,7 @@ export class GameScene extends Phaser.Scene {
   // Floating ability buttons
   private abilityFloating: Map<AbilityType, {
     bg: Phaser.GameObjects.Graphics;
-    icon: Phaser.GameObjects.Graphics;
+    icon: Phaser.GameObjects.Image;
     cdOvl: Phaser.GameObjects.Graphics;
     cdTxt: Phaser.GameObjects.Text;
     cost: Phaser.GameObjects.Text;
@@ -1355,7 +1355,6 @@ export class GameScene extends Phaser.Scene {
       if (!btn) return;
       const cx = startX + btns / 2;
       const cy = startY + i * (btns + gap) + btns / 2;
-      const r  = Math.round(btns * 0.235);
       const fillColor   = ABILITY_FILL[def.type]  ?? 0x1a2a3a;
       const borderColor = ABILITY_BORDER[def.type] ?? def.color;
 
@@ -1365,15 +1364,15 @@ export class GameScene extends Phaser.Scene {
       btn.cost.setPosition(cx, cy + btns / 2 + 5)
         .setStyle({ fontSize: Math.max(9, Math.round(btns * 0.195)) + 'px' });
 
-      // Redraw button background
+      // Redraw button background + icon
       btn.bg.clear();
       btn.bg.fillStyle(fillColor, 0.92);
       btn.bg.fillRoundedRect(cx - btns / 2, cy - btns / 2, btns, btns, 6);
       btn.bg.lineStyle(1, borderColor, 0.55);
       btn.bg.strokeRoundedRect(cx - btns / 2, cy - btns / 2, btns, btns, 6);
 
-      btn.icon.clear();
-      this.drawAbilityFloatingIcon(btn.icon, cx, cy, def.color, def.type, r);
+      const iconSize = Math.round(btns * 0.55);
+      btn.icon.setPosition(cx, cy).setDisplaySize(iconSize, iconSize);
     });
   }
 
@@ -1444,7 +1443,8 @@ export class GameScene extends Phaser.Scene {
       const cy = this._abilityStartY + i * (this._abilityBtnSize + this._abilityGap) + this._abilityBtnSize / 2;
 
       const bg    = this.add.graphics().setScrollFactor(0).setDepth(D);
-      const icon  = this.add.graphics().setScrollFactor(0).setDepth(D + 1);
+      const icon  = this.add.image(cx, cy, `ability_${def.type}`)
+        .setScrollFactor(0).setDepth(D + 1);
       const cdOvl = this.add.graphics().setScrollFactor(0).setDepth(D + 2);
       const cdTxt = this.add.text(cx, cy, '', {
         fontSize: '20px', fontFamily: 'monospace', color: '#ffffff', align: 'center',
@@ -1467,8 +1467,8 @@ export class GameScene extends Phaser.Scene {
         bg.fillRoundedRect(bcx - btns / 2, bcy - btns / 2, btns, btns, 6);
         bg.lineStyle(selected ? 2 : 1, bdr, selected ? 1.0 : 0.55);
         bg.strokeRoundedRect(bcx - btns / 2, bcy - btns / 2, btns, btns, 6);
-        icon.clear();
-        this.drawAbilityFloatingIcon(icon, bcx, bcy, def.color, def.type, Math.round(btns * 0.235));
+        const iconSz = Math.round(btns * 0.55);
+        icon.setPosition(bcx, bcy).setDisplaySize(iconSz, iconSz);
       };
 
       drawBtn(false, false);
@@ -1499,8 +1499,8 @@ export class GameScene extends Phaser.Scene {
         btn.bg.fillRoundedRect(bcx - btns / 2, bcy - btns / 2, btns, btns, 6);
         btn.bg.lineStyle(isSelected ? 2 : 1, borderColor, isSelected ? 1.0 : 0.55);
         btn.bg.strokeRoundedRect(bcx - btns / 2, bcy - btns / 2, btns, btns, 6);
-        btn.icon.clear();
-        this.drawAbilityFloatingIcon(btn.icon, bcx, bcy, def.color, def.type, Math.round(btns * 0.235));
+        const iSz = Math.round(btns * 0.55);
+        btn.icon.setPosition(bcx, bcy).setDisplaySize(iSz, iSz);
       });
     });
   }
@@ -1519,60 +1519,7 @@ export class GameScene extends Phaser.Scene {
     return false;
   }
 
-  /** Draw the icon symbol for a floating ability button (copied from BottomBar). */
-  private drawAbilityFloatingIcon(g: Phaser.GameObjects.Graphics, cx: number, cy: number, color: number, type: AbilityType, r: number) {
-    g.fillStyle(color, 0.9);
-    g.lineStyle(1.5, 0xffffff, 0.4);
-    switch (type) {
-      case 'freeze': {
-        for (let a = 0; a < 6; a++) {
-          const angle = (a * Math.PI) / 3;
-          g.lineBetween(cx, cy, cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
-          const mx = cx + Math.cos(angle) * r * 0.6;
-          const my = cy + Math.sin(angle) * r * 0.6;
-          g.lineBetween(mx, my, mx + Math.cos(angle + 1) * r * 0.3, my + Math.sin(angle + 1) * r * 0.3);
-        }
-        g.fillCircle(cx, cy, 3);
-        break;
-      }
-      case 'meteor': {
-        const ax = Math.PI * 0.75;
-        g.fillTriangle(
-          cx + Math.cos(ax) * r * 1.4, cy + Math.sin(ax) * r * 1.4,
-          cx + Math.cos(ax + 2.4) * r * 0.5, cy + Math.sin(ax + 2.4) * r * 0.5,
-          cx + Math.cos(ax - 2.4) * r * 0.5, cy + Math.sin(ax - 2.4) * r * 0.5,
-        );
-        g.fillStyle(0xffcc44, 0.9);
-        g.fillCircle(cx, cy, r * 0.55);
-        g.fillStyle(0xffffff, 0.5);
-        g.fillCircle(cx - 3, cy - 3, r * 0.2);
-        break;
-      }
-      case 'lightning_storm': {
-        const pts = [
-          { x: cx + 4, y: cy - r }, { x: cx - 2, y: cy - 3 },
-          { x: cx + 3, y: cy - 3 }, { x: cx - 5, y: cy + r },
-          { x: cx + 1, y: cy + 2 }, { x: cx - 3, y: cy + 2 },
-        ];
-        g.fillPoints(pts, true);
-        g.fillStyle(0xffffff, 0.4);
-        g.fillTriangle(cx + 4, cy - r, cx - 2, cy - 3, cx + 1, cy - 4);
-        break;
-      }
-      case 'heal_aura': {
-        g.strokeCircle(cx, cy, r);
-        g.lineStyle(2, color, 0.7);
-        g.lineBetween(cx - r * 0.7, cy - r * 0.7, cx + r * 0.7, cy + r * 0.7);
-        g.lineBetween(cx + r * 0.7, cy - r * 0.7, cx - r * 0.7, cy + r * 0.7);
-        g.fillStyle(color, 0.3);
-        g.fillCircle(cx, cy, r * 0.5);
-        g.lineStyle(2, 0xffffff, 0.8);
-        g.lineBetween(cx, cy, cx + r * 0.5, cy - r * 0.3);
-        g.lineBetween(cx, cy, cx, cy + r * 0.6);
-        break;
-      }
-    }
-  }
+  // ─── Floating Ability Update ───────────────────────────────────────────
 
   private updateFloatingAbilities() {
     const btns  = this._abilityBtnSize;

@@ -584,6 +584,25 @@
       </div>
     </div>
 
+    <!-- Ability icon presets -->
+    <div class="sidebar-section">
+      <h3>✨ Special Ability Icons</h3>
+      <div class="preset-grid" id="abilityPresetGrid">
+        <button class="preset-btn" data-ability="freeze">
+          <span class="preset-dot" style="background:#99ddff"></span> ❄️ Blizzard
+        </button>
+        <button class="preset-btn" data-ability="meteor">
+          <span class="preset-dot" style="background:#ff6600"></span> ☄️ Meteor
+        </button>
+        <button class="preset-btn" data-ability="lightning_storm">
+          <span class="preset-dot" style="background:#ffff00"></span> ⚡ Lightning
+        </button>
+        <button class="preset-btn" data-ability="heal_aura">
+          <span class="preset-dot" style="background:#aa44ff"></span> 🕐 Rift
+        </button>
+      </div>
+    </div>
+
     <!-- Prompt -->
     <div class="sidebar-section">
       <h3>📝 Prompt</h3>
@@ -835,6 +854,37 @@
       },
     };
 
+    const ABILITY_PRESETS = {
+      freeze: {
+        name: 'Blizzard',
+        prompt: 'top-down game icon, glowing blue snowflake crystal with six branching arms radiating frost, on dark transparent background, stylized fantasy art, sharp details',
+        color: '#99ddff',
+        file: 'ability_freeze',
+        w: 256, h: 256,
+      },
+      meteor: {
+        name: 'Meteor Strike',
+        prompt: 'top-down game icon, blazing orange fireball meteor with trailing flame and bright yellow-hot core, on dark transparent background, stylized fantasy art, sharp details',
+        color: '#ff6600',
+        file: 'ability_meteor',
+        w: 256, h: 256,
+      },
+      lightning_storm: {
+        name: 'Lightning Storm',
+        prompt: 'top-down game icon, jagged yellow lightning bolt crackling with electric energy and white-hot tip, on dark transparent background, stylized fantasy art, sharp details',
+        color: '#ffff00',
+        file: 'ability_lightning_storm',
+        w: 256, h: 256,
+      },
+      heal_aura: {
+        name: 'Temporal Rift',
+        prompt: 'top-down game icon, glowing purple clock rift with green ethereal cross motif and cosmic ring, on dark transparent background, stylized fantasy art, sharp details',
+        color: '#aa44ff',
+        file: 'ability_heal_aura',
+        w: 256, h: 256,
+      },
+    };
+
     // Pricing cache — populated from /api/pricing (fal.ai Platform API)
     const modelPricingCache = {};
 
@@ -937,6 +987,7 @@
         btn.addEventListener('click', () => {
           clearTowerSelection();
           document.querySelectorAll('.preset-btn[data-city]').forEach(b => b.classList.remove('active'));
+          document.querySelectorAll('.preset-btn[data-ability]').forEach(b => b.classList.remove('active'));
           applyPreset(btn.dataset.preset);
         });
       });
@@ -945,6 +996,9 @@
       });
       document.querySelectorAll('.preset-btn[data-city]').forEach((btn) => {
         btn.addEventListener('click', () => applyCityPreset(btn.dataset.city));
+      });
+      document.querySelectorAll('.preset-btn[data-ability]').forEach((btn) => {
+        btn.addEventListener('click', () => applyAbilityPreset(btn.dataset.ability));
       });
       $model.addEventListener('change', () => { updateModelInfo(); scheduleEstimate(); });
       $generateBtn.addEventListener('click', generateTile);
@@ -974,9 +1028,10 @@
     function applyTowerType(type) {
       currentTowerType = type;
       currentPreset = null;
-      // Deactivate terrain and city presets
+      // Deactivate terrain, city, and ability presets
       document.querySelectorAll('.preset-btn[data-preset]').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.preset-btn[data-city]').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.preset-btn[data-ability]').forEach(b => b.classList.remove('active'));
       // Activate tower type button
       document.querySelectorAll('.preset-btn[data-tower]').forEach(b =>
         b.classList.toggle('active', b.dataset.tower === type)
@@ -1026,6 +1081,7 @@
       // Terrain tiles are full-bleed — background removal not needed
       $autoRemoveBg.checked = false;
       document.querySelectorAll('.preset-btn[data-preset]').forEach((b) => b.classList.toggle('active', b.dataset.preset === name));
+      document.querySelectorAll('.preset-btn[data-ability]').forEach(b => b.classList.remove('active'));
       $generateBtn.disabled = false;
       scheduleEstimate();
     }
@@ -1039,11 +1095,32 @@
       $width.value = preset.w;
       $height.value = preset.h;
       $autoRemoveBg.checked = false;
-      // Deactivate terrain and tower buttons
+      // Deactivate terrain, tower, and ability buttons
       document.querySelectorAll('.preset-btn[data-preset]').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.preset-btn[data-ability]').forEach(b => b.classList.remove('active'));
       // Activate city button
       document.querySelectorAll('.preset-btn[data-city]').forEach(b =>
         b.classList.toggle('active', b.dataset.city === name)
+      );
+      $generateBtn.disabled = false;
+      scheduleEstimate();
+    }
+
+    function applyAbilityPreset(name) {
+      currentPreset = null;
+      clearTowerSelection();
+      const preset = ABILITY_PRESETS[name];
+      $prompt.value = preset.prompt;
+      $filename.value = preset.file;
+      $width.value = preset.w;
+      $height.value = preset.h;
+      $autoRemoveBg.checked = false;
+      // Deactivate terrain, tower, and city buttons
+      document.querySelectorAll('.preset-btn[data-preset]').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.preset-btn[data-city]').forEach(b => b.classList.remove('active'));
+      // Activate ability button
+      document.querySelectorAll('.preset-btn[data-ability]').forEach(b =>
+        b.classList.toggle('active', b.dataset.ability === name)
       );
       $generateBtn.disabled = false;
       scheduleEstimate();
