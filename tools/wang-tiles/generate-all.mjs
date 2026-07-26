@@ -73,7 +73,7 @@ const TERRAIN_KEYS = [
   'tile_water',
   'tile_grass',
   'tile_sand',
-  'tile_path'
+  'tile_path',
 ];
 
 const files = fs.readdirSync(TILES_DIR);

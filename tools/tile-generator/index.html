@@ -603,6 +603,37 @@
       </div>
     </div>
 
+    <!-- Economy building presets -->
+    <div class="sidebar-section">
+      <h3>🏚️ Economy Building</h3>
+      <div class="preset-grid" id="ecoPresetGrid">
+        <button class="preset-btn" data-eco="farm">
+          <span class="preset-dot" style="background:#7da832"></span> Farm
+        </button>
+        <button class="preset-btn" data-eco="mill">
+          <span class="preset-dot" style="background:#c4955c"></span> Mill
+        </button>
+        <button class="preset-btn" data-eco="bakery">
+          <span class="preset-dot" style="background:#d4a054"></span> Bakery
+        </button>
+        <button class="preset-btn" data-eco="fishery">
+          <span class="preset-dot" style="background:#5599bb"></span> Fishery
+        </button>
+        <button class="preset-btn" data-eco="harbor">
+          <span class="preset-dot" style="background:#4488cc"></span> Harbor
+        </button>
+        <button class="preset-btn" data-eco="warehouse">
+          <span class="preset-dot" style="background:#887766"></span> Warehouse
+        </button>
+        <button class="preset-btn" data-eco="lighthouse">
+          <span class="preset-dot" style="background:#ffcc44"></span> Lighthouse
+        </button>
+        <button class="preset-btn" data-eco="cart">
+          <span class="preset-dot" style="background:#aa7744"></span> Cart
+        </button>
+      </div>
+    </div>
+
     <!-- Prompt -->
     <div class="sidebar-section">
       <h3>📝 Prompt</h3>
@@ -885,6 +916,65 @@
       },
     };
 
+    const ECO_PRESETS = {
+      farm: {
+        name: 'Farm',
+        prompt: 'top-down game asset, medieval farmstead with crop fields in neat rows, small barn with red roof, windmill, isolated on dark transparent background, stylized fantasy art, sharp edges',
+        color: '#7da832',
+        file: 'eco_farm',
+        w: 256, h: 256,
+      },
+      mill: {
+        name: 'Mill',
+        prompt: 'top-down game asset, medieval water mill with large wooden water wheel and stone building, blue river flow beneath, isolated on dark transparent background, stylized fantasy art, sharp edges',
+        color: '#c4955c',
+        file: 'eco_mill',
+        w: 256, h: 256,
+      },
+      bakery: {
+        name: 'Bakery',
+        prompt: 'top-down game asset, medieval bakery building with smoking chimney and bread loaf sign, warm glow from oven windows, isolated on dark transparent background, stylized fantasy art, sharp edges',
+        color: '#d4a054',
+        file: 'eco_bakery',
+        w: 256, h: 256,
+      },
+      fishery: {
+        name: 'Fishery',
+        prompt: 'top-down game asset, wooden fishing hut on stilts over blue water with nets and small boat docked alongside, isolated on dark transparent background, stylized fantasy art, sharp edges',
+        color: '#5599bb',
+        file: 'eco_fishery',
+        w: 256, h: 256,
+      },
+      harbor: {
+        name: 'Trading Harbor',
+        prompt: 'top-down game asset, busy trading harbor with wooden pier extending into blue water, merchant ship docked, crates and barrels on the quay, isolated on dark transparent background, stylized fantasy art, sharp edges',
+        color: '#4488cc',
+        file: 'eco_harbor',
+        w: 256, h: 128,
+      },
+      warehouse: {
+        name: 'Warehouse',
+        prompt: 'top-down game asset, large medieval stone warehouse with heavy wooden doors, stacked crate graphics around the perimeter, isolated on dark transparent background, stylized fantasy art, sharp edges',
+        color: '#887766',
+        file: 'eco_warehouse',
+        w: 256, h: 256,
+      },
+      lighthouse: {
+        name: 'Lighthouse',
+        prompt: 'top-down game asset, tall round stone lighthouse with glowing yellow beacon at top, perched on rocky cliff edge with blue water below, isolated on dark transparent background, stylized fantasy art, sharp edges',
+        color: '#ffcc44',
+        file: 'eco_lighthouse',
+        w: 256, h: 256,
+      },
+      cart: {
+        name: 'Cart',
+        prompt: 'top-down game asset, medieval wooden trade cart loaded with goods and barrels, pulled by a horse, isolated on dark transparent background, stylized fantasy art, sharp edges',
+        color: '#aa7744',
+        file: 'eco_cart',
+        w: 256, h: 128,
+      },
+    };
+
     // Pricing cache — populated from /api/pricing (fal.ai Platform API)
     const modelPricingCache = {};
 
@@ -988,6 +1078,7 @@
           clearTowerSelection();
           document.querySelectorAll('.preset-btn[data-city]').forEach(b => b.classList.remove('active'));
           document.querySelectorAll('.preset-btn[data-ability]').forEach(b => b.classList.remove('active'));
+          document.querySelectorAll('.preset-btn[data-eco]').forEach(b => b.classList.remove('active'));
           applyPreset(btn.dataset.preset);
         });
       });
@@ -999,6 +1090,9 @@
       });
       document.querySelectorAll('.preset-btn[data-ability]').forEach((btn) => {
         btn.addEventListener('click', () => applyAbilityPreset(btn.dataset.ability));
+      });
+      document.querySelectorAll('.preset-btn[data-eco]').forEach((btn) => {
+        btn.addEventListener('click', () => applyEcoPreset(btn.dataset.eco));
       });
       $model.addEventListener('change', () => { updateModelInfo(); scheduleEstimate(); });
       $generateBtn.addEventListener('click', generateTile);
@@ -1028,10 +1122,11 @@
     function applyTowerType(type) {
       currentTowerType = type;
       currentPreset = null;
-      // Deactivate terrain, city, and ability presets
+      // Deactivate terrain, city, ability, and eco presets
       document.querySelectorAll('.preset-btn[data-preset]').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.preset-btn[data-city]').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.preset-btn[data-ability]').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.preset-btn[data-eco]').forEach(b => b.classList.remove('active'));
       // Activate tower type button
       document.querySelectorAll('.preset-btn[data-tower]').forEach(b =>
         b.classList.toggle('active', b.dataset.tower === type)
@@ -1082,6 +1177,7 @@
       $autoRemoveBg.checked = false;
       document.querySelectorAll('.preset-btn[data-preset]').forEach((b) => b.classList.toggle('active', b.dataset.preset === name));
       document.querySelectorAll('.preset-btn[data-ability]').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.preset-btn[data-eco]').forEach(b => b.classList.remove('active'));
       $generateBtn.disabled = false;
       scheduleEstimate();
     }
@@ -1095,9 +1191,10 @@
       $width.value = preset.w;
       $height.value = preset.h;
       $autoRemoveBg.checked = false;
-      // Deactivate terrain, tower, and ability buttons
+      // Deactivate terrain, tower, ability, and eco buttons
       document.querySelectorAll('.preset-btn[data-preset]').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.preset-btn[data-ability]').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.preset-btn[data-eco]').forEach(b => b.classList.remove('active'));
       // Activate city button
       document.querySelectorAll('.preset-btn[data-city]').forEach(b =>
         b.classList.toggle('active', b.dataset.city === name)
@@ -1115,12 +1212,34 @@
       $width.value = preset.w;
       $height.value = preset.h;
       $autoRemoveBg.checked = false;
-      // Deactivate terrain, tower, and city buttons
+      // Deactivate terrain, tower, city, and eco buttons
       document.querySelectorAll('.preset-btn[data-preset]').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.preset-btn[data-city]').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.preset-btn[data-eco]').forEach(b => b.classList.remove('active'));
       // Activate ability button
       document.querySelectorAll('.preset-btn[data-ability]').forEach(b =>
         b.classList.toggle('active', b.dataset.ability === name)
+      );
+      $generateBtn.disabled = false;
+      scheduleEstimate();
+    }
+
+    function applyEcoPreset(name) {
+      currentPreset = null;
+      clearTowerSelection();
+      const preset = ECO_PRESETS[name];
+      $prompt.value = preset.prompt;
+      $filename.value = preset.file;
+      $width.value = preset.w;
+      $height.value = preset.h;
+      $autoRemoveBg.checked = false;
+      // Deactivate terrain, tower, city, and ability buttons
+      document.querySelectorAll('.preset-btn[data-preset]').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.preset-btn[data-city]').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.preset-btn[data-ability]').forEach(b => b.classList.remove('active'));
+      // Activate eco button
+      document.querySelectorAll('.preset-btn[data-eco]').forEach(b =>
+        b.classList.toggle('active', b.dataset.eco === name)
       );
       $generateBtn.disabled = false;
       scheduleEstimate();

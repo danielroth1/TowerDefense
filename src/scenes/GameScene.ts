@@ -8,6 +8,11 @@ import { Projectile, type ProjectileConfig } from '../entities/Projectile';
 import { Hero } from '../entities/Hero';
 import { Barricade } from '../entities/Barricade';
 import { EconomyManager } from '../systems/EconomyManager';
+import { EconomySimulation } from '../systems/EconomySimulation';
+import { EconomyBuilding } from '../entities/EconomyBuilding';
+import { EconomyPanel } from '../ui/EconomyPanel';
+import type { EconomyBuildingType } from '../data/economy';
+import { ECO_BUILDING_DEFS, escalatedCost } from '../data/economy';
 import { WaveManager } from '../systems/WaveManager';
 import { AbilitySystem } from '../systems/AbilitySystem';
 import { SynergySystem } from '../systems/SynergySystem';
@@ -93,6 +98,7 @@ export class GameScene extends Phaser.Scene {
 
   // Systems
   private economy!: EconomyManager;
+  private economySim!: EconomySimulation;
   private waveManager!: WaveManager;
   private abilitySystem!: AbilitySystem;
   private synergySystem!: SynergySystem;
@@ -102,6 +108,7 @@ export class GameScene extends Phaser.Scene {
   // UI
   private hud!: HUD;
   private bottomBar!: BottomBar;
+  private economyPanel!: EconomyPanel;
   private sfx: SoundSystem = SoundSystem.instance;
 
   // Dual-camera system
@@ -116,8 +123,14 @@ export class GameScene extends Phaser.Scene {
   // Interaction state
   private placingTower: TowerType | null = null;
   private placingBarricade: boolean = false;
+  private placingEconomy: EconomyBuildingType | null = null;
+  private economyBuildings: EconomyBuilding[] = [];
   private hoverOverlay!: Phaser.GameObjects.Image;
   private selectedTower: Tower | null = null;
+
+  /** Set when an economy panel button is clicked — prevents the same pointerup
+   *  from immediately placing the building on the map. */
+  private _skipNextPlacement: boolean = false;
 
   // Stats
   private totalKills: number = 0;
@@ -581,6 +594,7 @@ export class GameScene extends Phaser.Scene {
 
   private createSystems() {
     this.economy       = new EconomyManager(this, this._debug ? DEBUG_STARTING_GOLD : undefined);
+    this.economySim    = new EconomySimulation(this.economy);
     this.waveManager   = new WaveManager(this, this.enemyGroup, this.flyerGroup, this.mapData.waypoints, this.mapData.spawnPoint);
     this.abilitySystem = new AbilitySystem(this);
     this.synergySystem = new SynergySystem(this);
@@ -602,6 +616,9 @@ export class GameScene extends Phaser.Scene {
 
     this.hud = new HUD(this);
     this.bottomBar = new BottomBar(this, this.economy);
+    this.economyPanel = new EconomyPanel(this, this.economy, this.economySim);
+    // Economy panel is UI — only render on the UI camera, not the main camera
+    this.cameras.main.ignore(this.economyPanel.getContainer());
     this.createFloatingAbilities();
 
     // Register all UI objects with the UI group for camera ignoring
@@ -626,6 +643,15 @@ export class GameScene extends Phaser.Scene {
     this.bottomBar.onPlaceTower = (type) => {
       this.placingTower = type;
       this.placingBarricade = false;
+      this.placingEconomy = null;
+      this.economyPanel.hide();
+    };
+
+    this.economyPanel.callback = (type) => {
+      this.placingEconomy = type;
+      this.placingTower = null;
+      this.placingBarricade = false;
+      this._skipNextPlacement = true;
     };
 
     this.bottomBar.onUpgrade = () => {
@@ -732,6 +758,11 @@ export class GameScene extends Phaser.Scene {
 
     // Decorative city roads (static graphics)
     if (this.cityRoadGraphics) this.uiCam.ignore(this.cityRoadGraphics);
+
+    // Economy buildings
+    for (const b of this.economyBuildings) {
+      this.uiCam.ignore(b);
+    }
   }
 
   private setupInput() {
@@ -775,6 +806,17 @@ export class GameScene extends Phaser.Scene {
       this.cancelPlacing();
       this.deselectTower();
       this.heroSelected = false; this.hero.setSelected(false);
+    });
+    kb.on('keydown-V', () => {
+      // Toggle economy panel (V for "econoVy" — E conflicts with tower hotkey)
+      if (this.economyPanel.isVisible()) {
+        this.economyPanel.hide();
+        this.placingEconomy = null;
+      } else {
+        this.economyPanel.show();
+        this.placingTower = null;
+        this.placingBarricade = false;
+      }
     });
     kb.on('keydown-B', () => {
       if (this.economy.canAfford(BARRICADE_COST) && this.barricadeCount < MAX_BARRICADES) {
@@ -950,7 +992,7 @@ export class GameScene extends Phaser.Scene {
     if (p.y >= this.scale.height - this._barH) return;
 
     // ── HERO SELECTION: highest priority ──────────────────────────────────
-    if (!this.placingTower && !this.placingBarricade) {
+    if (!this.placingTower && !this.placingBarricade && !this.placingEconomy) {
       const heroBounds = this.hero.getBounds();
       // Expand bounds slightly for easier clicking
       const pad = 10;
@@ -974,7 +1016,7 @@ export class GameScene extends Phaser.Scene {
     if (row < 0 || row >= GRID_ROWS || col < 0 || col >= GRID_COLS) return;
     const tile = this.mapData.grid[row][col];
 
-    if (!this.placingTower && !this.placingBarricade) {
+    if (!this.placingTower && !this.placingBarricade && !this.placingEconomy) {
       // Ability cast — skip if click was on a floating ability button (they
       // have their own pointerup handler that toggles pendingCast)
       if (this.abilitySystem.pendingCast && !this.isClickOnAbilityButton(p)) {
@@ -1036,6 +1078,24 @@ export class GameScene extends Phaser.Scene {
       if (this.barricadeCount >= MAX_BARRICADES) this.placingBarricade = false;
       return;
     }
+
+    // Placing economy building
+    if (this.placingEconomy) {
+      if (this._skipNextPlacement) {
+        this._skipNextPlacement = false;
+        return;
+      }
+      if (!this.canPlaceEconomy(this.placingEconomy, col, row)) return;
+      const def = ECO_BUILDING_DEFS[this.placingEconomy];
+      const count = this.economySim.countOfType(this.placingEconomy);
+      const cost = escalatedCost(def, count);
+      if (!this.economy.spend(cost)) return;
+      this.placeEconomyBuilding(this.placingEconomy, col, row);
+      if (!this.input.keyboard?.addKey('SHIFT').isDown) {
+        this.placingEconomy = null;
+      }
+      return;
+    }
   }
 
   private updateHoverTile(p: Phaser.Input.Pointer) {
@@ -1056,7 +1116,11 @@ export class GameScene extends Phaser.Scene {
       !this.decorationBlockedCells.has(`${row},${col}`) &&
       !this.synergySystem.getTowerAt(col, row);
 
-    if (canPlace) {
+    // Economy building placement validation
+    const canPlaceEco = this.placingEconomy &&
+      this.canPlaceEconomy(this.placingEconomy, col, row);
+
+    if (canPlace || canPlaceEco) {
       this.hoverOverlay.setPosition(col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE + TILE_SIZE / 2).setAlpha(0.7);
     } else {
       this.hoverOverlay.setAlpha(0);
@@ -1066,6 +1130,9 @@ export class GameScene extends Phaser.Scene {
   private cancelPlacing() {
     this.placingTower = null;
     this.placingBarricade = false;
+    this.placingEconomy = null;
+    this._skipNextPlacement = false;
+    this.economyPanel.hide();
     this.hoverOverlay.setAlpha(0);
   }
 
@@ -1123,6 +1190,150 @@ export class GameScene extends Phaser.Scene {
 
   private towerRow(tower: Tower): number {
     return Math.round((tower.y - TILE_SIZE / 2) / TILE_SIZE);
+  }
+
+  // ─── Economy building management ─────────────────────────────────────────
+
+  private canPlaceEconomy(type: EconomyBuildingType, col: number, row: number): boolean {
+    if (row < 0 || row >= GRID_ROWS || col < 0 || col >= GRID_COLS) return false;
+    const tile = this.mapData.grid[row][col];
+
+    const def = ECO_BUILDING_DEFS[type];
+
+    // Harbor: straddles water — check that one cell is grass, one is water
+    if (def.placement.straddlesWater) {
+      if (col + 1 >= GRID_COLS) return false;
+      const tile2 = this.mapData.grid[row][col + 1];
+      const hasWater = tile.type === 'buildable' && tile2.type === 'ground';
+      const hasWaterRev = tile.type === 'ground' && tile2.type === 'buildable';
+      if (!hasWater && !hasWaterRev) return false;
+      // Check cells aren't blocked by decorations, towers, or other eco buildings
+      if (this.decorationBlockedCells.has(`${row},${col}`)) return false;
+      if (this.decorationBlockedCells.has(`${row},${col + 1}`)) return false;
+      if (this.synergySystem.getTowerAt(col, row)) return false;
+      if (this.synergySystem.getTowerAt(col + 1, row)) return false;
+      if (this.economyBuildings.some(b =>
+        (b.gridCol === col && b.gridRow === row) ||
+        (b.gridCol === col + 1 && b.gridRow === row))) return false;
+      return true;
+    }
+
+    // All other buildings require a buildable tile
+    if (tile.type !== 'buildable') return false;
+    if (this.decorationBlockedCells.has(`${row},${col}`)) return false;
+    if (this.synergySystem.getTowerAt(col, row)) return false;
+    if (this.economyBuildings.some(b => b.gridCol === col && b.gridRow === row)) return false;
+
+    // Water adjacency checks
+    if (def.placement.requireWaterAdjacent) {
+      if (!this.hasWaterNeighbor(row, col)) return false;
+    }
+    if (def.placement.forbidWaterAdjacent) {
+      if (this.hasWaterNeighbor(row, col)) return false;
+    }
+
+    // Road adjacency (simplified: check if any neighboring cell has a road
+    // — either a path tile or an existing economy building connected to roads)
+    if (def.placement.requireRoadAdjacent) {
+      if (!this.hasRoadNeighbor(row, col)) return false;
+    }
+
+    return true;
+  }
+
+  private hasWaterNeighbor(row: number, col: number): boolean {
+    const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+    for (const [dr, dc] of dirs) {
+      const nr = row + dr, nc = col + dc;
+      if (nr < 0 || nr >= GRID_ROWS || nc < 0 || nc >= GRID_COLS) continue;
+      if (this.mapData.grid[nr][nc].type === 'ground') return true;
+    }
+    return false;
+  }
+
+  private hasRoadNeighbor(row: number, col: number): boolean {
+    const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+    for (const [dr, dc] of dirs) {
+      const nr = row + dr, nc = col + dc;
+      if (nr < 0 || nr >= GRID_ROWS || nc < 0 || nc >= GRID_COLS) continue;
+      // Check for path tiles (roads used by enemies) and decorative road graphics
+      if (this.mapData.grid[nr][nc].type === 'path') return true;
+    }
+    // Also consider it connected if there's at least one other economy building
+    // placed (the road network will be regenerated to connect them)
+    if (this.economyBuildings.length > 0) return true;
+    return false;
+  }
+
+  private placeEconomyBuilding(type: EconomyBuildingType, col: number, row: number) {
+    this.sfx.play('tower_place');
+    const building = new EconomyBuilding(this, col, row, type);
+    this.economyBuildings.push(building);
+    this.economySim.addBuilding(building);
+
+    // Ignore on UI camera so it doesn't render twice (once on map, once on UI overlay)
+    if (this.uiCam) this.uiCam.ignore(building);
+
+    // Mark cells as occupied
+    const def = ECO_BUILDING_DEFS[type];
+    for (let dr = 0; dr < def.height; dr++) {
+      for (let dc = 0; dc < def.width; dc++) {
+        this.mapData.grid[row + dr][col + dc].type = 'path'; // unbuildable
+        this.refreshTileSprite(row + dr, col + dc);
+      }
+    }
+
+    // Placement animation
+    building.setScale(0.4);
+    this.tweens.add({ targets: building, scaleX: 1, scaleY: 1, duration: 200, ease: 'Back.easeOut' });
+
+    // Regenerate decorative roads to include the new economy building.
+    // Collect all building positions (decorative + economy) and re-run road generation.
+    this.regenerateAllRoads();
+  }
+
+  /** Destroy existing road graphics and regenerate from all buildings. */
+  private regenerateAllRoads(): void {
+    // Collect economy building positions as DecorationPlacement-compatible objects
+    const ecoPlacements: Array<{ row: number; col: number; w: number; h: number }> =
+      this.economyBuildings.map(b => ({
+        row: b.gridRow, col: b.gridCol,
+        w: b.def.width, h: b.def.height,
+      }));
+
+    // Re-fetch decorative placements (CityDecorator result is not stored,
+    // but blockedCells are; re-run the generator to get placements back)
+    const decoResult = generateCityDecorations(this.mapData.grid, this.mapData.seed);
+
+    // Merge all placements for road generation
+    const allPlacements: Array<{ row: number; col: number; w: number; h: number }> = [
+      ...decoResult.placements,
+      ...ecoPlacements,
+    ];
+
+    const allBlocked = new Set([...decoResult.blockedCells]);
+
+    if (allPlacements.length >= 2) {
+      // Cast to any — generateCityRoads only uses row/col/w/h from placements
+      const roadResult = generateCityRoads(
+        this.mapData.grid,
+        allPlacements as any,
+        allBlocked,
+        this.mapData.seed,
+      );
+      if (roadResult.roads.length > 0) {
+        // Destroy old road graphics
+        if (this.cityRoadGraphics) {
+          this.cityRoadGraphics.destroy();
+          this.cityRoadGraphics = null;
+        }
+        const roadG = this.add.graphics().setDepth(0.14);
+        const roadRng = createPRNG(this.mapData.seed + 0xC0DE);
+        drawCityRoads(roadG, roadResult, roadRng);
+        this.cityRoadGraphics = roadG;
+        if (this.uiCam) this.uiCam.ignore(roadG);
+      }
+    }
   }
 
   // ─── Projectiles ────────────────────────────────────────────────────────
@@ -1711,6 +1922,7 @@ export class GameScene extends Phaser.Scene {
     if (this.isPaused) return;
 
     this.economy.update(delta);
+    this.economySim.update(delta);
     this.waveManager.update(delta);
     this.abilitySystem.update(delta);
     this.weatherSystem.update(delta);

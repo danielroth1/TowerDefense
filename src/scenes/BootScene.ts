@@ -71,7 +71,7 @@ export class BootScene extends Phaser.Scene {
     // smooth display with linear filtering (pixelArt: false).
     // Stored in subfolders: assets/tiles/tile_grass_wang/wang_0.png … wang_15.png
     // Missing sets are silently skipped; the crop-based fallback is used instead.
-    const TERRAIN_KEYS = ['tile_water', 'tile_grass', 'tile_sand', 'tile_path', 'tile_spawn', 'tile_goal'];
+    const TERRAIN_KEYS = ['tile_water', 'tile_grass', 'tile_sand', 'tile_path'];
     for (const baseKey of TERRAIN_KEYS) {
       for (let i = 0; i < 16; i++) {
         this.load.image(`${baseKey}_wang_${i}`, `assets/tiles/${baseKey}_wang/wang_${i}.png`);
@@ -101,6 +101,16 @@ export class BootScene extends Phaser.Scene {
     this.load.image('ability_meteor',           'assets/tiles/ability_meteor.png');
     this.load.image('ability_lightning_storm',  'assets/tiles/ability_lightning_storm.png');
     this.load.image('ability_heal_aura',        'assets/tiles/ability_heal_aura.png');
+
+    // ── Economy building textures (AI-generated, optional — procedural fallback in create())
+    this.load.image('eco_farm',       'assets/tiles/eco_farm.png');
+    this.load.image('eco_mill',       'assets/tiles/eco_mill.png');
+    this.load.image('eco_bakery',     'assets/tiles/eco_bakery.png');
+    this.load.image('eco_fishery',    'assets/tiles/eco_fishery.png');
+    this.load.image('eco_harbor',     'assets/tiles/eco_harbor.png');
+    this.load.image('eco_warehouse',  'assets/tiles/eco_warehouse.png');
+    this.load.image('eco_lighthouse', 'assets/tiles/eco_lighthouse.png');
+    this.load.image('eco_cart',       'assets/tiles/eco_cart.png');
   }
 
   create() {
@@ -126,6 +136,7 @@ export class BootScene extends Phaser.Scene {
     this.generateProjectileTextures();
     this.generateParticleTextures();
     this.generateCityDecorTextures();
+    this.generateEconomyTextures();
     this.generateUITextures();
     this.registerAnimations();
 
@@ -154,7 +165,7 @@ export class BootScene extends Phaser.Scene {
    * were loaded from disk without error.
    */
   private detectWangTileSets(): void {
-    const TERRAIN_KEYS = ['tile_water', 'tile_grass', 'tile_sand', 'tile_path', 'tile_spawn', 'tile_goal'];
+    const TERRAIN_KEYS = ['tile_water', 'tile_grass', 'tile_sand', 'tile_path'];
     for (const baseKey of TERRAIN_KEYS) {
       const complete = this.textures.exists(`${baseKey}_wang_0`)
         && this.textures.exists(`${baseKey}_wang_15`);
@@ -1295,6 +1306,275 @@ export class BootScene extends Phaser.Scene {
     g.fillRect(S / 2 + 2, S / 2 - 6, 4, 8);
 
     g.generateTexture('deco_city_tower', S, S);
+    g.destroy();
+  }
+
+  // ─── Economy building textures ──────────────────────────────────────────
+
+  private generateEconomyTextures() {
+    if (!this.aiLoadedTiles.has('eco_farm'))       this.generateEcoFarm();
+    if (!this.aiLoadedTiles.has('eco_mill'))       this.generateEcoMill();
+    if (!this.aiLoadedTiles.has('eco_bakery'))     this.generateEcoBakery();
+    if (!this.aiLoadedTiles.has('eco_fishery'))    this.generateEcoFishery();
+    if (!this.aiLoadedTiles.has('eco_harbor'))     this.generateEcoHarbor();
+    if (!this.aiLoadedTiles.has('eco_warehouse'))  this.generateEcoWarehouse();
+    if (!this.aiLoadedTiles.has('eco_lighthouse')) this.generateEcoLighthouse();
+    if (!this.aiLoadedTiles.has('eco_cart'))       this.generateEcoCart();
+  }
+
+  private generateEcoFarm() {
+    const S = TILE_SIZE, g = this.add.graphics();
+    // Dirt field
+    g.fillStyle(0x5a4a20, 1); g.fillRect(0, 0, S, S);
+    // Crop rows
+    for (let row = 0; row < 4; row++) {
+      const y = 10 + row * 9;
+      g.fillStyle(0x6a8a30, 1);
+      g.fillRect(4, y, S - 8, 5);
+      // Crop dots
+      g.fillStyle(0x8aba40, 1);
+      for (let x = 6; x < S - 6; x += 7) {
+        g.fillCircle(x, y + 2, 2);
+      }
+    }
+    // Fence border
+    g.lineStyle(1, 0x8B7355, 1);
+    g.strokeRect(2, 2, S - 4, S - 4);
+    // Gate (bottom)
+    g.lineStyle(1, 0x8B7355, 0); // clear
+    g.fillStyle(0x8B7355, 0.6);
+    g.fillRect(S / 2 - 4, S - 6, 8, 4);
+    // Tiny barn
+    g.fillStyle(0xA08060, 1);
+    g.fillRect(S - 14, 2, 10, 10);
+    g.fillStyle(0x8B4513, 1);
+    g.fillTriangle(S - 16, 2, S - 9, -3, S - 2, 2);
+
+    g.generateTexture('eco_farm', S, S);
+    g.destroy();
+  }
+
+  private generateEcoMill() {
+    const S = TILE_SIZE, g = this.add.graphics();
+    // Stone base
+    g.fillStyle(0x7a7a70, 1);
+    g.fillCircle(S / 2, S / 2, 15);
+    g.fillStyle(0x8a8a80, 1);
+    g.fillCircle(S / 2, S / 2, 10);
+    // Door
+    g.fillStyle(0x5a3a1a, 1);
+    g.fillRect(S / 2 - 4, S / 2 + 3, 8, 10);
+    // Windmill blades (cross)
+    g.lineStyle(2, 0x8B7355, 1);
+    // Vertical blade
+    g.lineBetween(S / 2, S / 2 - 18, S / 2, S / 2 - 6);
+    // Horizontal blade
+    g.lineBetween(S / 2 - 18, S / 2, S / 2 + 18, S / 2);
+    // Sail cloth on blades
+    g.fillStyle(0xeeeedd, 0.7);
+    g.fillRect(S / 2 - 1, S / 2 - 17, 3, 8);
+    g.fillRect(S / 2 + 6, S / 2 - 1, 10, 3);
+    g.fillRect(S / 2 - 16, S / 2 - 1, 8, 3);
+    // Center hub
+    g.fillStyle(0x666666, 1);
+    g.fillCircle(S / 2, S / 2, 3);
+
+    g.generateTexture('eco_mill', S, S);
+    g.destroy();
+  }
+
+  private generateEcoBakery() {
+    const S = TILE_SIZE, g = this.add.graphics();
+    // Stone base
+    g.fillStyle(0x9a8a70, 1);
+    g.fillRoundedRect(8, 14, S - 16, S - 20, 4);
+    // Roof
+    g.fillStyle(0x8B4513, 1);
+    g.fillTriangle(S / 2, 2, 6, 16, S - 6, 16);
+    // Chimney
+    g.fillStyle(0x666666, 1);
+    g.fillRect(S - 18, 4, 6, 14);
+    // Smoke particles (simple dots)
+    g.fillStyle(0xcccccc, 0.5);
+    g.fillCircle(S - 15, 0, 3);
+    g.fillStyle(0xcccccc, 0.3);
+    g.fillCircle(S - 12, -3, 2);
+    // Door
+    g.fillStyle(0x5a3a1a, 1);
+    g.fillRoundedRect(S / 2 - 5, S / 2 + 2, 10, S / 2 - 8, 3);
+    // Window with glow
+    g.fillStyle(0xffcc66, 0.6);
+    g.fillRoundedRect(S / 2 - 12, S / 2 - 6, 8, 8, 2);
+    // Bread sign
+    g.fillStyle(0xd4a843, 0.9);
+    g.fillCircle(S / 2 + 12, 12, 5);
+
+    g.generateTexture('eco_bakery', S, S);
+    g.destroy();
+  }
+
+  private generateEcoFishery() {
+    const S = TILE_SIZE, g = this.add.graphics();
+    // Grass ground
+    g.fillStyle(0x3a5a2a, 1); g.fillRect(0, 0, S, S);
+    // Hut
+    g.fillStyle(0x9a8a70, 1);
+    g.fillRoundedRect(6, 14, S - 20, S - 20, 3);
+    // Roof
+    g.fillStyle(0x6B4226, 1);
+    g.fillTriangle(S / 2 - 8, 4, 4, 16, S - 22, 16);
+    // Door
+    g.fillStyle(0x4a2a1a, 1);
+    g.fillRect(S / 2 - 6, S / 2 + 2, 8, 12);
+    // Fishing rod (right side, extending out)
+    g.lineStyle(1.5, 0x8B7355, 1);
+    g.lineBetween(S - 6, 20, S + 8, 6);
+    // Line dropping down
+    g.lineStyle(0.5, 0xcccccc, 0.8);
+    g.lineBetween(S + 8, 6, S + 8, 18);
+    // Bobber
+    g.fillStyle(0xff4444, 0.8);
+    g.fillCircle(S + 8, 18, 2);
+    // Fish bucket
+    g.fillStyle(0x888888, 0.7);
+    g.fillRect(8, S - 12, 10, 8);
+    g.fillStyle(0x6699cc, 0.6);
+    g.fillRect(9, S - 10, 8, 4);
+
+    g.generateTexture('eco_fishery', S, S);
+    g.destroy();
+  }
+
+  private generateEcoHarbor() {
+    // Reuse the decorative harbor generator — same texture layout
+    const W = TILE_SIZE * 2, H = TILE_SIZE;
+    const g = this.add.graphics();
+    // Land half
+    for (let y = 0; y < H; y++) {
+      const t = y / H;
+      g.fillStyle(Phaser.Display.Color.GetColor(
+        Math.floor((0.40 + 0.05 * t) * 255),
+        Math.floor((0.35 + 0.04 * t) * 255),
+        Math.floor((0.25 + 0.03 * t) * 255),
+      ), 1);
+      g.fillRect(0, y, TILE_SIZE, 1);
+    }
+    // Water half
+    for (let y = 0; y < H; y++) {
+      const t = y / H;
+      g.fillStyle(Phaser.Display.Color.GetColor(
+        Math.floor((0.12 + 0.03 * t) * 255),
+        Math.floor((0.22 + 0.04 * t) * 255),
+        Math.floor((0.48 + 0.05 * t) * 255),
+      ), 1);
+      g.fillRect(TILE_SIZE, y, TILE_SIZE, 1);
+    }
+    // Pier
+    g.fillStyle(0x8B7355, 1);
+    g.fillRect(8, H * 0.3, TILE_SIZE - 16, H * 0.25);
+    for (let px = 10; px < TILE_SIZE - 10; px += 8) {
+      g.fillStyle(0x7a6345, 0.5);
+      g.fillRect(px, H * 0.3, 3, H * 0.25);
+    }
+    // Boat
+    g.fillStyle(0x6B4226, 1);
+    g.fillTriangle(TILE_SIZE + TILE_SIZE * 0.25, H * 0.78, TILE_SIZE + TILE_SIZE * 0.15, H * 0.68, TILE_SIZE + TILE_SIZE * 0.35, H * 0.68);
+    g.lineStyle(1, 0x333333, 1);
+    g.lineBetween(TILE_SIZE + TILE_SIZE * 0.25, H * 0.68, TILE_SIZE + TILE_SIZE * 0.25, H * 0.55);
+    g.fillStyle(0xffffff, 0.7);
+    g.fillTriangle(TILE_SIZE + TILE_SIZE * 0.26, H * 0.56, TILE_SIZE + TILE_SIZE * 0.26, H * 0.66, TILE_SIZE + TILE_SIZE * 0.36, H * 0.62);
+    // Crates
+    g.fillStyle(0xA08060, 1);
+    g.fillRect(20, 8, 8, 8);
+
+    g.generateTexture('eco_harbor', W, H);
+    g.destroy();
+  }
+
+  private generateEcoWarehouse() {
+    const S = TILE_SIZE, g = this.add.graphics();
+    // Ground
+    g.fillStyle(0x5a5040, 1); g.fillRect(0, 0, S, S);
+    // Large building
+    g.fillStyle(0x887766, 1);
+    g.fillRoundedRect(3, 6, S - 6, S - 12, 3);
+    // Roof
+    g.fillStyle(0x6a5a4a, 1);
+    g.fillTriangle(S / 2, 0, 2, 8, S - 2, 8);
+    // Loading bay (large door)
+    g.fillStyle(0x4a3a2a, 1);
+    g.fillRoundedRect(S / 2 - 8, S / 2 + 2, 16, S / 2 - 10, 2);
+    // Barrels beside door
+    g.fillStyle(0x8B6914, 1);
+    g.fillRect(4, S - 14, 8, 10);
+    g.fillStyle(0x9B7934, 0.5);
+    g.fillRect(5, S - 13, 3, 8);
+    g.fillStyle(0x8B6914, 1);
+    g.fillRect(S - 12, S - 14, 8, 10);
+    // Fill level indicators (vertical bars on side)
+    g.fillStyle(0x444444, 0.5);
+    g.fillRect(S - 4, 10, 2, S - 18);
+
+    g.generateTexture('eco_warehouse', S, S);
+    g.destroy();
+  }
+
+  private generateEcoLighthouse() {
+    const S = TILE_SIZE, g = this.add.graphics();
+    // Rocky base
+    g.fillStyle(0x5a5a5a, 1);
+    g.fillCircle(S / 2, S / 2 + 8, 12);
+    g.fillStyle(0x6a6a6a, 0.6);
+    g.fillCircle(S / 2 - 3, S / 2 + 5, 6);
+    // Tower body (tapered)
+    g.fillStyle(0xeeeedd, 1);
+    g.fillRect(S / 2 - 6, 10, 12, S - 24);
+    // Red stripes
+    g.fillStyle(0xdd3333, 1);
+    g.fillRect(S / 2 - 6, 14, 12, 5);
+    g.fillRect(S / 2 - 6, 26, 12, 5);
+    // Lantern room
+    g.fillStyle(0x333333, 1);
+    g.fillRect(S / 2 - 7, 6, 14, 8);
+    // Light glow
+    g.fillStyle(0xffff88, 0.8);
+    g.fillCircle(S / 2, 10, 4);
+    g.fillStyle(0xffff88, 0.3);
+    g.fillCircle(S / 2, 10, 8);
+    // Light beam (cone)
+    g.fillStyle(0xffff88, 0.15);
+    g.fillTriangle(S / 2 + 4, 8, S / 2 + 4, 12, S, -4);
+    // Door at base
+    g.fillStyle(0x4a3a2a, 1);
+    g.fillRect(S / 2 - 3, S - 10, 6, 8);
+
+    g.generateTexture('eco_lighthouse', S, S);
+    g.destroy();
+  }
+
+  private generateEcoCart() {
+    const W = 20, H = 14, g = this.add.graphics();
+    // Cart body
+    g.fillStyle(0x8B6914, 1);
+    g.fillRoundedRect(1, 2, W - 10, H - 4, 2);
+    // Wheels
+    g.fillStyle(0x444444, 1);
+    g.fillCircle(5, H - 2, 3);
+    g.fillCircle(W - 4, H - 2, 3);
+    // Wheel spokes
+    g.lineStyle(0.5, 0x888888, 0.8);
+    g.lineBetween(5, H - 5, 5, H + 1);
+    g.lineBetween(2, H - 2, 8, H - 2);
+    g.lineBetween(W - 7, H - 5, W - 1, H + 1);
+    g.lineBetween(W - 7, H - 2, W - 1, H - 2);
+    // Handle/shaft
+    g.lineStyle(1, 0x6B4226, 1);
+    g.lineBetween(W - 8, 4, W - 1, 4);
+    // Cargo (colored box — tint applied at runtime per resource type)
+    g.fillStyle(0xd4a843, 0.8);
+    g.fillRect(2, 0, W - 14, 5);
+
+    g.generateTexture('eco_cart', W, H);
     g.destroy();
   }
 

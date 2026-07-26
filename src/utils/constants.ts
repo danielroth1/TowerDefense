@@ -77,6 +77,9 @@ export const STARTING_LIVES = 20;
 export const PASSIVE_INCOME_INTERVAL = 5000; // ms
 export const PASSIVE_INCOME_AMOUNT   = 10;
 
+// ─── Economy Simulation ──────────────────────────────────────────────────────
+export const MAX_ECO_BUILDING_LEVEL = 3;
+
 // ─── Waves ───────────────────────────────────────────────────────────────────
 export const TOTAL_WAVES   = 50;
 export const BOSS_EVERY_N  = 5;
