@@ -40,12 +40,18 @@ export class HUD {
   // FPS (bottom-right)
   private fpsTxt: Phaser.GameObjects.Text;
 
+  // Perf stats panel (bottom-left corner, transparent dark background)
+  private perfStatsEnabled = false;
+  private perfPanel: Phaser.GameObjects.Graphics;
+  private perfText: Phaser.GameObjects.Text;
+
   // Settings modal objects
   private _settingsOpen = false;
   private modalBackdrop: Phaser.GameObjects.Rectangle;
   private modalPanel:    Phaser.GameObjects.Graphics;
   private modalBgmBtn:   Phaser.GameObjects.Text;
   private modalSfxBtn:   Phaser.GameObjects.Text;
+  private modalPerfBtn:  Phaser.GameObjects.Text;
   private modalPauseBtn: Phaser.GameObjects.Text;
   private modalCloseBtn: Phaser.GameObjects.Text;
 
@@ -122,6 +128,12 @@ export class HUD {
       fontSize: '13px', fontFamily: 'monospace', color: '#334455',
     }).setScrollFactor(0).setDepth(D + 1).setOrigin(1, 0.5);
 
+    // ── Perf stats panel (bottom-left, hidden by default) ──────────────────
+    this.perfPanel = scene.add.graphics().setScrollFactor(0).setDepth(D + 1).setVisible(false);
+    this.perfText = scene.add.text(0, 0, '', {
+      fontSize: '12px', fontFamily: 'monospace', color: '#aabbcc', lineSpacing: 2,
+    }).setScrollFactor(0).setDepth(D + 2).setOrigin(0, 1).setVisible(false);
+
     // ── Settings modal ───────────────────────────────────────────────────────
     this.modalBackdrop = scene.add.rectangle(0, 0, W, H, 0x000000, 0.55)
       .setScrollFactor(0).setDepth(70).setOrigin(0, 0).setVisible(false)
@@ -149,6 +161,12 @@ export class HUD {
         this.modalSfxBtn.setText(on ? '🔊 SFX: ON' : '🔊 SFX: OFF');
         this.modalSfxBtn.setColor(on ? '#88cc88' : '#cc8888');
       });
+
+    this.modalPerfBtn = scene.add.text(0, 0, '📊 PERF STATS: OFF', {
+      fontSize: '18px', fontFamily: 'monospace', color: '#cc8888',
+    }).setScrollFactor(0).setDepth(72).setOrigin(0.5).setVisible(false)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerup', () => this.togglePerfStats());
 
     this.modalPauseBtn = scene.add.text(0, 0, '⏸ PAUSE [P]', {
       fontSize: '20px', fontFamily: 'monospace', color: '#aabbcc',
@@ -192,10 +210,13 @@ export class HUD {
       this.bossContainer,
       this.heroTxt,
       this.fpsTxt,
+      this.perfPanel,
+      this.perfText,
       this.modalBackdrop,
       this.modalPanel,
       this.modalBgmBtn,
       this.modalSfxBtn,
+      this.modalPerfBtn,
       this.modalPauseBtn,
       this.modalCloseBtn,
     ];
@@ -292,6 +313,17 @@ export class HUD {
     this.heroTxt.setPosition(10, H - barH - 14);
     this.fpsTxt.setPosition(W - 10, H - barH - 14);
 
+    // Perf stats panel: bottom-left, above hero text
+    const perfW = 190;
+    const perfH = 68;
+    const perfX = 8;
+    const perfY = H - barH - 14 - 20; // above hero/fps row
+    this.perfPanel.clear();
+    this.perfPanel.fillStyle(0x000000, 0.45);
+    this.perfPanel.fillRoundedRect(perfX, perfY - perfH, perfW, perfH, 6);
+    this.perfText.setPosition(perfX + 8, perfY);
+    this.perfText.setStyle({ fontSize: Math.max(9, Math.round(12 * sc)) + 'px' });
+
     // Boss HP bar below badge row
     const bossY  = padT + bh + 8;
     const bossW  = Math.min(W - 32, Math.round(720 * sc));
@@ -309,7 +341,7 @@ export class HUD {
     this.modalBackdrop.setPosition(0, 0).setSize(W, H);
 
     const panelW = Math.max(220, Math.round(300 * sc));
-    const panelH = Math.max(180, Math.round(240 * sc));
+    const panelH = Math.max(240, Math.round(300 * sc));
     const px = W / 2 - panelW / 2;
     const py = H / 2 - panelH / 2;
     this.modalPanel.clear();
@@ -320,11 +352,13 @@ export class HUD {
     this.modalPanel.lineStyle(1, 0x2a3a4a, 1);
     this.modalPanel.strokeRoundedRect(px, py, panelW, panelH, 12);
     const modalFS = Math.max(14, Math.round(20 * sc)) + 'px';
-    this.modalBgmBtn.setStyle({ fontSize: modalFS }).setPosition(W / 2, py + panelH * 0.21);
-    this.modalSfxBtn.setStyle({ fontSize: modalFS }).setPosition(W / 2, py + panelH * 0.40);
-    this.modalPauseBtn.setStyle({ fontSize: modalFS }).setPosition(W / 2, py + panelH * 0.62);
+    const modalFS2 = Math.max(12, Math.round(18 * sc)) + 'px';
+    this.modalBgmBtn.setStyle({ fontSize: modalFS }).setPosition(W / 2, py + panelH * 0.17);
+    this.modalSfxBtn.setStyle({ fontSize: modalFS }).setPosition(W / 2, py + panelH * 0.33);
+    this.modalPerfBtn.setStyle({ fontSize: modalFS2 }).setPosition(W / 2, py + panelH * 0.49);
+    this.modalPauseBtn.setStyle({ fontSize: modalFS }).setPosition(W / 2, py + panelH * 0.65);
     this.modalCloseBtn.setStyle({ fontSize: Math.max(12, Math.round(18 * sc)) + 'px' })
-      .setPosition(W / 2, py + panelH * 0.84);
+      .setPosition(W / 2, py + panelH * 0.83);
   }
 
   private setGold(g: number) {
@@ -374,12 +408,41 @@ export class HUD {
     this._settingsOpen ? this.closeSettings() : this.openSettings();
   }
 
+  // ─── Perf Stats ───────────────────────────────────────────────────────
+
+  /** Enable perf stats display (called by PerfTest / GameScene). */
+  enablePerfStats() {
+    this.perfStatsEnabled = true;
+    this.modalPerfBtn.setText('📊 PERF STATS: ON');
+    this.modalPerfBtn.setColor('#88cc88');
+  }
+
+  private togglePerfStats() {
+    this.perfStatsEnabled = !this.perfStatsEnabled;
+    this.modalPerfBtn.setText(this.perfStatsEnabled ? '📊 PERF STATS: ON' : '📊 PERF STATS: OFF');
+    this.modalPerfBtn.setColor(this.perfStatsEnabled ? '#88cc88' : '#cc8888');
+  }
+
+  /** Update the perf stats display. Call every frame. */
+  updatePerfStats(enemies: number, towers: number, projectiles: number) {
+    const visible = this.perfStatsEnabled;
+    this.perfPanel.setVisible(visible);
+    this.perfText.setVisible(visible);
+    if (!visible) return;
+
+    const fps = Math.round(this.scene.game.loop.actualFps);
+    this.perfText.setText(
+      `Enemies:     ${enemies}\nTowers:       ${towers}\nProjectiles:  ${projectiles}\nFPS:          ${fps}`,
+    );
+  }
+
   openSettings() {
     this._settingsOpen = true;
     this.modalBackdrop.setVisible(true);
     this.modalPanel.setVisible(true);
     this.modalBgmBtn.setVisible(true);
     this.modalSfxBtn.setVisible(true);
+    this.modalPerfBtn.setVisible(true);
     this.modalPauseBtn.setVisible(true);
     this.modalCloseBtn.setVisible(true);
   }
@@ -390,6 +453,7 @@ export class HUD {
     this.modalPanel.setVisible(false);
     this.modalBgmBtn.setVisible(false);
     this.modalSfxBtn.setVisible(false);
+    this.modalPerfBtn.setVisible(false);
     this.modalPauseBtn.setVisible(false);
     this.modalCloseBtn.setVisible(false);
   }

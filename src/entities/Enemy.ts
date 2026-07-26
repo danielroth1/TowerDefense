@@ -38,6 +38,9 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
   private lastX: number = 0;
   private lastY: number = 0;
 
+  /** Cache last applied tint value to avoid redundant WebGL state changes. */
+  private _lastTint: number = 0xffffff;
+
   constructor(scene: Phaser.Scene, x: number, y: number, def: EnemyDef, waypoints: { x: number; y: number }[]) {
     super(scene, x, y, `enemy_${def.type}_sheet`, 0);
     this.def      = def;
@@ -93,27 +96,48 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     if (time >= this.slowExpiry) this.slowFactor = 1;
     const stunned = time < this.stunExpiry;
 
-    // Poison DoT
+    // Poison DoT — allocation-free manual loop
+    let totalDps = 0;
     if (this.poisonStacks.length > 0) {
-      this.poisonStacks = this.poisonStacks.filter(s => s.expiry > time);
-      const totalDps = this.poisonStacks.reduce((sum, s) => sum + s.dps, 0);
-      if (totalDps > 0) {
-        this.hp -= totalDps * (delta / 1000);
-        // Green tint hint
-        this.setTint(Phaser.Display.Color.GetColor(0x88, 0xff, 0x44));
+      let writeIdx = 0;
+      for (let i = 0; i < this.poisonStacks.length; i++) {
+        const s = this.poisonStacks[i];
+        if (s.expiry > time) {
+          totalDps += s.dps;
+          if (writeIdx !== i) this.poisonStacks[writeIdx] = s;
+          writeIdx++;
+        }
       }
-    } else {
-      this.clearTint();
+      this.poisonStacks.length = writeIdx;
     }
 
-    // Apply slow/freeze tint
-    if (this.slowFactor < 0.5) {
-      this.setTint(0x99ddff);
-      this.anims.timeScale = this.slowFactor * 2;
+    // Determine target tint
+    let targetTint: number;
+    if (totalDps > 0 && this.slowFactor >= 0.5) {
+      targetTint = Phaser.Display.Color.GetColor(0x88, 0xff, 0x44); // poison green
+    } else if (this.slowFactor < 0.5) {
+      targetTint = 0x99ddff; // freeze blue
     } else {
-      this.clearTint();
-      this.anims.timeScale = 1;
+      targetTint = 0xffffff; // no tint
     }
+
+    // Only call setTint/clearTint if tint actually changed
+    if (this._lastTint !== targetTint) {
+      this._lastTint = targetTint;
+      if (targetTint === 0xffffff) {
+        this.clearTint();
+      } else {
+        this.setTint(targetTint);
+      }
+    }
+
+    // Apply damage regardless of tint
+    if (totalDps > 0) {
+      this.hp -= totalDps * (delta / 1000);
+    }
+
+    // Animation speed based on slow
+    this.anims.timeScale = this.slowFactor < 0.5 ? this.slowFactor * 2 : 1;
 
     // Hero attack timer (bosses never attack the hero directly)
     if (this.def.heroAttackRange && !this.def.isBoss) {

@@ -19,6 +19,7 @@ import { SoundSystem } from '../systems/SoundSystem';
 import { generateCityDecorations } from '../systems/CityDecorator';
 import { generateCityRoads, drawCityRoads } from '../systems/CityRoadNetwork';
 import { PerfTest } from '../systems/PerfTest';
+import { EnemyGrid } from '../systems/EnemyGrid';
 import { createPRNG } from '../utils/helpers';
 import {
   TILE_SIZE, GRID_COLS, GRID_ROWS, COLORS,
@@ -121,6 +122,16 @@ export class GameScene extends Phaser.Scene {
   private totalKills: number = 0;
   private barricadeCount: number = 0;
 
+  // Spatial grid for efficient enemy lookups
+  private enemyGrid!: EnemyGrid;
+  /** Cached boss enemy reference (avoids full scan each frame). */
+  private currentBoss: Enemy | null = null;
+
+  // Reusable VFX graphics object pool
+  private vfxPool: Phaser.GameObjects.Graphics[] = [];
+  private vfxPoolIndex: number = 0;
+  private readonly VFX_POOL_SIZE = 16;
+
   // Pause
   private isPaused: boolean = false;
 
@@ -186,8 +197,18 @@ export class GameScene extends Phaser.Scene {
     this.createGroups();
     this.createHero();
     this.createSystems();
+    // Spatial grid for enemy lookups — rebuilt each frame in update()
+    this.enemyGrid = new EnemyGrid();
     this.createUI();
     this.setupCamera();
+    // VFX graphics pool (after setupCamera so uiCam is available)
+    this.vfxPool = [];
+    this.vfxPoolIndex = 0;
+    for (let i = 0; i < this.VFX_POOL_SIZE; i++) {
+      const g = this.add.graphics().setVisible(false);
+      if (this.uiCam) this.uiCam.ignore(g);
+      this.vfxPool.push(g);
+    }
     this.setupInput();
     this.registerEvents();
     this.initResizeHandler();
@@ -202,6 +223,7 @@ export class GameScene extends Phaser.Scene {
         this.synergySystem, this.enemyGroup, this.flyerGroup,
         this.uiCam, (type, col, row) => this.placeTower(type, col, row),
       ).run();
+      this.hud.enablePerfStats();
     }
 
     // 4s countdown before first wave
@@ -783,11 +805,17 @@ export class GameScene extends Phaser.Scene {
     this.events.on('check_can_afford', (cost: number, cb: (v: boolean) => void) => cb(this.economy.canAfford(cost)));
     this.events.on('ability_spend',    (cost: number) => this.economy.spend(cost));
 
-    // Tower targeting
+    // Tower targeting (uses spatial grid — O(cells in range) instead of O(all enemies))
     this.events.on('tower_find_target', (tower: Tower, cb: (e: Enemy) => void) => {
-      this.enemyGroup.getChildren().forEach(e => cb(e as Enemy));
+      const range = tower.range;
+      this.enemyGrid.query(tower.x, tower.y, range, e => { cb(e); });
       if (tower.def.targetsFlying) {
-        this.flyerGroup.getChildren().forEach(e => cb(e as Enemy));
+        this.flyerGroup.getChildren().forEach(e => {
+          const enemy = e as Enemy;
+          if (!enemy.active) return;
+          const d = Phaser.Math.Distance.Between(tower.x, tower.y, enemy.x, enemy.y);
+          if (d <= range) cb(enemy);
+        });
       }
     });
 
@@ -799,6 +827,8 @@ export class GameScene extends Phaser.Scene {
     this.events.on('projectile_hit', (proj: Projectile, target: Enemy) => this.handleHit(proj, target));
 
     this.events.on('enemy_died', (enemy: Enemy) => {
+      // Clear boss cache if the boss died
+      if (this.currentBoss === enemy) this.currentBoss = null;
       this.sfx.play(enemy.def.isBoss ? 'boss_die' : 'enemy_die');
       const goldMult = this.comboSystem.multiplier * this.weatherSystem.mods.goldEarnMult;
       this.economy.earn(Math.round(enemy.reward * goldMult));
@@ -832,32 +862,31 @@ export class GameScene extends Phaser.Scene {
       }
     });
 
-    // Hero attack
+    // Hero attack (uses spatial grid)
     this.events.on('hero_find_target', (hx: number, hy: number, range: number) => {
       let best: Enemy | null = null;
       let bestProgress = -1;
-      const checkEnemy = (e: Phaser.GameObjects.GameObject) => {
-        const enemy = e as Enemy;
+      this.enemyGrid.query(hx, hy, range, enemy => {
         if (!enemy.active || enemy.hp <= 0 || enemy.isPhased) return;
-        const d = Phaser.Math.Distance.Between(hx, hy, enemy.x, enemy.y);
-        if (d <= range && enemy.pathProgress > bestProgress) {
+        if (enemy.pathProgress > bestProgress) {
           best = enemy;
           bestProgress = enemy.pathProgress;
         }
-      };
-      this.enemyGroup.getChildren().forEach(checkEnemy);
-      this.flyerGroup.getChildren().forEach(checkEnemy);
+      });
       if (best !== null) {
         const target: Enemy = best;
         this.hero.playAttack();
         target.takeDamage(this.hero.attackDamage);
-        // Sword slash FX
+        // Sword slash FX (pooled graphics)
         const g = this.vfxGraphics().setDepth(10);
         g.lineStyle(3, 0xffdd44, 1);
         g.lineBetween(this.hero.x, this.hero.y, target.x, target.y);
         g.fillStyle(0xffffaa, 0.6);
         g.fillCircle(target.x, target.y, 12);
-        this.tweens.add({ targets: g, alpha: 0, duration: 180, onComplete: () => g.destroy() });
+        this.tweens.add({ targets: g, alpha: 0, duration: 180, onComplete: () => {
+          g.clear();
+          g.setVisible(false);
+        } });
         const em = this.vfxParticles(target.x, target.y, 'particle_spark', {
           speed: { min: 30, max: 80 }, lifespan: 250, scale: { start: 0.7, end: 0 },
           quantity: 6, emitting: false,
@@ -1144,13 +1173,11 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (evo === 'hurricane') {
-      // Fire 4 projectiles in a spread around the tower
+      // Fire 4 projectiles in a spread around the tower (uses spatial grid)
       for (let a = 0; a < 4; a++) {
-        const t = this.enemyGroup.getChildren().find(
-          e => Phaser.Math.Distance.Between(tower.x, tower.y, (e as Enemy).x, (e as Enemy).y) <= tower.range
-        );
+        const t = this.enemyGrid.findNearest(tower.x, tower.y, tower.range);
         if (t) {
-          const ecfg = { ...cfg, target: t as Enemy, pierce: false, bounceLeft: 0 };
+          const ecfg = { ...cfg, target: t, pierce: false, bounceLeft: 0 };
           const p = new Projectile(this, ecfg);
           this.projectileGroup.add(p);
         }
@@ -1163,11 +1190,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private getTargetOffset(base: Enemy, _offset: number): Enemy | null {
-    // For spread shots, find enemy near offset
-    const nearEnemy = (this.enemyGroup.getChildren() as Enemy[]).find(
-      e => Math.abs(e.x - base.x) < 60 && e !== base
-    );
-    return nearEnemy ?? null;
+    // For spread shots, find enemy near offset (uses spatial grid)
+    return this.enemyGrid.find(base.x, base.y, 60, e => e !== base && e.active);
   }
 
   private handleHit(proj: Projectile, target: Enemy) {
@@ -1179,16 +1203,14 @@ export class GameScene extends Phaser.Scene {
     const ignoreArmor = cfg.specialTags.includes('armor_pierce');
     target.takeDamage(cfg.damage, ignoreArmor);
 
-    // Splash
+    // Splash (uses spatial grid)
     if (cfg.splashRadius > 0) {
-      const all = [...this.enemyGroup.getChildren() as Enemy[], ...this.flyerGroup.getChildren() as Enemy[]];
-      for (const e of all) {
-        if (e === target || !e.active) continue;
-        if (Phaser.Math.Distance.Between(proj.x, proj.y, e.x, e.y) <= cfg.splashRadius) {
-          e.takeDamage(Math.round(cfg.damage * (cfg.bigSplash ? 0.6 : 0.4)));
-          if (e.hp <= 0) e.die();
-        }
-      }
+      const splashDmg = Math.round(cfg.damage * (cfg.bigSplash ? 0.6 : 0.4));
+      this.enemyGrid.query(proj.x, proj.y, cfg.splashRadius, e => {
+        if (e === target || !e.active) return;
+        e.takeDamage(splashDmg);
+        if (e.hp <= 0) e.die();
+      });
       this.spawnExplosion(proj.x, proj.y, Math.min(cfg.splashRadius, 48), COLORS.FX_EXPLOSION);
     }
 
@@ -1209,28 +1231,24 @@ export class GameScene extends Phaser.Scene {
       target.takeDamage(Math.round(cfg.damage * 2.0));
     }
 
-    // Plague spread: when target dies, poison nearby enemies
+    // Plague spread: when target dies, poison nearby enemies (uses spatial grid)
     if (cfg.specialTags.includes('spread_poison')) {
-      const all = [...this.enemyGroup.getChildren() as Enemy[], ...this.flyerGroup.getChildren() as Enemy[]];
-      for (const e of all) {
-        if (e === target || !e.active) continue;
-        if (Phaser.Math.Distance.Between(target.x, target.y, e.x, e.y) < 80) {
-          e.applyPoison(cfg.effectValue || 10, 4000, now);
-        }
-      }
+      const poisonDps = cfg.effectValue || 10;
+      this.enemyGrid.query(target.x, target.y, 80, e => {
+        if (e === target || !e.active) return;
+        e.applyPoison(poisonDps, 4000, now);
+      });
     }
 
-    // Overload death pulse: when an enemy dies from this, explode AoE
+    // Overload death pulse: when an enemy dies from this, explode AoE (uses spatial grid)
     if (cfg.specialTags.includes('death_pulse')) {
       this.spawnExplosion(target.x, target.y, 90, 0xffff44);
-      const nearby = [...this.enemyGroup.getChildren() as Enemy[], ...this.flyerGroup.getChildren() as Enemy[]];
-      for (const e of nearby) {
-        if (e === target || !e.active) continue;
-        if (Phaser.Math.Distance.Between(target.x, target.y, e.x, e.y) <= 90) {
-          e.takeDamage(Math.round(cfg.damage * 0.35));
-          if (e.hp <= 0) e.die();
-        }
-      }
+      const pulseDmg = Math.round(cfg.damage * 0.35);
+      this.enemyGrid.query(target.x, target.y, 90, e => {
+        if (e === target || !e.active) return;
+        e.takeDamage(pulseDmg);
+        if (e.hp <= 0) e.die();
+      });
     }
 
     // Chain lightning (tesla)
@@ -1244,18 +1262,19 @@ export class GameScene extends Phaser.Scene {
 
   private chainLightning(from: Enemy, damage: number, bouncesLeft: number, now: number) {
     if (bouncesLeft <= 0) return;
-    const all = this.enemyGroup.getChildren() as Enemy[];
-    const next = all
-      .filter(e => e !== from && e.active && Phaser.Math.Distance.Between(from.x, from.y, e.x, e.y) < 120)
-      .sort((a, b) => Phaser.Math.Distance.Between(from.x, from.y, a.x, a.y) -
-                       Phaser.Math.Distance.Between(from.x, from.y, b.x, b.y))[0];
+    // Use spatial grid to find nearest enemy within range
+    const next = this.enemyGrid.find(from.x, from.y, 120, e => e !== from && e.active);
     if (!next) return;
 
-    // Draw arc
+    // Draw arc using pooled graphics
     const g = this.vfxGraphics().setDepth(8);
+    g.clear();
     g.lineStyle(2, 0xffff00, 0.9);
     g.lineBetween(from.x, from.y, next.x, next.y);
-    this.tweens.add({ targets: g, alpha: 0, duration: 300, onComplete: () => g.destroy() });
+    this.tweens.add({ targets: g, alpha: 0, duration: 300, onComplete: () => {
+      g.clear();
+      g.setVisible(false);
+    } });
 
     next.takeDamage(Math.round(damage));
     next.applyStun(300, now);
@@ -1267,7 +1286,10 @@ export class GameScene extends Phaser.Scene {
     const g = this.vfxGraphics().setDepth(7);
     g.fillStyle(color, 0.5);
     g.fillCircle(x, y, r * 0.6);
-    this.tweens.add({ targets: g, alpha: 0, scaleX: 1.5, scaleY: 1.5, duration: 300, onComplete: () => g.destroy() });
+    this.tweens.add({ targets: g, alpha: 0, scaleX: 1.5, scaleY: 1.5, duration: 300, onComplete: () => {
+      g.clear();
+      g.setVisible(false);
+    } });
 
     const em = this.vfxParticles(x, y, 'particle_exp', {
       speed: { min: 60, max: 200 },
@@ -1611,41 +1633,58 @@ export class GameScene extends Phaser.Scene {
     this.towerGroup.getChildren().forEach(obj => {
       const t = obj as Tower;
       if (!t.isAura) return;
-      const enemies = this.enemyGroup.getChildren() as Enemy[];
-      for (const e of enemies) {
-        if (Phaser.Math.Distance.Between(t.x, t.y, e.x, e.y) <= t.range) {
-          e.applySlow(0.4, 500, now);
-        }
-      }
+      this.enemyGrid.query(t.x, t.y, t.range, e => {
+        e.applySlow(0.4, 500, now);
+      });
     });
   }
 
   // ─── Boss tracking ───────────────────────────────────────────────────────
   private updateBossBar() {
-    const enemies = [...this.enemyGroup.getChildren() as Enemy[], ...this.flyerGroup.getChildren() as Enemy[]];
-    const boss = enemies.find(e => e.def.isBoss);
-    if (boss) {
-      this.events.emit('boss_hp_update', boss.hp, boss.maxHp, boss.def.label);
+    // Refresh cached boss if it became inactive
+    if (this.currentBoss && (!this.currentBoss.active || this.currentBoss.hp <= 0)) {
+      this.currentBoss = null;
+    }
+    // Scan for a new boss only when we don't have one cached
+    if (!this.currentBoss) {
+      const allGround = this.enemyGroup.getChildren() as Enemy[];
+      for (let i = 0; i < allGround.length; i++) {
+        const e = allGround[i];
+        if (e.active && e.def.isBoss) { this.currentBoss = e; break; }
+      }
+      if (!this.currentBoss) {
+        const allFliers = this.flyerGroup.getChildren() as Enemy[];
+        for (let i = 0; i < allFliers.length; i++) {
+          const e = allFliers[i];
+          if (e.active && e.def.isBoss) { this.currentBoss = e; break; }
+        }
+      }
+    }
+    if (this.currentBoss) {
+      this.events.emit('boss_hp_update', this.currentBoss.hp, this.currentBoss.maxHp, this.currentBoss.def.label);
     }
   }
 
   // ─── Healer aura ────────────────────────────────────────────────────────
   private processHealerAura(delta: number) {
-    const healers = (this.enemyGroup.getChildren() as Enemy[]).filter(e => e.def.special === 'heal_aura');
-    for (const healer of healers) {
-      for (const e of this.enemyGroup.getChildren() as Enemy[]) {
-        if (e === healer) continue;
-        if (Phaser.Math.Distance.Between(healer.x, healer.y, e.x, e.y) < 100) {
-          e.hp = Math.min(e.maxHp, e.hp + healer.def.specialValue * (delta / 1000));
-        }
-      }
+    const allGround = this.enemyGroup.getChildren() as Enemy[];
+    for (let i = 0; i < allGround.length; i++) {
+      const healer = allGround[i];
+      if (!healer.active || healer.def.special !== 'heal_aura') continue;
+      this.enemyGrid.query(healer.x, healer.y, 100, e => {
+        if (e === healer || !e.active) return;
+        e.hp = Math.min(e.maxHp, e.hp + healer.def.specialValue * (delta / 1000));
+      });
     }
   }
 
-  // ─── Wrappers for transient VFX — auto-ignore on UI camera ─────────────
+  // ─── Wrappers for transient VFX — uses object pool ─────────────────────
   private vfxGraphics(): Phaser.GameObjects.Graphics {
-    const g = this.add.graphics();
-    if (this.uiCam) this.uiCam.ignore(g);
+    // Cycle through the pool
+    const g = this.vfxPool[this.vfxPoolIndex];
+    this.vfxPoolIndex = (this.vfxPoolIndex + 1) % this.VFX_POOL_SIZE;
+    g.clear();
+    g.setAlpha(1).setScale(1).setVisible(true);
     return g;
   }
 
@@ -1666,6 +1705,19 @@ export class GameScene extends Phaser.Scene {
     this.abilitySystem.update(delta);
     this.weatherSystem.update(delta);
     this.comboSystem.update(delta);
+
+    // Rebuild spatial grid once per frame
+    this.enemyGrid.clear();
+    const allGround = this.enemyGroup.getChildren() as Enemy[];
+    for (let i = 0; i < allGround.length; i++) {
+      const e = allGround[i];
+      if (e.active) this.enemyGrid.insert(e);
+    }
+    const allFliers = this.flyerGroup.getChildren() as Enemy[];
+    for (let i = 0; i < allFliers.length; i++) {
+      const e = allFliers[i];
+      if (e.active) this.enemyGrid.insert(e);
+    }
 
     // Update towers
     this.towerGroup.getChildren().forEach(t => (t as Tower).preUpdate(time, delta));
@@ -1710,6 +1762,12 @@ export class GameScene extends Phaser.Scene {
       this.hero.hp,
       this.hero.maxHp,
       this.hero.level,
+    );
+
+    this.hud.updatePerfStats(
+      this.enemyGroup.countActive() + this.flyerGroup.countActive(),
+      this.towerGroup.countActive(),
+      this.projectileGroup.countActive(),
     );
 
     this.updateMinimap();
