@@ -103,15 +103,15 @@ export class BootScene extends Phaser.Scene {
     this.load.image('ability_heal_aura',        'assets/tiles/ability_heal_aura.png');
 
     // ── Economy building textures (AI-generated, optional — procedural fallback in create())
-    this.load.image('eco_farm',       'assets/tiles/eco_farm.png');
-    this.load.image('eco_mill',       'assets/tiles/eco_mill.png');
-    this.load.image('eco_bakery',     'assets/tiles/eco_bakery.png');
-    this.load.image('eco_fishery',    'assets/tiles/eco_fishery.png');
-    this.load.image('eco_harbor',     'assets/tiles/eco_harbor.png');
-    this.load.image('eco_warehouse',  'assets/tiles/eco_warehouse.png');
-    this.load.image('eco_market',     'assets/tiles/eco_market.png');
-    this.load.image('eco_lighthouse', 'assets/tiles/eco_lighthouse.png');
+    //    Upgrade variants: eco_{type}_1 (Mk II), eco_{type}_2 (Mk III)
+    const ECO_TYPES = ['farm', 'mill', 'bakery', 'fishery', 'harbor', 'warehouse', 'market', 'lighthouse'];
+    for (const ecoType of ECO_TYPES) {
+      this.load.image(`eco_${ecoType}`, `assets/tiles/eco_${ecoType}.png`);
+      this.load.image(`eco_${ecoType}_1`, `assets/tiles/eco_${ecoType}_1.png`);
+      this.load.image(`eco_${ecoType}_2`, `assets/tiles/eco_${ecoType}_2.png`);
+    }
     this.load.image('eco_cart',       'assets/tiles/eco_cart.png');
+    this.load.image('eco_fisher_ship', 'assets/tiles/eco_fisher_ship.png');
   }
 
   create() {

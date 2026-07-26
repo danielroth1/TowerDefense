@@ -19,8 +19,8 @@ export interface EconomyUpgradeTier {
   cycleTime: number;        // ms between production cycles
   label: string;
   /** Multiplier applied to the base gold value of produced goods. */
-  valueMultiplier?: number;
-}
+  valueMultiplier?: number;  /** Extra inventory capacity granted by this upgrade. */
+  extraCapacity?: number;}
 
 // ─── Building Definition ─────────────────────────────────────────────────────
 
@@ -154,25 +154,25 @@ export const ECO_BUILDING_DEFS: Record<EconomyBuildingType, EconomyBuildingDef> 
   fishery: {
     type: 'fishery',
     label: 'Fishery',
-    description: 'Catches fish. Must be adjacent to water.',
+    description: 'Catches fish with a boat. 2×1 — straddles land and water.',
     baseCost: 80,
     color: 0x5588bb,
-    width: 1, height: 1,
+    width: 2, height: 1,
     textureKey: 'eco_fishery',
     produces: 'fish',
     consumes: null,
     baseCycleTime: 10000,
     goldPerUnit: 0, // Value comes from harbor
     upgrades: [
-      { cost: 60,  cycleTime: 7000,  label: 'Nets',    valueMultiplier: 1.0 },
-      { cost: 100, cycleTime: 5000,  label: 'Trawler', valueMultiplier: 1.0 },
+      { cost: 60,  cycleTime: 7000,  label: 'Nets',         valueMultiplier: 1.0 },
+      { cost: 100, cycleTime: 5000,  label: 'Trawler',      valueMultiplier: 1.25 },
     ],
     placement: {
       tileType: 'buildable',
       requireWaterAdjacent: true,
       forbidWaterAdjacent: false,
       requireRoadAdjacent: false,
-      straddlesWater: false,
+      straddlesWater: true,
     },
     isEndpoint: false,
     isStorage: false,
@@ -220,8 +220,8 @@ export const ECO_BUILDING_DEFS: Record<EconomyBuildingType, EconomyBuildingDef> 
     baseCycleTime: 0,
     goldPerUnit: 0,
     upgrades: [
-      { cost: 50,  cycleTime: 0, label: 'Stockpile',  valueMultiplier: 1.5 },
-      { cost: 80,  cycleTime: 0, label: 'Depot',      valueMultiplier: 2.0 },
+      { cost: 50,  cycleTime: 0, label: 'Stockpile',  valueMultiplier: 1.5, extraCapacity: 3 },
+      { cost: 80,  cycleTime: 0, label: 'Depot',      valueMultiplier: 2.0, extraCapacity: 5 },
     ],
     placement: {
       tileType: 'buildable',

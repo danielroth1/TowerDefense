@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import type { EconomyBuildingType, EconomyBuildingDef, EconomyUpgradeTier } from '../data/economy';
 import { ECO_BUILDING_DEFS, WAREHOUSE_CAPACITY } from '../data/economy';
-import { TILE_SIZE } from '../utils/constants';
+import { TILE_SIZE, SELL_REFUND_RATIO } from '../utils/constants';
 
 export class EconomyBuilding extends Phaser.GameObjects.Container {
   readonly buildingType: EconomyBuildingType;
@@ -22,6 +22,8 @@ export class EconomyBuilding extends Phaser.GameObjects.Container {
   // Visual
   private sprite: Phaser.GameObjects.Image | null = null;
   private levelLabel: Phaser.GameObjects.Text | null = null;
+  private selected: boolean = false;
+  private rangeCircle: Phaser.GameObjects.Graphics | null = null;
 
   get def(): EconomyBuildingDef { return ECO_BUILDING_DEFS[this.buildingType]; }
 
@@ -69,7 +71,15 @@ export class EconomyBuilding extends Phaser.GameObjects.Container {
   redraw() {
     this.removeAll(true);
 
-    const texKey = this.def.textureKey;
+    // Use upgrade variant texture if available (eco_{type}_1, eco_{type}_2)
+    let texKey = this.def.textureKey;
+    if (this.level > 1) {
+      const variantKey = `${this.def.textureKey}_${this.level - 1}`;
+      if (this.scene.textures.exists(variantKey)) {
+        texKey = variantKey;
+      }
+    }
+
     const displayW = this.def.width * TILE_SIZE * 0.9;
     const displayH = this.def.height * TILE_SIZE * 0.9;
 
@@ -157,7 +167,39 @@ export class EconomyBuilding extends Phaser.GameObjects.Container {
     const tier = this.def.upgrades[this.level - 1];
     this.totalSpent += tier.cost;
     this.level++;
+    if (tier.extraCapacity) this.maxInventory += tier.extraCapacity;
     this.redraw();
     return tier;
+  }
+
+  sellValue(): number {
+    return Math.floor(this.totalSpent * SELL_REFUND_RATIO);
+  }
+
+  // ─── Selection ──────────────────────────────────────────────────────────
+
+  showRange(show: boolean) {
+    this.rangeCircle?.destroy();
+    this.rangeCircle = null;
+    if (!show) {
+      this.selected = false;
+      return;
+    }
+    this.selected = true;
+    // Show a highlight ring around the building footprint
+    const displayW = this.def.width * TILE_SIZE;
+    const displayH = this.def.height * TILE_SIZE;
+    this.rangeCircle = this.scene.add.graphics().setDepth(1);
+    this.rangeCircle.lineStyle(2, 0x44ff88, 0.5);
+    this.rangeCircle.strokeRect(-displayW / 2 - 2, -displayH / 2 - 2, displayW + 4, displayH + 4);
+    this.add(this.rangeCircle);
+  }
+
+  getRangeCircle(): Phaser.GameObjects.Graphics | null {
+    return this.rangeCircle;
+  }
+
+  isSelected(): boolean {
+    return this.selected;
   }
 }

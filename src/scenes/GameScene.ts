@@ -133,6 +133,7 @@ export class GameScene extends Phaser.Scene {
   private economyBuildings: EconomyBuilding[] = [];
   private hoverOverlay!: Phaser.GameObjects.Image;
   private selectedTower: Tower | null = null;
+  private selectedEcoBuilding: EconomyBuilding | null = null;
 
   /** Set when an economy panel button is clicked — prevents the same pointerup
    *  from immediately placing the building on the map. */
@@ -218,7 +219,8 @@ export class GameScene extends Phaser.Scene {
 
     // Create economy systems early — markets from city decorations need them
     this.economy    = new EconomyManager(this, this._debug ? DEBUG_STARTING_GOLD : undefined);
-    this.economySim = new EconomySimulation(this.economy);
+    this.economySim = new EconomySimulation(this.economy, this);
+    this.economySim.setGrid(this.mapData.grid);
     this.transportSys = new TransportSystem(this, this.economySim);
 
     this.placeCityDecorations();
@@ -708,6 +710,37 @@ export class GameScene extends Phaser.Scene {
       this.bottomBar.showBuildMode();
     };
 
+    this.bottomBar.onSellEco = () => {
+      if (!this.selectedEcoBuilding) return;
+      const b = this.selectedEcoBuilding;
+      this.economy.earn(b.sellValue());
+      // Restore occupied tiles to buildable
+      const def = b.def;
+      for (let dr = 0; dr < def.height; dr++) {
+        for (let dc = 0; dc < def.width; dc++) {
+          this.mapData.grid[b.gridRow + dr][b.gridCol + dc].type = 'buildable';
+          this.refreshTileSprite(b.gridRow + dr, b.gridCol + dc);
+        }
+      }
+      // Remove from tracking arrays
+      const idx = this.economyBuildings.indexOf(b);
+      if (idx >= 0) this.economyBuildings.splice(idx, 1);
+      this.economySim.removeBuilding(b);
+      this.transportSys.setBuildings(this.economyBuildings);
+      this.selectedEcoBuilding = null;
+      this.regenerateAllRoads();
+      this.bottomBar.showBuildMode();
+    };
+
+    this.bottomBar.onUpgradeEco = () => {
+      if (!this.selectedEcoBuilding) return;
+      const cost = this.selectedEcoBuilding.upgradeCost();
+      if (!this.economy.spend(cost)) return;
+      this.sfx.play('tower_place');
+      this.selectedEcoBuilding.upgrade();
+      this.bottomBar.showEconomyMode(this.selectedEcoBuilding);
+    };
+
     this.bottomBar.onSendWave = () => this.waveManager.sendEarlyWave();
 
     this.bottomBar.onToggleEconomy = () => {
@@ -1072,6 +1105,13 @@ export class GameScene extends Phaser.Scene {
         return;
       }
 
+      // Economy building click → upgrade/sell panel
+      const clickedEco = this.getEconomyBuildingAt(col, row);
+      if (clickedEco) {
+        this.selectEcoBuilding(clickedEco);
+        return;
+      }
+
       // Hero movement (only when selected; hero stays selected after moving)
       if (this.heroSelected) {
         if (tile.type !== 'ground') {
@@ -1189,6 +1229,8 @@ export class GameScene extends Phaser.Scene {
   private deselectTower() {
     this.selectedTower?.showRange(false);
     this.selectedTower = null;
+    this.selectedEcoBuilding?.showRange(false);
+    this.selectedEcoBuilding = null;
     this.heroSelected = false;
     this.hero.setSelected(false);
     this.bottomBar.showBuildMode();
@@ -1220,6 +1262,26 @@ export class GameScene extends Phaser.Scene {
 
   private getTowerAt(col: number, row: number): Tower | null {
     return this.synergySystem.getTowerAt(col, row);
+  }
+
+  private getEconomyBuildingAt(col: number, row: number): EconomyBuilding | null {
+    return this.economyBuildings.find(b => {
+      const def = ECO_BUILDING_DEFS[b.buildingType];
+      return col >= b.gridCol && col < b.gridCol + def.width
+          && row >= b.gridRow && row < b.gridRow + def.height;
+    }) ?? null;
+  }
+
+  private selectEcoBuilding(building: EconomyBuilding) {
+    this.deselectTower();
+    this.selectedEcoBuilding?.showRange(false);
+    this.selectedEcoBuilding = building;
+    building.showRange(true);
+    const rc = building.getRangeCircle();
+    if (rc && this.uiCam) this.uiCam.ignore(rc);
+    this.heroSelected = false;
+    this.hero.setSelected(false);
+    this.bottomBar.showEconomyMode(building);
   }
 
   private towerCol(tower: Tower): number {
@@ -1312,6 +1374,10 @@ export class GameScene extends Phaser.Scene {
 
     // Ignore on UI camera so it doesn't render twice (once on map, once on UI overlay)
     if (this.uiCam) this.uiCam.ignore(building);
+
+    // Ignore fisher ship on UI camera
+    const fisherShip = this.economySim.getFisherShip(building);
+    if (fisherShip && this.uiCam) this.uiCam.ignore(fisherShip);
 
     const def = ECO_BUILDING_DEFS[type];
 

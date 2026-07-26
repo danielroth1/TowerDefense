@@ -634,6 +634,13 @@
         <button class="preset-btn" data-eco="cart">
           <span class="preset-dot" style="background:#aa7744"></span> Cart
         </button>
+        <button class="preset-btn" data-eco="fisher_ship">
+          <span class="preset-dot" style="background:#6699cc"></span> Fisher Ship
+        </button>
+      </div>
+      <div id="ecoVariantRow" style="display:none; margin-top:10px;">
+        <div style="font-size:11px; color:var(--muted); margin-bottom:6px;" id="ecoVariantLabel">Level / Upgrade</div>
+        <div class="preset-grid" id="ecoVariantGrid"></div>
       </div>
     </div>
 
@@ -983,6 +990,13 @@
         file: 'eco_cart',
         w: 256, h: 128,
       },
+      fisher_ship: {
+        name: 'Fisher Ship',
+        prompt: 'top-down game asset, small wooden fishing boat with single sail and fishing net draped over the side, simple wooden hull, isolated on dark transparent background, stylized fantasy art, sharp edges',
+        color: '#6699cc',
+        file: 'eco_fisher_ship',
+        w: 128, h: 128,
+      },
     };
 
     // Pricing cache — populated from /api/pricing (fal.ai Platform API)
@@ -1067,6 +1081,8 @@
     const $tooltip = document.getElementById('tooltip');
     const $towerVariantRow = document.getElementById('towerVariantRow');
     const $towerVariantGrid = document.getElementById('towerVariantGrid');
+    const $ecoVariantRow = document.getElementById('ecoVariantRow');
+    const $ecoVariantGrid = document.getElementById('ecoVariantGrid');
     const $autoRemoveBg = document.getElementById('autoRemoveBg');
     const $bgModelSelect = document.getElementById('bgModelSelect');
     const $browseModelsBtn = document.getElementById('browseModelsBtn');
@@ -1089,6 +1105,7 @@
           document.querySelectorAll('.preset-btn[data-city]').forEach(b => b.classList.remove('active'));
           document.querySelectorAll('.preset-btn[data-ability]').forEach(b => b.classList.remove('active'));
           document.querySelectorAll('.preset-btn[data-eco]').forEach(b => b.classList.remove('active'));
+          $ecoVariantRow.style.display = 'none';
           applyPreset(btn.dataset.preset);
         });
       });
@@ -1127,6 +1144,7 @@
       currentTowerType = null;
       document.querySelectorAll('.preset-btn[data-tower]').forEach(b => b.classList.remove('active'));
       $towerVariantRow.style.display = 'none';
+      $ecoVariantRow.style.display = 'none';
     }
 
     function applyTowerType(type) {
@@ -1238,10 +1256,6 @@
       currentPreset = null;
       clearTowerSelection();
       const preset = ECO_PRESETS[name];
-      $prompt.value = preset.prompt;
-      $filename.value = preset.file;
-      $width.value = preset.w;
-      $height.value = preset.h;
       $autoRemoveBg.checked = false;
       // Deactivate terrain, tower, city, and ability buttons
       document.querySelectorAll('.preset-btn[data-preset]').forEach(b => b.classList.remove('active'));
@@ -1251,8 +1265,47 @@
       document.querySelectorAll('.preset-btn[data-eco]').forEach(b =>
         b.classList.toggle('active', b.dataset.eco === name)
       );
+
+      // If this preset has variants, show variant buttons
+      if (preset.variants) {
+        $ecoVariantRow.style.display = '';
+        $ecoVariantGrid.innerHTML = preset.variants.map((v, i) =>
+          `<button class="preset-btn" data-eco-variant="${i}" style="font-size:11px">
+             <span class="preset-dot" style="background:${preset.color}"></span>
+             ${v.label}
+           </button>`
+        ).join('');
+
+        document.querySelectorAll('.preset-btn[data-eco-variant]').forEach(btn => {
+          btn.addEventListener('click', () => applyEcoVariant(name, parseInt(btn.dataset.ecoVariant)));
+        });
+
+        // Auto-select first variant
+        applyEcoVariant(name, 0);
+      } else {
+        $ecoVariantRow.style.display = 'none';
+        $prompt.value = preset.prompt;
+        $filename.value = preset.file;
+        $width.value = preset.w;
+        $height.value = preset.h;
+        $generateBtn.disabled = false;
+        scheduleEstimate();
+      }
+    }
+
+    function applyEcoVariant(type, index) {
+      const preset = ECO_PRESETS[type];
+      const variant = preset.variants[index];
+      $prompt.value = variant.prompt;
+      $filename.value = variant.file;
+      $width.value = preset.w;
+      $height.value = preset.h;
       $generateBtn.disabled = false;
       scheduleEstimate();
+
+      document.querySelectorAll('.preset-btn[data-eco-variant]').forEach(b =>
+        b.classList.toggle('active', parseInt(b.dataset.ecoVariant) === index)
+      );
     }
 
     function updateModelInfo() {

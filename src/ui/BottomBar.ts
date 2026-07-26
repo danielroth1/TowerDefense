@@ -3,6 +3,7 @@ import { TOWER_DEFS, TOWER_TYPES_ORDERED, type TowerType } from '../data/towers'
 import { COLORS } from '../utils/constants';
 import type { EconomyManager } from '../systems/EconomyManager';
 import type { Tower } from '../entities/Tower';
+import type { EconomyBuilding } from '../entities/EconomyBuilding';
 import { drawElevatedButton } from '../utils/ButtonStyles';
 
 const TLEFT = 0; // 12;  // left margin for tower button area
@@ -32,6 +33,7 @@ export class BottomBar {
   private upgRoot:    Phaser.GameObjects.Container;
   private upgBtnList: UBtn[] = [];
   private currentUpgradeTower: Tower | null = null;
+  private currentEcoBuilding: EconomyBuilding | null = null;
 
   // Wave button (floating, bottom-right corner, above the bar)
   private waveBg:     Phaser.GameObjects.Graphics;
@@ -60,6 +62,8 @@ export class BottomBar {
   onUpgrade:    (() => void) | null = null;
   onEvolve:     ((branch: 0 | 1) => void) | null = null;
   onSell:       (() => void) | null = null;
+  onSellEco:    (() => void) | null = null;
+  onUpgradeEco: (() => void) | null = null;
   onSendWave:   (() => void) | null = null;
   onToggleEconomy: (() => void) | null = null;
 
@@ -175,6 +179,9 @@ export class BottomBar {
       this.refreshBuildAffordability();
       if (this.upgRoot.visible && this.currentUpgradeTower) {
         this.showUpgradeMode(this.currentUpgradeTower);
+      }
+      if (this.upgRoot.visible && this.currentEcoBuilding) {
+        this.showEconomyMode(this.currentEcoBuilding);
       }
     });
   }
@@ -419,6 +426,7 @@ export class BottomBar {
 
   showBuildMode() {
     this.currentUpgradeTower = null;
+    this.currentEcoBuilding = null;
     this.setBuildVisible(true);
     this.setBuildInputEnabled(true);
     this.upgRoot.setVisible(false);
@@ -433,6 +441,7 @@ export class BottomBar {
 
   showUpgradeMode(tower: Tower) {
     this.currentUpgradeTower = tower;
+    this.currentEcoBuilding = null;
     this.setBuildVisible(false);
     this.setBuildInputEnabled(false);
     this.scrollPrevBg.setVisible(false);
@@ -441,6 +450,20 @@ export class BottomBar {
     this.scrollNextHit.setVisible(false);
     this.clearUpgHits();
     this.rebuildUpgradeSection(tower);
+    this.upgRoot.setVisible(true);
+  }
+
+  showEconomyMode(building: EconomyBuilding) {
+    this.currentEcoBuilding = building;
+    this.currentUpgradeTower = null;
+    this.setBuildVisible(false);
+    this.setBuildInputEnabled(false);
+    this.scrollPrevBg.setVisible(false);
+    this.scrollPrevHit.setVisible(false);
+    this.scrollNextBg.setVisible(false);
+    this.scrollNextHit.setVisible(false);
+    this.clearUpgHits();
+    this.rebuildEconomySection(building);
     this.upgRoot.setVisible(true);
   }
 
@@ -593,6 +616,116 @@ export class BottomBar {
           fontSize: Math.max(9, actFSPx - 2) + 'px', fontFamily: 'monospace',
           color: act.statsDiff ? (can ? '#88cc88' : '#334433') : (can ? '#8899aa' : '#334455'),
           align: 'center',
+        }).setOrigin(0.5));
+      }
+
+      const line = [act.label.startsWith('💰') ? '' : `${act.cost}g`, act.hotkey ? `[${act.hotkey}]` : '']
+        .filter(Boolean).join(' ');
+      if (line) {
+        this.upgRoot.add(this.scene.add.text(cx, CY + h * 0.42, line, {
+          fontSize: Math.max(9, actFSPx - 1) + 'px', fontFamily: 'monospace',
+          color: can ? '#ffd700' : '#554433', align: 'center',
+        }).setOrigin(0.5));
+      }
+
+      if (can) {
+        const hit = this.scene.add.rectangle(cx, CY, w - 8, h - 8, 0, 0)
+          .setScrollFactor(0).setInteractive({ useHandCursor: true }).setDepth(50);
+        this.scene.cameras.main.ignore(hit);
+        hit.on('pointerover', () => this.drawUBtn(bg4, cx, CY, w - 4, h - 4, act.color, true, can));
+        hit.on('pointerout',  () => this.drawUBtn(bg4, cx, CY, w - 4, h - 4, act.color, false, can));
+        hit.on('pointerup',   () => act.cb());
+        this.upgBtnList.push({ bg: bg4, txt, hit });
+      }
+    });
+  }
+
+  private rebuildEconomySection(building: EconomyBuilding) {
+    this.upgRoot.removeAll(true);
+    this.upgBtnList = [];
+
+    const def = building.def;
+    const CY  = this._TOWER_CY;
+    const cx0 = this.upgradeCX(0);
+
+    // ── Info panel (current building) ──────────────────────────────────────
+    const infoBg = this.scene.add.graphics();
+    this.drawTowerBtn(infoBg, cx0, CY, this._TBW, this._TBH, def.color, false, false, true);
+    this.upgRoot.add(infoBg);
+
+    const iconSize = Math.round(this._TBW * 0.5);
+    if (this.scene.textures.exists(def.textureKey)) {
+      this.upgRoot.add(this.scene.add.image(cx0, CY - this._TBH * 0.25, def.textureKey).setDisplaySize(iconSize, iconSize));
+    }
+
+    const nameFSPx = Math.max(10, Math.round(this._TBW * 0.115));
+    this.upgRoot.add(this.scene.add.text(cx0, CY + this._TBH * 0.2,
+      `${def.label}\nLv${building.level}`, {
+        fontSize: nameFSPx + 'px', fontFamily: 'monospace', color: '#eef0f4', align: 'center', lineSpacing: 2,
+      }).setOrigin(0.5));
+
+    // Show production stats
+    const stats: string[] = [];
+    if (def.produces) {
+      stats.push(`⏱ ${(building.cycleTime / 1000).toFixed(1)}s`);
+    }
+    if (building.def.isStorage) {
+      stats.push(`📦 ${building.inventory}/${building.maxInventory}`);
+    }
+    if (stats.length > 0) {
+      this.upgRoot.add(this.scene.add.text(cx0, CY + this._TBH * 0.41,
+        stats.join(' '), {
+          fontSize: Math.max(9, nameFSPx - 2) + 'px', fontFamily: 'monospace', color: '#8899aa', align: 'center',
+        }).setOrigin(0.5));
+    }
+
+    // ── Action buttons ─────────────────────────────────────────────────────
+    interface EcoAction {
+      label: string; color: number; cb: () => void; enabled: boolean;
+      hotkey?: string; cost: number; previewStats?: string; statsDiff?: string;
+    }
+    const actions: EcoAction[] = [];
+
+    if (building.canUpgrade()) {
+      const cost = building.upgradeCost();
+      const tier = def.upgrades[building.level - 1];
+      const parts: string[] = [];
+      if (tier.cycleTime > 0) parts.push(`⏱ ${(tier.cycleTime / 1000).toFixed(1)}s`);
+      if (tier.valueMultiplier && tier.valueMultiplier > 1.0) parts.push(`×${tier.valueMultiplier}`);
+      if (tier.extraCapacity) parts.push(`+${tier.extraCapacity}📦`);
+      actions.push({
+        label: `⬆ ${tier.label}`, hotkey: 'U', cost,
+        color: this.economy.canAfford(cost) ? 0x1e5a3a : 0x333333,
+        enabled: this.economy.canAfford(cost),
+        previewStats: parts.join(' '),
+        cb: () => { this.onUpgradeEco?.(); this.showEconomyMode(building); },
+      });
+    }
+
+    const sellVal = building.sellValue();
+    actions.push({ label: '💰 Sell', cost: sellVal, color: 0x4a1a1a, enabled: true,
+      previewStats: `+${sellVal}g`, cb: () => this.onSellEco?.() });
+
+    actions.forEach((act, i) => {
+      const cx = this.upgradeCX(i + 1);
+      const can = act.enabled;
+      const w = this._TBW, h = this._TBH;
+      const actFSPx = Math.max(10, Math.round(w * 0.105));
+
+      const bg4 = this.scene.add.graphics();
+      this.upgRoot.add(bg4);
+      this.drawUBtn(bg4, cx, CY, w - 4, h - 4, act.color, false, can);
+
+      const txt = this.scene.add.text(cx, CY + h * 0.08, act.label, {
+        fontSize: actFSPx + 'px', fontFamily: 'monospace', color: can ? '#eef0f4' : '#445566', align: 'center',
+      }).setOrigin(0.5);
+      this.upgRoot.add(txt);
+
+      const subText = act.previewStats || '';
+      if (subText) {
+        this.upgRoot.add(this.scene.add.text(cx, CY + h * 0.26, subText, {
+          fontSize: Math.max(9, actFSPx - 2) + 'px', fontFamily: 'monospace',
+          color: can ? '#8899aa' : '#334455', align: 'center',
         }).setOrigin(0.5));
       }
 

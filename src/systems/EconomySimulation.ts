@@ -1,6 +1,8 @@
+import Phaser from 'phaser';
 import type { EconomyBuildingType, EconomyResource } from '../data/economy';
 import { ECO_BUILDING_DEFS, CHAIN_BONUS_MULTIPLIER, WAREHOUSE_CAPACITY, WAREHOUSE_BULK_BONUS } from '../data/economy';
 import type { EconomyBuilding } from '../entities/EconomyBuilding';
+import { FisherShip } from '../entities/FisherShip';
 import type { EconomyManager } from './EconomyManager';
 
 /*
@@ -47,13 +49,26 @@ function getProduces(type: EconomyBuildingType): EconomyResource | null {
 export class EconomySimulation {
   private buildings: EconomyBuilding[] = [];
   private economy: EconomyManager;
+  private scene: Phaser.Scene;
   private eventListeners: Array<(e: EconomyEvent) => void> = [];
 
   /** Tracks what resource type each warehouse is storing (by building reference). */
   private warehouseResources = new WeakMap<EconomyBuilding, EconomyResource>();
 
-  constructor(economy: EconomyManager) {
+  /** Fisher ships per fishery building. */
+  private fisherShips = new Map<EconomyBuilding, FisherShip>();
+
+  /** Map grid reference for ship pathfinding. */
+  private grid: { type: string }[][] = [];
+
+  constructor(economy: EconomyManager, scene: Phaser.Scene) {
     this.economy = economy;
+    this.scene = scene;
+  }
+
+  /** Set the map grid for fisher ship pathfinding. */
+  setGrid(grid: { type: string }[][]): void {
+    this.grid = grid;
   }
 
   // ─── Building management ────────────────────────────────────────────────
@@ -64,12 +79,29 @@ export class EconomySimulation {
     if (ECO_BUILDING_DEFS[building.buildingType].isStorage) {
       building.maxInventory = WAREHOUSE_CAPACITY;
     }
+    // Create a fisher ship for fishery buildings
+    if (building.buildingType === 'fishery' && this.grid.length > 0) {
+      const ship = new FisherShip(this.scene, building, this.grid);
+      ship.setFishingDuration(building.cycleTime);
+      this.fisherShips.set(building, ship);
+    }
   }
 
   removeBuilding(building: EconomyBuilding): void {
     const idx = this.buildings.indexOf(building);
     if (idx >= 0) this.buildings.splice(idx, 1);
+    // Destroy associated fisher ship
+    const ship = this.fisherShips.get(building);
+    if (ship) {
+      ship.destroy();
+      this.fisherShips.delete(building);
+    }
     building.destroy();
+  }
+
+  /** Get the fisher ship for a given fishery (if any). */
+  getFisherShip(building: EconomyBuilding): FisherShip | undefined {
+    return this.fisherShips.get(building);
   }
 
   getBuildings(): readonly EconomyBuilding[] {
@@ -101,6 +133,12 @@ export class EconomySimulation {
       // Don't produce if inventory is full
       if (b.inventory >= b.maxInventory) continue;
 
+      // Fisher ships: use ship-based production instead of direct timer
+      if (b.buildingType === 'fishery') {
+        this.updateFishery(b, delta);
+        continue;
+      }
+
       b.cycleTimer += delta;
       if (b.cycleTimer >= b.cycleTime) {
         b.cycleTimer -= b.cycleTime;
@@ -110,11 +148,33 @@ export class EconomySimulation {
       }
     }
 
+    // Update all fisher ships
+    for (const [building, ship] of this.fisherShips) {
+      const fishReady = ship.updateShip(delta);
+      if (fishReady) {
+        building.inventory++;
+        building.redraw();
+        this.emit({ type: 'produced', buildingType: 'fishery', resource: 'fish', amount: 1 });
+      }
+    }
+
     // Tick markets: slowly convert inventory to gold
     this.tickMarkets(delta);
 
     // Try to consume goods: move inventory from producers to consumers
     this.processConsumption();
+  }
+
+  /** Handle fishery production via fisher ship. */
+  private updateFishery(building: EconomyBuilding, _delta: number): void {
+    const ship = this.fisherShips.get(building);
+    if (!ship) return;
+    // Update fishing duration from building's cycle time (affected by upgrades)
+    ship.setFishingDuration(building.cycleTime);
+    // If the ship is idle, send it on a trip
+    if (ship.isIdle()) {
+      ship.startTrip();
+    }
   }
 
   /** Markets convert stored goods to gold over time (tick-based, not instant). */
