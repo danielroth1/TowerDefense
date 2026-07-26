@@ -105,8 +105,8 @@ export class Tower extends Phaser.GameObjects.Container {
     this.projectileSpeed = tier.projectileSpeed;
     this.redraw();
     this.applySynergies();
-    // Bounce animation
-    this.scene.tweens.add({ targets: this, scaleX: 1.25, scaleY: 1.25, duration: 120, yoyo: true, ease: 'Back.easeOut' });
+    // Bounce animation — always end at scale 1
+    this.scene.tweens.add({ targets: this, scaleX: 1.25, scaleY: 1.25, duration: 120, yoyo: true, ease: 'Back.easeOut', onComplete: () => { this.setScale(1); } });
   }
 
   canEvolve(): boolean {
@@ -128,7 +128,8 @@ export class Tower extends Phaser.GameObjects.Container {
     if (evo.special === 'aura_slow') this.isAura = true;
     this.applySynergies();
     this.redraw();
-    this.scene.tweens.add({ targets: this, scaleX: 1.4, scaleY: 1.4, duration: 200, yoyo: true });
+    // Bounce animation — always end at scale 1
+    this.scene.tweens.add({ targets: this, scaleX: 1.4, scaleY: 1.4, duration: 200, yoyo: true, onComplete: () => { this.setScale(1); } });
   }
 
   sellValue(): number {
