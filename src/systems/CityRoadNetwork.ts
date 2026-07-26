@@ -48,7 +48,7 @@ export interface CityRoadResult {
 const CLUSTER_DIST_SQ = (3.5 * TILE_SIZE) ** 2;  // ~3.5 tiles
 
 /** Half-width of a decorative road in pixels. */
-const ROAD_HALF_WIDTH = 6;
+const ROAD_HALF_WIDTH = 4;
 
 /** Chaikin subdivision iterations. */
 const SMOOTH_ITERATIONS = 2;
