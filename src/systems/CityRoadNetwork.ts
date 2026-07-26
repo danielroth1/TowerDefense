@@ -48,7 +48,7 @@ export interface CityRoadResult {
 const CLUSTER_DIST_SQ = (3.5 * TILE_SIZE) ** 2;  // ~3.5 tiles
 
 /** Half-width of a decorative road in pixels. */
-const ROAD_HALF_WIDTH = 4;
+const ROAD_HALF_WIDTH = 2;
 
 /** Chaikin subdivision iterations. */
 const SMOOTH_ITERATIONS = 2;
@@ -607,17 +607,15 @@ export function drawCityRoads(
   const ROAD_DARK   = 0x5a4e30;  // edge shadow
   const ROAD_LIGHT  = 0x9a8e70;  // highlight stones
 
-  // ── Draw road polygons ──────────────────────────────────────────────
-  for (const road of result.roads) {
-    const { points } = road;
-    if (points.length < 2) continue;
-
-    // Build left/right edge points
+  /**
+   * Build left/right edge points for a road at a given half-width multiplier.
+   * Returns { leftEdge, rightEdge, poly }.
+   */
+  function buildRoadPoly(points: Vec2[], widthMul: number) {
     const leftEdge: Vec2[] = [];
     const rightEdge: Vec2[] = [];
 
     for (let i = 0; i < points.length; i++) {
-      // Compute tangent direction
       let tx: number, ty: number;
       if (i === 0) {
         tx = points[1].x - points[0].x;
@@ -630,37 +628,64 @@ export function drawCityRoads(
         ty = points[i + 1].y - points[i - 1].y;
       }
       const len = Math.sqrt(tx * tx + ty * ty) || 1;
-      // Perpendicular normal
       const nx = -ty / len;
       const ny = tx / len;
 
-      // Slight noise on half-width for organic edges
       const wobble = 1 + (rng() - 0.5) * 0.2;
-      const hw = ROAD_HALF_WIDTH * wobble;
+      const hw = ROAD_HALF_WIDTH * wobble * widthMul;
 
       leftEdge.push({ x: points[i].x + nx * hw, y: points[i].y + ny * hw });
       rightEdge.push({ x: points[i].x - nx * hw, y: points[i].y - ny * hw });
     }
 
-    // Build polygon: left edge forward + right edge reversed
     const poly: Vec2[] = [...leftEdge, ...rightEdge.reverse()];
+    return { leftEdge, rightEdge, poly };
+  }
 
-    // Fill road body — fully opaque
-    g.fillStyle(ROAD_BASE, 1);
+  // ── Draw road polygons ──────────────────────────────────────────────
+  for (const road of result.roads) {
+    const { points } = road;
+    if (points.length < 2) continue;
+
+    // ── Soft blur edge (wider, low opacity) ─────────────────────────
+    const blurPoly = buildRoadPoly(points, 2.2);
+    g.fillStyle(ROAD_BASE, 0.10);
     g.beginPath();
-    g.moveTo(poly[0].x, poly[0].y);
-    for (let i = 1; i < poly.length; i++) {
-      g.lineTo(poly[i].x, poly[i].y);
+    g.moveTo(blurPoly.poly[0].x, blurPoly.poly[0].y);
+    for (let i = 1; i < blurPoly.poly.length; i++) {
+      g.lineTo(blurPoly.poly[i].x, blurPoly.poly[i].y);
     }
     g.closePath();
     g.fillPath();
 
-    // Dark edge stroke on left side
-    g.lineStyle(1.5, ROAD_DARK, 0.6);
+    // ── Mid blur edge (medium width, medium opacity) ────────────────
+    const midPoly = buildRoadPoly(points, 1.5);
+    g.fillStyle(ROAD_BASE, 0.20);
     g.beginPath();
-    g.moveTo(leftEdge[0].x, leftEdge[0].y);
-    for (let i = 1; i < leftEdge.length; i++) {
-      g.lineTo(leftEdge[i].x, leftEdge[i].y);
+    g.moveTo(midPoly.poly[0].x, midPoly.poly[0].y);
+    for (let i = 1; i < midPoly.poly.length; i++) {
+      g.lineTo(midPoly.poly[i].x, midPoly.poly[i].y);
+    }
+    g.closePath();
+    g.fillPath();
+
+    // ── Main road body — fully opaque ───────────────────────────────
+    const mainPoly = buildRoadPoly(points, 1.0);
+    g.fillStyle(ROAD_BASE, 1);
+    g.beginPath();
+    g.moveTo(mainPoly.poly[0].x, mainPoly.poly[0].y);
+    for (let i = 1; i < mainPoly.poly.length; i++) {
+      g.lineTo(mainPoly.poly[i].x, mainPoly.poly[i].y);
+    }
+    g.closePath();
+    g.fillPath();
+
+    // ── Subtle edge shadow stroke ───────────────────────────────────
+    g.lineStyle(0.5, ROAD_DARK, 0.3);
+    g.beginPath();
+    g.moveTo(mainPoly.leftEdge[0].x, mainPoly.leftEdge[0].y);
+    for (let i = 1; i < mainPoly.leftEdge.length; i++) {
+      g.lineTo(mainPoly.leftEdge[i].x, mainPoly.leftEdge[i].y);
     }
     g.strokePath();
 

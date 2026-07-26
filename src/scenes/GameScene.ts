@@ -1371,7 +1371,7 @@ export class GameScene extends Phaser.Scene {
       btn.bg.lineStyle(1, borderColor, 0.55);
       btn.bg.strokeRoundedRect(cx - btns / 2, cy - btns / 2, btns, btns, 6);
 
-      const iconSize = Math.round(btns * 0.55);
+      const iconSize = Math.round(btns * 0.72);
       btn.icon.setPosition(cx, cy).setDisplaySize(iconSize, iconSize);
     });
   }
@@ -1467,7 +1467,7 @@ export class GameScene extends Phaser.Scene {
         bg.fillRoundedRect(bcx - btns / 2, bcy - btns / 2, btns, btns, 6);
         bg.lineStyle(selected ? 2 : 1, bdr, selected ? 1.0 : 0.55);
         bg.strokeRoundedRect(bcx - btns / 2, bcy - btns / 2, btns, btns, 6);
-        const iconSz = Math.round(btns * 0.55);
+        const iconSz = Math.round(btns * 0.72);
         icon.setPosition(bcx, bcy).setDisplaySize(iconSz, iconSz);
       };
 
@@ -1499,7 +1499,7 @@ export class GameScene extends Phaser.Scene {
         btn.bg.fillRoundedRect(bcx - btns / 2, bcy - btns / 2, btns, btns, 6);
         btn.bg.lineStyle(isSelected ? 2 : 1, borderColor, isSelected ? 1.0 : 0.55);
         btn.bg.strokeRoundedRect(bcx - btns / 2, bcy - btns / 2, btns, btns, 6);
-        const iSz = Math.round(btns * 0.55);
+        const iSz = Math.round(btns * 0.72);
         btn.icon.setPosition(bcx, bcy).setDisplaySize(iSz, iSz);
       });
     });

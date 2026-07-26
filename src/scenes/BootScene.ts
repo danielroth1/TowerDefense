@@ -112,6 +112,7 @@ export class BootScene extends Phaser.Scene {
     this.detectWangTileSets();
 
     this.generateMipmapsForAITiles();
+    this.downscaleSpriteIcons();
     this.generateBlobTextures();
     // If an AI path tile was loaded, generate masked blob textures from it
     if (this.textures.exists('tile_path')) {
@@ -126,7 +127,6 @@ export class BootScene extends Phaser.Scene {
     this.generateParticleTextures();
     this.generateCityDecorTextures();
     this.generateUITextures();
-    this.generateAbilityIcons();
     this.registerAnimations();
 
     // Share AI tile keys + Wang tile availability so GameScene can use them
@@ -199,6 +199,10 @@ export class BootScene extends Phaser.Scene {
     };
 
     for (const key of this.aiLoadedTiles) {
+      // Ability icons and tower sprites get their own downscale pass below —
+      // this method only handles terrain/base tiles that need crop slicing.
+      if (key.startsWith('ability_') || key.startsWith('tower_') || key.startsWith('deco_')) continue;
+
       const texture = this.textures.get(key);
       if (!texture) continue;
 
@@ -289,6 +293,78 @@ export class BootScene extends Phaser.Scene {
         );
         this.textures.addCanvas(cropKey, slice);
       }
+    }
+  }
+
+  /**
+   * Downscale ability icons and other sprite textures to a display-appropriate
+   * size using multi-step high-quality bilinear interpolation.  The terrain
+   * mipmap pass targets 256px (for crop slicing), but sprite icons displayed
+   * at ~33–50px benefit from a much smaller source to avoid the blur that
+   * comes from extreme WebGL downscaling.
+   */
+  private downscaleSpriteIcons(): void {
+    // Per-key target sizes (max dimension).  Ability icons & tower sprites
+    // display at ~33–50px so 96px is 2–3× headroom.  Larger decorations
+    // (dense city cluster, harbor panorama) need more resolution to stay
+    // sharp when rendered at their native sizes on the map.
+    const targetForKey = (key: string): number => {
+      if (key === 'deco_city_dense' || key === 'deco_city_harbor') return 292;
+      return 192;
+    };
+
+    const smoothCtx = (w: number, h: number): CanvasRenderingContext2D => {
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      const ctx = c.getContext('2d')!;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      return ctx;
+    };
+
+    const keys = [...this.aiLoadedTiles].filter(k =>
+      k.startsWith('ability_') || k.startsWith('tower_') || k.startsWith('deco_'),
+    );
+
+    for (const key of keys) {
+      const texture = this.textures.get(key);
+      if (!texture) continue;
+
+      const source = texture.source[0];
+      const img = source?.image as HTMLImageElement | undefined;
+      if (!img) continue;
+
+      const TARGET = targetForKey(key);
+      const maxDim = Math.max(img.width, img.height);
+      if (maxDim <= TARGET) continue; // already small enough
+
+      // Multi-step halving for maximum quality, same approach as terrain mipmaps
+      let src: TexImageSource = img;
+      let curW = img.width;
+      let curH = img.height;
+
+      // Halve until ≤ 2× target
+      while (Math.max(curW, curH) > TARGET * 2) {
+        const nextW = Math.round(curW / 2);
+        const nextH = Math.round(curH / 2);
+        const stepCtx = smoothCtx(nextW, nextH);
+        stepCtx.drawImage(src, 0, 0, nextW, nextH);
+        src = stepCtx.canvas;
+        curW = nextW;
+        curH = nextH;
+      }
+
+      // Final step: clamp to TARGET, preserve aspect ratio
+      const scale = TARGET / Math.max(curW, curH);
+      const dw = Math.round(curW * scale);
+      const dh = Math.round(curH * scale);
+      const ctx = smoothCtx(dw, dh);
+      ctx.drawImage(src, 0, 0, dw, dh);
+
+      // Replace the oversized texture with the compact version
+      this.textures.remove(key);
+      this.textures.addCanvas(key, ctx.canvas);
     }
   }
 
