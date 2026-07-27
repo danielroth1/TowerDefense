@@ -1,0 +1,25 @@
+{
+  "$schema": "./economy-config.schema.json",
+  "description": "Economy delivery rules, gold values, and warehouse config.",
+
+  "resources": {
+    "wheat": { "goldValue": 5 },
+    "flour": { "goldValue": 12 },
+    "bread": { "goldValue": 25 },
+    "fish":  { "goldValue": 8 },
+    "goods": { "goldValue": 30 }
+  },
+
+  "deliveryTargets": {
+    "wheat": ["mill", "warehouse", "market"],
+    "flour": ["bakery", "warehouse", "market"],
+    "bread": ["market", "warehouse"],
+    "fish":  ["market", "warehouse"],
+    "goods": ["market", "warehouse"]
+  },
+
+  "warehouse": {
+    "outboundTargets": ["market"],
+    "baseDispatchInterval": 3000
+  }
+}

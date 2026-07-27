@@ -831,8 +831,9 @@ export class GameScene extends Phaser.Scene {
       this.uiCam.ignore(b);
     }
 
-    // Cart sprites are world-space; ignore on the UI camera so they scroll with the main camera
-    if (this.transportSys) this.uiCam.ignore(this.transportSys.cartGroup);
+    // Cart sprites & money text are world-space; transport system ignores
+    // each one on the UI camera as it's dynamically created
+    if (this.transportSys) this.transportSys.setUICam(this.uiCam);
   }
 
   private setupInput() {

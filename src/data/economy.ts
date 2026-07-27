@@ -1,5 +1,7 @@
 // ─── Economy Building Types ─────────────────────────────────────────────────
 
+import economyConfig from './economy-config.json';
+
 export type EconomyBuildingType =
   | 'farm'
   | 'mill'
@@ -318,3 +320,29 @@ export const CHAIN_BONUS_MULTIPLIER = 1.25;
 
 export const WAREHOUSE_CAPACITY = 5;
 export const WAREHOUSE_BULK_BONUS = 1.5;  // 50% bonus when full
+
+// ─── Delivery config (from economy-config.json) ─────────────────────────────
+
+/** Gold value of each resource type when sold at market. */
+export const RESOURCE_GOLD_VALUES: Record<EconomyResource, number> = {
+  wheat: economyConfig.resources.wheat.goldValue,
+  flour: economyConfig.resources.flour.goldValue,
+  bread: economyConfig.resources.bread.goldValue,
+  fish:  economyConfig.resources.fish.goldValue,
+  goods: economyConfig.resources.goods.goldValue,
+};
+
+/**
+ * Which building types can receive each resource.
+ * e.g. "wheat" → ["mill", "warehouse"] means farms can deliver wheat to mills or warehouses.
+ */
+export const DELIVERY_TARGETS: Record<EconomyResource, EconomyBuildingType[]> =
+  economyConfig.deliveryTargets as Record<EconomyResource, EconomyBuildingType[]>;
+
+/** Buildings that a warehouse can deliver goods to (typically just market). */
+export const WAREHOUSE_OUTBOUND_TARGETS: EconomyBuildingType[] =
+  economyConfig.warehouse.outboundTargets as EconomyBuildingType[];
+
+/** Base interval (ms) between warehouse cart dispatches. */
+export const WAREHOUSE_DISPATCH_INTERVAL: number =
+  economyConfig.warehouse.baseDispatchInterval;

@@ -1,6 +1,12 @@
 import Phaser from 'phaser';
 import type { EconomyBuildingType, EconomyResource } from '../data/economy';
-import { ECO_BUILDING_DEFS, CHAIN_BONUS_MULTIPLIER, WAREHOUSE_CAPACITY, WAREHOUSE_BULK_BONUS } from '../data/economy';
+import {
+  ECO_BUILDING_DEFS,
+  WAREHOUSE_CAPACITY,
+  DELIVERY_TARGETS,
+  WAREHOUSE_OUTBOUND_TARGETS,
+  WAREHOUSE_DISPATCH_INTERVAL,
+} from '../data/economy';
 import type { EconomyBuilding } from '../entities/EconomyBuilding';
 import { FisherShip } from '../entities/FisherShip';
 import type { EconomyManager } from './EconomyManager';
@@ -9,13 +15,17 @@ import type { TransportSystem } from './TransportSystem';
 /*
  * ─── Economy Simulation System ───────────────────────────────────────────
  *
- * Manages all player-placed economy buildings and their production cycles.
+ * Drives the player economy — production cycles, delivery dispatch, and
+ * warehouse-to-market distribution.
  *
- *   - Ticks each building's cycle timer
- *   - When a producer finishes, TransportSystem dispatches a cart
- *   - Carts travel along road paths — goods arrive only when cart reaches destination
- *   - Chain bonus: if goods pass through 3+ buildings, apply multiplier
- *   - Warehouse: buffers up to WAREHOUSE_CAPACITY goods, bulk-delivers
+ * Config-driven: all delivery rules live in src/data/economy-config.json.
+ *
+ *   - Producers tick cycle timers → produce goods into inventory
+ *   - processConsumption() dispatches carts to valid targets (config-defined)
+ *   - Reservation system: goods in transit count against receiver capacity
+ *   - Closest-first target selection, falls back to next closest if full
+ *   - Warehouses actively dispatch carts to markets (no bulk-wait)
+ *   - TransportSystem handles pathfinding and cart movement
  */
 
 // ─── Public types ───────────────────────────────────────────────────────────
@@ -30,18 +40,7 @@ export interface EconomyEvent {
   pixelY?: number;
 }
 
-// ─── Production chain graph ─────────────────────────────────────────────────
-
-/**
- * Which building consumes which resource.
- * 'goods' has no direct consumer — they go to warehouse, which
- * bulk-delivers to markets.
- */
-const CONSUMER_MAP: Partial<Record<EconomyResource, EconomyBuildingType>> = {
-  wheat: 'mill',
-  flour: 'bakery',
-  fish:  'harbor',
-};
+export type DeliveryType = 'consumer' | 'warehouse' | 'market';
 
 /** Which resource each building produces. */
 function getProduces(type: EconomyBuildingType): EconomyResource | null {
@@ -68,6 +67,9 @@ export class EconomySimulation {
   /** Map grid reference for ship pathfinding. */
   private grid: { type: string }[][] = [];
 
+  /** Per-warehouse dispatch timer (ms since last cart sent to market). */
+  private warehouseTimers = new WeakMap<EconomyBuilding, number>();
+
   constructor(economy: EconomyManager, scene: Phaser.Scene) {
     this.economy = economy;
     this.scene = scene;
@@ -87,11 +89,10 @@ export class EconomySimulation {
 
   addBuilding(building: EconomyBuilding): void {
     this.buildings.push(building);
-    // Set warehouse max inventory and clear stored resource
     if (ECO_BUILDING_DEFS[building.buildingType].isStorage) {
       building.maxInventory = WAREHOUSE_CAPACITY;
+      this.warehouseTimers.set(building, 0);
     }
-    // Create a fisher ship for fishery buildings
     if (building.buildingType === 'fishery' && this.grid.length > 0) {
       const ship = new FisherShip(this.scene, building, this.grid);
       ship.setFishingDuration(building.cycleTime);
@@ -102,16 +103,12 @@ export class EconomySimulation {
   removeBuilding(building: EconomyBuilding): void {
     const idx = this.buildings.indexOf(building);
     if (idx >= 0) this.buildings.splice(idx, 1);
-    // Destroy associated fisher ship
     const ship = this.fisherShips.get(building);
-    if (ship) {
-      ship.destroy();
-      this.fisherShips.delete(building);
-    }
+    if (ship) { ship.destroy(); this.fisherShips.delete(building); }
+    this.warehouseTimers.delete(building);
     building.destroy();
   }
 
-  /** Get the fisher ship for a given fishery (if any). */
   getFisherShip(building: EconomyBuilding): FisherShip | undefined {
     return this.fisherShips.get(building);
   }
@@ -120,7 +117,6 @@ export class EconomySimulation {
     return this.buildings;
   }
 
-  /** Count buildings of a given type. Used for escalating costs. */
   countOfType(type: EconomyBuildingType): number {
     return this.buildings.filter(b => b.buildingType === type).length;
   }
@@ -136,19 +132,13 @@ export class EconomySimulation {
   // ─── Update loop ────────────────────────────────────────────────────────
 
   update(delta: number): void {
+    // ── 1. Tick production cycles ──────────────────────────────────────
     for (const b of this.buildings) {
       const def = ECO_BUILDING_DEFS[b.buildingType];
-
-      // Only tick producers (buildings that produce a resource)
       if (!def.produces) continue;
-
-      // Don't produce if inventory is full
       if (b.inventory >= b.maxInventory) continue;
-
-      // Buildings that consume a resource need input stock to produce
       if (def.consumes && b.inputStock <= 0) continue;
 
-      // Fisher ships: use ship-based production instead of direct timer
       if (b.buildingType === 'fishery') {
         this.updateFishery(b, delta);
         continue;
@@ -157,7 +147,6 @@ export class EconomySimulation {
       b.cycleTimer += delta;
       if (b.cycleTimer >= b.cycleTime) {
         b.cycleTimer -= b.cycleTime;
-        // Consume input stock for buildings that need it
         if (def.consumes) b.inputStock--;
         b.inventory++;
         b.redraw();
@@ -165,7 +154,7 @@ export class EconomySimulation {
       }
     }
 
-    // Update all fisher ships
+    // ── 2. Fisher ships ────────────────────────────────────────────────
     for (const [building, ship] of this.fisherShips) {
       const fishReady = ship.updateShip(delta);
       if (fishReady) {
@@ -175,30 +164,31 @@ export class EconomySimulation {
       }
     }
 
-    // Tick markets: slowly convert inventory to gold
-    this.tickMarkets(delta);
-
-    // Try to consume goods: move inventory from producers to consumers
+    // ── 3. Dispatch producer goods via carts ───────────────────────────
     this.processConsumption();
+
+    // ── 4. Warehouse → market dispatch ─────────────────────────────────
+    this.dispatchWarehouses(delta);
+
+    // ── 5. Market gold conversion ──────────────────────────────────────
+    this.tickMarkets(delta);
   }
 
-  /** Handle fishery production via fisher ship. */
+  // ─── Fishery ────────────────────────────────────────────────────────────
+
   private updateFishery(building: EconomyBuilding, _delta: number): void {
     const ship = this.fisherShips.get(building);
     if (!ship) return;
-    // Update fishing duration from building's cycle time (affected by upgrades)
     ship.setFishingDuration(building.cycleTime);
-    // If the ship is idle, send it on a trip
-    if (ship.isIdle()) {
-      ship.startTrip();
-    }
+    if (ship.isIdle()) ship.startTrip();
   }
 
-  /** Markets convert stored goods to gold over time (tick-based, not instant). */
+  // ─── Markets ────────────────────────────────────────────────────────────
+
   private tickMarkets(delta: number): void {
     for (const b of this.buildings) {
       if (!ECO_BUILDING_DEFS[b.buildingType].isEndpoint) continue;
-      if (b.buildingType !== 'market') continue; // Only market is tick-based
+      if (b.buildingType !== 'market') continue;
       if (b.inventory <= 0) continue;
 
       b.cycleTimer += delta;
@@ -222,214 +212,171 @@ export class EconomySimulation {
     }
   }
 
-  // ─── Consumption / transport ────────────────────────────────────────────
+  // ─── Consumption / cart dispatch ────────────────────────────────────────
 
   /**
-   * Dispatch pending producer inventory to consumers via the TransportSystem.
-   * Goods are no longer transferred instantly — a cart must physically
-   * travel the road network and arrive before the consumer receives them.
+   * For each producer with inventory, find a valid target from the config.
+   * Target types are tried in priority order (array order in config).
+   * Within each type, the closest building with free capacity is chosen.
    */
   private processConsumption(): void {
     if (!this.transportSys) return;
 
-    // Phase 1: Dispatch carts from producers to consumers/warehouses.
     for (const producer of this.buildings) {
       if (producer.inventory <= 0) continue;
 
       const resource = getProduces(producer.buildingType);
       if (!resource) continue;
 
-      const consumerType = CONSUMER_MAP[resource];
+      const targetTypes = DELIVERY_TARGETS[resource];
+      if (!targetTypes || targetTypes.length === 0) continue;
 
-      // Goods with no consumer (e.g. bread from bakery) go to warehouse → market.
-      if (!consumerType) {
-        const warehouse = this.findClosestAvailableWarehouse(producer, resource);
-        if (warehouse) {
-          // Warehouse delivery: dispatch a cart. Goods leave producer now,
-          // arrive at warehouse when cart gets there.
-          const accepted = this.transportSys.requestDelivery(producer, warehouse, resource, 'warehouse');
-          if (accepted) {
-            producer.inventory--;
-            producer.redraw();
-          }
+      // Try target types in priority order (array order = priority).
+      // Within each type, pick the closest building with free capacity.
+      for (const targetType of targetTypes) {
+        const candidates = this.buildings
+          .filter(b => b.buildingType === targetType)
+          .filter(b => this.hasFreeCapacity(b, resource))
+          .sort((a, b) => this.distSq(producer, a) - this.distSq(producer, b));
+
+        if (candidates.length === 0) continue; // No capacity in this type, try next
+
+        const target = candidates[0];
+        const deliveryType = this.getDeliveryType(target.buildingType);
+
+        this.reserveCapacity(target, deliveryType);
+
+        const accepted = this.transportSys.requestDelivery(producer, target, resource, deliveryType);
+        if (accepted) {
+          producer.inventory--;
+          producer.redraw();
+        } else {
+          this.releaseReservation(target, deliveryType);
         }
-        continue;
-      }
-
-      // Raw materials: deliver directly to consumer (production chain).
-      // Prefer the closest consumer that has input capacity.
-      const consumers = this.buildings.filter(
-        b => b.buildingType === consumerType && b.inputStock < b.maxInventory,
-      );
-      if (consumers.length === 0) continue;
-
-      const consumer = this.closestBuilding(producer, consumers);
-
-      // Dispatch cart — goods leave producer now, arrive at consumer when cart gets there.
-      const accepted = this.transportSys.requestDelivery(producer, consumer, resource, 'consumer');
-      if (accepted) {
-        producer.inventory--;
-        producer.redraw();
+        break; // Dispatched to this type, move to next producer
       }
     }
-
-    // Phase 2: Process full warehouses — bulk deliver to consumer with bonus.
-    this.processWarehouses();
   }
 
-  /** Find the closest building from a list. */
-  private closestBuilding(from: EconomyBuilding, candidates: EconomyBuilding[]): EconomyBuilding {
-    let best = candidates[0];
-    let bestDist = Infinity;
-    for (const c of candidates) {
-      const dx = c.pixelX - from.pixelX;
-      const dy = c.pixelY - from.pixelY;
-      const d = dx * dx + dy * dy;
-      if (d < bestDist) { bestDist = d; best = c; }
-    }
-    return best;
+  /** Map building type to delivery type for reservation tracking. */
+  private getDeliveryType(type: EconomyBuildingType): DeliveryType {
+    const def = ECO_BUILDING_DEFS[type];
+    if (def.isStorage) return 'warehouse';
+    if (def.isEndpoint) return 'market';
+    return 'consumer';
   }
 
-  /** Find the closest warehouse that can accept this resource (empty or matching type, has space). */
-  private findClosestAvailableWarehouse(from: EconomyBuilding, resource: EconomyResource): EconomyBuilding | null {
-    let best: EconomyBuilding | null = null;
-    let bestDist = Infinity;
-    for (const b of this.buildings) {
-      if (!ECO_BUILDING_DEFS[b.buildingType].isStorage) continue;
-      if (b.inventory >= b.maxInventory) continue;
+  // ─── Warehouse → market dispatch ────────────────────────────────────────
 
-      const stored = this.warehouseResources.get(b);
-      // Empty warehouse accepts anything; non-empty must match resource type
-      if (stored !== undefined && stored !== resource) continue;
+  /**
+   * Warehouses actively dispatch carts to markets when they have inventory.
+   * Dispatch interval scales with warehouse level (higher = faster).
+   */
+  private dispatchWarehouses(delta: number): void {
+    if (!this.transportSys) return;
 
-      const dx = b.pixelX - from.pixelX;
-      const dy = b.pixelY - from.pixelY;
-      const d = dx * dx + dy * dy;
-      if (d < bestDist) { bestDist = d; best = b; }
-    }
-    return best;
-  }
+    const markets = this.buildings.filter(b =>
+      WAREHOUSE_OUTBOUND_TARGETS.includes(b.buildingType),
+    );
 
-  /** Bulk-deliver goods from full warehouses to market (if available) or directly to consumer. */
-  private processWarehouses(): void {
+    if (markets.length === 0) return;
+
     for (const warehouse of this.buildings) {
       if (!ECO_BUILDING_DEFS[warehouse.buildingType].isStorage) continue;
-      if (warehouse.inventory < warehouse.maxInventory) continue;
+      if (warehouse.inventory <= 0) continue;
 
-      const resource = this.warehouseResources.get(warehouse);
-      if (!resource) continue;
+      const timer = this.warehouseTimers.get(warehouse) ?? 0;
+      const interval = WAREHOUSE_DISPATCH_INTERVAL / warehouse.level;
+      const newTimer = timer + delta;
 
-      // Try market first — prefer closest non-full market
-      const markets = this.buildings.filter(
-        b => b.buildingType === 'market' && b.inventory < b.maxInventory,
-      );
-      const market = markets.length > 0 ? this.closestBuilding(warehouse, markets) : null;
-
-      if (market) {
-        // Bulk deliver to market
-        const count = warehouse.inventory;
-        const bonusCount = Math.floor(count * (WAREHOUSE_BULK_BONUS - 1));
-
-        warehouse.inventory = 0;
-        this.warehouseResources.delete(warehouse);
-        warehouse.redraw();
-
-        // Transfer to market (with bonus units)
-        const space = market.maxInventory - market.inventory;
-        const transfer = Math.min(count + bonusCount, space);
-        market.inventory += transfer;
-        market.redraw();
-
-        this.emit({ type: 'consumed', buildingType: 'market', resource, amount: transfer,
-          pixelX: warehouse.pixelX, pixelY: warehouse.pixelY });
+      if (newTimer < interval) {
+        this.warehouseTimers.set(warehouse, newTimer);
         continue;
       }
 
-      // No market — try direct consumer (legacy path), else fallback gold.
-      let delivered = false;
-      const consumerType = CONSUMER_MAP[resource];
-      if (consumerType) {
-        const consumers = this.buildings.filter(
-          b => b.buildingType === consumerType && b.inputStock < b.maxInventory,
-        );
-        if (consumers.length > 0) {
-          const consumer = this.closestBuilding(warehouse, consumers);
-          const count = warehouse.inventory;
-          const bonusCount = Math.floor(count * (WAREHOUSE_BULK_BONUS - 1));
+      this.warehouseTimers.set(warehouse, newTimer - interval);
 
-          warehouse.inventory = 0;
-          this.warehouseResources.delete(warehouse);
-          warehouse.redraw();
+      const resource = this.warehouseResources.get(warehouse) ?? 'goods';
 
-          const space = consumer.maxInventory - consumer.inputStock;
-          const transfer = Math.min(count, space);
-          consumer.inputStock += transfer;
-          consumer.redraw();
+      // Find closest market with free capacity
+      const target = markets
+        .filter(m => this.hasFreeCapacity(m, resource))
+        .sort((a, b) => this.distSq(warehouse, a) - this.distSq(warehouse, b))[0];
 
-          this.emit({ type: 'consumed', buildingType: consumer.buildingType, resource, amount: transfer });
+      if (!target) continue;
 
-          const consumerDef = ECO_BUILDING_DEFS[consumer.buildingType];
-          if (consumerDef.isEndpoint && consumerDef.goldPerUnit > 0) {
-            for (let i = 0; i < transfer; i++) {
-              if (consumer.inventory > 0) {
-                this.deliverToEndpoint(consumer);
-              }
-            }
-            if (bonusCount > 0) {
-              const bonusGold = consumerDef.goldPerUnit * consumer.valueMultiplier * bonusCount;
-              this.economy.earn(Math.floor(bonusGold));
-              this.emit({
-                type: 'delivered',
-                buildingType: consumer.buildingType,
-                resource,
-                amount: Math.floor(bonusGold),
-                pixelX: consumer.pixelX, pixelY: consumer.pixelY,
-              });
-            }
-          }
-          delivered = true;
-        }
-      }
+      // Reserve on market
+      target.reservedInventory++;
 
-      if (!delivered) {
-        // No market and no available consumer — sell directly for gold
-        const count = warehouse.inventory;
-        const bonusCount = Math.floor(count * (WAREHOUSE_BULK_BONUS - 1));
-        const totalGold = 12 * (count + bonusCount);
-
-        warehouse.inventory = 0;
-        this.warehouseResources.delete(warehouse);
+      const accepted = this.transportSys.requestDelivery(warehouse, target, resource, 'market');
+      if (accepted) {
+        warehouse.inventory--;
         warehouse.redraw();
-
-        this.economy.earn(totalGold);
-        this.emit({
-          type: 'delivered',
-          buildingType: 'warehouse',
-          resource,
-          amount: totalGold,
-          pixelX: warehouse.pixelX, pixelY: warehouse.pixelY,
-        });
+      } else {
+        target.reservedInventory--;
       }
+    }
+  }
+
+  // ─── Capacity & reservation ─────────────────────────────────────────────
+
+  /** Check if a building has free capacity for an incoming delivery, including reservations. */
+  private hasFreeCapacity(building: EconomyBuilding, resource: EconomyResource): boolean {
+    const def = ECO_BUILDING_DEFS[building.buildingType];
+
+    if (def.isStorage) {
+      // Warehouse: check inventory + reserved, and resource type match
+      const stored = this.warehouseResources.get(building);
+      if (stored !== undefined && stored !== resource) return false;
+      return (building.inventory + building.reservedInventory) < building.maxInventory;
+    }
+
+    if (def.isEndpoint) {
+      // Market / endpoint: stores goods in inventory, not inputStock
+      return (building.inventory + building.reservedInventory) < building.maxInventory;
+    }
+
+    // Consumer (production building like mill, bakery, harbor): uses inputStock
+    return (building.inputStock + building.reservedInput) < building.maxInventory;
+  }
+
+  /** Increment the appropriate reservation counter. */
+  private reserveCapacity(building: EconomyBuilding, deliveryType: DeliveryType): void {
+    if (deliveryType === 'warehouse' || deliveryType === 'market') {
+      building.reservedInventory++;
+    } else {
+      building.reservedInput++;
+    }
+  }
+
+  /** Decrement reservation (called when cart dispatch fails). */
+  private releaseReservation(building: EconomyBuilding, deliveryType: DeliveryType): void {
+    if (deliveryType === 'warehouse' || deliveryType === 'market') {
+      building.reservedInventory = Math.max(0, building.reservedInventory - 1);
+    } else {
+      building.reservedInput = Math.max(0, building.reservedInput - 1);
     }
   }
 
   /**
-   * Called by TransportSystem when a cart arrives at its destination.
-   * Transfers the carried goods into the receiver's inventory/inputStock.
-   *
-   * @param receiver  The building receiving the goods (consumer or warehouse).
-   * @param resource  The type of resource being delivered.
-   * @param deliveryType  'consumer' → inputStock, 'warehouse' → inventory.
+   * Called by TransportSystem when a cart arrives.
+   * Releases the reservation and transfers goods into actual stock.
    */
   completeDelivery(
     receiver: EconomyBuilding,
     resource: EconomyResource,
-    deliveryType: 'consumer' | 'warehouse',
+    deliveryType: DeliveryType,
   ): void {
     if (deliveryType === 'warehouse') {
+      receiver.reservedInventory = Math.max(0, receiver.reservedInventory - 1);
       receiver.inventory++;
       this.warehouseResources.set(receiver, resource);
+    } else if (deliveryType === 'market') {
+      receiver.reservedInventory = Math.max(0, receiver.reservedInventory - 1);
+      receiver.inventory++;
     } else {
+      // consumer
+      receiver.reservedInput = Math.max(0, receiver.reservedInput - 1);
       receiver.inputStock++;
     }
     receiver.redraw();
@@ -443,45 +390,11 @@ export class EconomySimulation {
     });
   }
 
-  private deliverToEndpoint(endpoint: EconomyBuilding): void {
-    const def = ECO_BUILDING_DEFS[endpoint.buildingType];
-    let gold = def.goldPerUnit * endpoint.valueMultiplier;
+  // ─── Helpers ────────────────────────────────────────────────────────────
 
-    // Chain bonus: check if goods came through a full chain
-    // (simplified: if there's both a farm AND mill for bakery, or fishery for harbor)
-    if (this.hasCompleteChainBefore(endpoint)) {
-      gold = Math.floor(gold * CHAIN_BONUS_MULTIPLIER);
-    }
-
-    endpoint.inventory--;
-    endpoint.redraw();
-
-    this.economy.earn(gold);
-    this.emit({
-      type: 'delivered',
-      buildingType: endpoint.buildingType,
-      resource: def.consumes ?? def.produces,
-      amount: gold,
-      pixelX: endpoint.pixelX,
-      pixelY: endpoint.pixelY,
-    });
-  }
-
-  /** Check if there's a complete production chain feeding this endpoint. */
-  private hasCompleteChainBefore(endpoint: EconomyBuilding): boolean {
-    const type = endpoint.buildingType;
-
-    if (type === 'bakery') {
-      // Complete chain: farm + mill + bakery all present
-      return this.buildings.some(b => b.buildingType === 'farm')
-        && this.buildings.some(b => b.buildingType === 'mill');
-    }
-
-    if (type === 'harbor') {
-      // Complete chain: fishery + harbor
-      return this.buildings.some(b => b.buildingType === 'fishery');
-    }
-
-    return false;
+  private distSq(a: EconomyBuilding, b: EconomyBuilding): number {
+    const dx = b.pixelX - a.pixelX;
+    const dy = b.pixelY - a.pixelY;
+    return dx * dx + dy * dy;
   }
 }

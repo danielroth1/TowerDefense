@@ -603,6 +603,28 @@
       </div>
     </div>
 
+    <!-- Goods icon presets -->
+    <div class="sidebar-section">
+      <h3>🌾 Economy Goods</h3>
+      <div class="preset-grid" id="goodsPresetGrid">
+        <button class="preset-btn" data-goods="wheat">
+          <span class="preset-dot" style="background:#d4a843"></span> 🌾 Wheat
+        </button>
+        <button class="preset-btn" data-goods="flour">
+          <span class="preset-dot" style="background:#eee8d5"></span> 🫓 Flour
+        </button>
+        <button class="preset-btn" data-goods="bread">
+          <span class="preset-dot" style="background:#c89a5c"></span> 🍞 Bread
+        </button>
+        <button class="preset-btn" data-goods="fish">
+          <span class="preset-dot" style="background:#6699cc"></span> 🐟 Fish
+        </button>
+        <button class="preset-btn" data-goods="goods">
+          <span class="preset-dot" style="background:#c8a050"></span> 📦 Trade Goods
+        </button>
+      </div>
+    </div>
+
     <!-- Economy building presets -->
     <div class="sidebar-section">
       <h3>🏚️ Economy Building</h3>
@@ -926,6 +948,44 @@
       },
     };
 
+    const GOODS_PRESETS = {
+      wheat: {
+        name: 'Wheat',
+        prompt: 'top-down game icon, golden wheat sheaf bundle with three stalks tied together, warm golden color, on dark transparent background, stylized fantasy art, sharp details',
+        color: '#d4a843',
+        file: 'goods_wheat',
+        w: 128, h: 128,
+      },
+      flour: {
+        name: 'Flour',
+        prompt: 'top-down game icon, white linen flour sack with brown tie, small pile of white flour spilling out, on dark transparent background, stylized fantasy art, sharp details',
+        color: '#eee8d5',
+        file: 'goods_flour',
+        w: 128, h: 128,
+      },
+      bread: {
+        name: 'Bread',
+        prompt: 'top-down game icon, golden brown bread loaf with scored top, warm crusty artisan bread, on dark transparent background, stylized fantasy art, sharp details',
+        color: '#c89a5c',
+        file: 'goods_bread',
+        w: 128, h: 128,
+      },
+      fish: {
+        name: 'Fish',
+        prompt: 'top-down game icon, silver-blue whole fish with scales and tail fin, fresh caught fish, on dark transparent background, stylized fantasy art, sharp details',
+        color: '#6699cc',
+        file: 'goods_fish',
+        w: 128, h: 128,
+      },
+      goods: {
+        name: 'Trade Goods',
+        prompt: 'top-down game icon, wooden crate filled with colorful trade goods, silk fabric and spices visible, golden coin on top, on dark transparent background, stylized fantasy art, sharp details',
+        color: '#c8a050',
+        file: 'goods_trade',
+        w: 128, h: 128,
+      },
+    };
+
     const ECO_PRESETS = {
       farm: {
         name: 'Farm',
@@ -933,6 +993,11 @@
         color: '#7da832',
         file: 'eco_farm',
         w: 256, h: 256,
+        variants: [
+          { label: 'Mk I',  file: 'eco_farm', prompt: 'top-down game asset, basic medieval farmstead with small crop field, simple wooden fence, tiny barn with red roof, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+          { label: 'Mk II', file: 'eco_farm_1', prompt: 'top-down game asset, irrigated medieval farmstead with lush green crop rows, stone irrigation channels, larger barn with red roof and windmill, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+          { label: 'Mk III',file: 'eco_farm_2', prompt: 'top-down game asset, fertile prosperous medieval farmstead with golden wheat fields, large stone barn with red roof, big windmill, scarecrow, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+        ],
       },
       mill: {
         name: 'Mill',
@@ -940,6 +1005,11 @@
         color: '#c4955c',
         file: 'eco_mill',
         w: 256, h: 256,
+        variants: [
+          { label: 'Mk I',  file: 'eco_mill', prompt: 'top-down game asset, basic medieval water mill with small wooden water wheel and stone building, blue river, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+          { label: 'Mk II', file: 'eco_mill_1', prompt: 'top-down game asset, upgraded windmill with large four-blade wooden windmill, reinforced stone building, grain sacks nearby, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+          { label: 'Mk III',file: 'eco_mill_2', prompt: 'top-down game asset, industrial medieval mill with massive stone building, tall chimney, large windmill, multiple grain sacks and flour barrels, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+        ],
       },
       bakery: {
         name: 'Bakery',
@@ -947,6 +1017,11 @@
         color: '#d4a054',
         file: 'eco_bakery',
         w: 256, h: 256,
+        variants: [
+          { label: 'Mk I',  file: 'eco_bakery', prompt: 'top-down game asset, small medieval bakery building with smoking chimney, bread loaf sign, warm glow from window, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+          { label: 'Mk II', file: 'eco_bakery_1', prompt: 'top-down game asset, artisan medieval bakery with large stone oven, bigger chimney with more smoke, golden bread displays outside, warm inviting glow, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+          { label: 'Mk III',file: 'eco_bakery_2', prompt: 'top-down game asset, grand brick oven bakery, massive stone oven chimney, ornate bread displays, golden warm glow, piles of fresh bread loaves outside, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+        ],
       },
       fishery: {
         name: 'Fishery',
@@ -954,6 +1029,11 @@
         color: '#5599bb',
         file: 'eco_fishery',
         w: 256, h: 256,
+        variants: [
+          { label: 'Mk I',  file: 'eco_fishery', prompt: 'top-down game asset, simple wooden fishing hut on stilts over blue water, basic fishing nets and small rowboat, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+          { label: 'Mk II', file: 'eco_fishery_1', prompt: 'top-down game asset, upgraded fishing station with larger wooden hut on stilts, improved nets draped over railing, motorized boat docked alongside, blue water below, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+          { label: 'Mk III',file: 'eco_fishery_2', prompt: 'top-down game asset, advanced trawler fishing platform, large wooden deck extending over blue water, heavy-duty nets, big fishing trawler boat, crates of fish, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+        ],
       },
       harbor: {
         name: 'Trading Harbor',
@@ -961,6 +1041,11 @@
         color: '#4488cc',
         file: 'eco_harbor',
         w: 256, h: 128,
+        variants: [
+          { label: 'Mk I',  file: 'eco_harbor', prompt: 'top-down game asset, small trading harbor with wooden pier extending into blue water, small merchant boat docked, few crates on quay, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+          { label: 'Mk II', file: 'eco_harbor_1', prompt: 'top-down game asset, trade dock harbor with reinforced stone pier, medium merchant ship docked, stacked crates and barrels, crane mechanism, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+          { label: 'Mk III',file: 'eco_harbor_2', prompt: 'top-down game asset, grand harbor with massive stone pier, large galleon merchant ship, warehouses along quay, multiple cranes, bustling trade scene, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+        ],
       },
       warehouse: {
         name: 'Warehouse',
@@ -968,6 +1053,11 @@
         color: '#887766',
         file: 'eco_warehouse',
         w: 256, h: 256,
+        variants: [
+          { label: 'Mk I',  file: 'eco_warehouse', prompt: 'top-down game asset, small medieval stone warehouse with wooden door, few crates stacked outside, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+          { label: 'Mk II', file: 'eco_warehouse_1', prompt: 'top-down game asset, stockpile medieval stone warehouse with large heavy wooden doors, many stacked crates and barrels around perimeter, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+          { label: 'Mk III',file: 'eco_warehouse_2', prompt: 'top-down game asset, grand depot medieval stone warehouse, massive building with double doors, crane loading platform, towers of crates and barrels, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+        ],
       },
       market: {
         name: 'Market',
@@ -975,6 +1065,11 @@
         color: '#e8c864',
         file: 'eco_market',
         w: 256, h: 256,
+        variants: [
+          { label: 'Mk I',  file: 'eco_market', prompt: 'top-down game asset, small medieval sandstone market building with domed roof, arched entrance, colorful striped stall awnings, gold coins near entrance, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+          { label: 'Mk II', file: 'eco_market_1', prompt: 'top-down game asset, trade post market, larger stone building with ornate domed roof, multiple arched entrances, colorful market stalls surrounding it, gold coin piles, warm glow, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+          { label: 'Mk III',file: 'eco_market_2', prompt: 'top-down game asset, grand bazaar market, massive ornate stone building with golden domed roof, grand arched entrances, elaborate colorful market stalls all around, treasure chests and gold piles, warm golden glow, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+        ],
       },
       lighthouse: {
         name: 'Lighthouse',
@@ -982,6 +1077,11 @@
         color: '#ffcc44',
         file: 'eco_lighthouse',
         w: 256, h: 256,
+        variants: [
+          { label: 'Mk I',  file: 'eco_lighthouse', prompt: 'top-down game asset, basic round stone lighthouse with small yellow beacon at top, perched on rocky cliff with blue water, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+          { label: 'Mk II', file: 'eco_lighthouse_1', prompt: 'top-down game asset, upgraded beacon lighthouse, taller round stone tower with bright yellow beacon, larger rocky cliff base, blue water, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+          { label: 'Mk III',file: 'eco_lighthouse_2', prompt: 'top-down game asset, great light lighthouse, massive round stone tower with brilliant golden beacon glowing brightly, ornate lamp room, grand rocky cliff, blue water, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+        ],
       },
       cart: {
         name: 'Cart',
@@ -1121,6 +1221,9 @@
       document.querySelectorAll('.preset-btn[data-eco]').forEach((btn) => {
         btn.addEventListener('click', () => applyEcoPreset(btn.dataset.eco));
       });
+      document.querySelectorAll('.preset-btn[data-goods]').forEach((btn) => {
+        btn.addEventListener('click', () => applyGoodsPreset(btn.dataset.goods));
+      });
       $model.addEventListener('change', () => { updateModelInfo(); scheduleEstimate(); });
       $generateBtn.addEventListener('click', generateTile);
       $browseModelsBtn.addEventListener('click', openModelBrowser);
@@ -1145,16 +1248,18 @@
       document.querySelectorAll('.preset-btn[data-tower]').forEach(b => b.classList.remove('active'));
       $towerVariantRow.style.display = 'none';
       $ecoVariantRow.style.display = 'none';
+      document.querySelectorAll('.preset-btn[data-goods]').forEach(b => b.classList.remove('active'));
     }
 
     function applyTowerType(type) {
       currentTowerType = type;
       currentPreset = null;
-      // Deactivate terrain, city, ability, and eco presets
+      // Deactivate terrain, city, ability, eco, and goods presets
       document.querySelectorAll('.preset-btn[data-preset]').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.preset-btn[data-city]').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.preset-btn[data-ability]').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.preset-btn[data-eco]').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.preset-btn[data-goods]').forEach(b => b.classList.remove('active'));
       // Activate tower type button
       document.querySelectorAll('.preset-btn[data-tower]').forEach(b =>
         b.classList.toggle('active', b.dataset.tower === type)
@@ -1206,6 +1311,7 @@
       document.querySelectorAll('.preset-btn[data-preset]').forEach((b) => b.classList.toggle('active', b.dataset.preset === name));
       document.querySelectorAll('.preset-btn[data-ability]').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.preset-btn[data-eco]').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.preset-btn[data-goods]').forEach(b => b.classList.remove('active'));
       $generateBtn.disabled = false;
       scheduleEstimate();
     }
@@ -1219,10 +1325,11 @@
       $width.value = preset.w;
       $height.value = preset.h;
       $autoRemoveBg.checked = false;
-      // Deactivate terrain, tower, ability, and eco buttons
+      // Deactivate terrain, tower, ability, eco, and goods buttons
       document.querySelectorAll('.preset-btn[data-preset]').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.preset-btn[data-ability]').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.preset-btn[data-eco]').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.preset-btn[data-goods]').forEach(b => b.classList.remove('active'));
       // Activate city button
       document.querySelectorAll('.preset-btn[data-city]').forEach(b =>
         b.classList.toggle('active', b.dataset.city === name)
@@ -1244,9 +1351,32 @@
       document.querySelectorAll('.preset-btn[data-preset]').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.preset-btn[data-city]').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.preset-btn[data-eco]').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.preset-btn[data-goods]').forEach(b => b.classList.remove('active'));
       // Activate ability button
       document.querySelectorAll('.preset-btn[data-ability]').forEach(b =>
         b.classList.toggle('active', b.dataset.ability === name)
+      );
+      $generateBtn.disabled = false;
+      scheduleEstimate();
+    }
+
+    function applyGoodsPreset(name) {
+      currentPreset = null;
+      clearTowerSelection();
+      const preset = GOODS_PRESETS[name];
+      $prompt.value = preset.prompt;
+      $filename.value = preset.file;
+      $width.value = preset.w;
+      $height.value = preset.h;
+      $autoRemoveBg.checked = true; // goods icons need transparent backgrounds
+      // Deactivate terrain, tower, city, ability, and eco buttons
+      document.querySelectorAll('.preset-btn[data-preset]').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.preset-btn[data-city]').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.preset-btn[data-ability]').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.preset-btn[data-eco]').forEach(b => b.classList.remove('active'));
+      // Activate goods button
+      document.querySelectorAll('.preset-btn[data-goods]').forEach(b =>
+        b.classList.toggle('active', b.dataset.goods === name)
       );
       $generateBtn.disabled = false;
       scheduleEstimate();
@@ -1257,10 +1387,11 @@
       clearTowerSelection();
       const preset = ECO_PRESETS[name];
       $autoRemoveBg.checked = false;
-      // Deactivate terrain, tower, city, and ability buttons
+      // Deactivate terrain, tower, city, ability, and goods buttons
       document.querySelectorAll('.preset-btn[data-preset]').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.preset-btn[data-city]').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.preset-btn[data-ability]').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.preset-btn[data-goods]').forEach(b => b.classList.remove('active'));
       // Activate eco button
       document.querySelectorAll('.preset-btn[data-eco]').forEach(b =>
         b.classList.toggle('active', b.dataset.eco === name)

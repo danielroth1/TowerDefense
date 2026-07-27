@@ -20,6 +20,10 @@ export class EconomyBuilding extends Phaser.GameObjects.Container {
   maxInventory: number = 3;
   /** Input stock — consumed resource waiting to be processed (e.g. wheat in a mill). */
   inputStock: number = 0;
+  /** Goods in transit to this building's inputStock (reserved by outgoing cart). */
+  reservedInput: number = 0;
+  /** Goods in transit to this building's inventory (reserved by outgoing cart, warehouses only). */
+  reservedInventory: number = 0;
 
   // Visual
   private sprite: Phaser.GameObjects.Image | null = null;
