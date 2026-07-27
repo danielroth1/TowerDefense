@@ -222,6 +222,8 @@ export class GameScene extends Phaser.Scene {
     this.economySim = new EconomySimulation(this.economy, this);
     this.economySim.setGrid(this.mapData.grid);
     this.transportSys = new TransportSystem(this, this.economySim);
+    this.economySim.setTransportSystem(this.transportSys);
+    this.transportSys.setGrid(this.mapData.grid);
 
     this.placeCityDecorations();
     this.createGroups();

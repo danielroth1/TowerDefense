@@ -1,18 +1,25 @@
 import Phaser from 'phaser';
 import type { EconomyBuilding } from '../entities/EconomyBuilding';
 import type { EconomySimulation, EconomyEvent } from './EconomySimulation';
-import { ECO_BUILDING_DEFS } from '../data/economy';
 import type { EconomyResource } from '../data/economy';
+import { buildWalkabilityGrid, findCartPath, type Vec2 } from './CartPathfinder';
+import type { GridTile } from './MapGenerator';
 
 /*
  * ─── Transport System ────────────────────────────────────────────────────
  *
- * Listens to EconomySimulation events and spawns visual cart sprites that
- * travel between producer and consumer buildings along the road network.
+ * Manages cart deliveries between economy buildings along the road network.
  *
- * Carts are purely visual — the economy simulation handles all inventory
- * transfers and gold payouts independently. This system just adds the
- * animated cart layer on top.
+ * Each cart carries exactly one unit of goods. Carts pathfind along the
+ * walkable grid (grass + enemy path tiles) using A*, then traverse the
+ * resulting polyline manually each frame. Goods are only transferred to
+ * the receiver when the cart physically reaches its destination.
+ *
+ * Flow:
+ *   1. EconomySimulation calls requestDelivery(from, to, resource, type)
+ *   2. TransportSystem pathfinds from → to, spawns a cart with the path
+ *   3. Each frame the cart advances along its path at CART_SPEED px/s
+ *   4. On arrival → economySim.completeDelivery() transfers the goods
  */
 
 // ─── Cargo tint colors ──────────────────────────────────────────────────────
@@ -25,121 +32,237 @@ const CARGO_TINTS: Record<EconomyResource, number> = {
   goods: 0xc8a050,
 };
 
+const CART_SPEED = 80; // px/s
+const MAX_CARTS = 20;
+
 // ─── Cart entity ────────────────────────────────────────────────────────────
 
-interface Cart {
+interface CartSprite {
   sprite: Phaser.GameObjects.Image;
-  tween: Phaser.Tweens.Tween | null;
   alive: boolean;
+}
+
+interface PendingDelivery {
+  cart: CartSprite;
+  from: EconomyBuilding;
+  to: EconomyBuilding;
+  resource: EconomyResource;
+  deliveryType: 'consumer' | 'warehouse';
+  /** Pre-computed path polyline (pixel centers). */
+  path: Vec2[];
+  /** Total path length in pixels. */
+  totalLength: number;
+  /** Pixels traveled so far along the path. */
+  distTraveled: number;
 }
 
 export class TransportSystem {
   private scene: Phaser.Scene;
-  private buildings: EconomyBuilding[] = [];
+  private economySim: EconomySimulation;
 
   /** Group containing all cart sprites — exposed so the UI camera can ignore them. */
   readonly cartGroup: Phaser.GameObjects.Group;
 
+  /** Active deliveries (carts currently in transit). */
+  private deliveries: PendingDelivery[] = [];
+
   /** Pool of reusable cart sprites. */
-  private cartPool: Cart[] = [];
-  private readonly CART_SPEED = 80; // px/s
-  private readonly MAX_CARTS = 20;
+  private cartPool: CartSprite[] = [];
+
+  /** Walkability grid for pathfinding (built from map grid). */
+  private walkable: Uint8Array | null = null;
 
   constructor(scene: Phaser.Scene, sim: EconomySimulation) {
     this.scene = scene;
+    this.economySim = sim;
     this.cartGroup = scene.add.group();
 
-    // Pre-create cart pool
-    for (let i = 0; i < this.MAX_CARTS; i++) {
+    // Pre-create cart sprite pool
+    for (let i = 0; i < MAX_CARTS; i++) {
       const sprite = scene.add.image(-100, -100, 'eco_cart')
         .setDepth(0.25)
         .setDisplaySize(16, 12)
         .setVisible(false)
         .setActive(false);
       this.cartGroup.add(sprite);
-      this.cartPool.push({ sprite, tween: null, alive: false });
+      this.cartPool.push({ sprite, alive: false });
     }
 
-    // Listen for production events
-    sim.onEvent((e: EconomyEvent) => this.onEconomyEvent(e));
-  }
-
-  /** Set the current list of economy buildings (updated after placement). */
-  setBuildings(buildings: EconomyBuilding[]): void {
-    this.buildings = buildings;
-  }
-
-  // ─── Event handler ───────────────────────────────────────────────────────
-
-  private onEconomyEvent(e: EconomyEvent): void {
-    // Spawn floating money text when gold is earned from market/endpoint
-    if (e.type === 'delivered' && e.amount > 0 && e.pixelX != null && e.pixelY != null) {
-      this.spawnMoneyText(e.pixelX, e.pixelY, e.amount);
-    }
-
-    if (e.type !== 'consumed') return;
-    if (!e.resource) return;
-
-    // Warehouse → Market delivery: cart from a warehouse to the market
-    if (e.buildingType === 'market') {
-      const warehouses = this.buildings.filter(
-        b => ECO_BUILDING_DEFS[b.buildingType].isStorage,
-      );
-      const markets = this.buildings.filter(b => b.buildingType === 'market');
-      if (warehouses.length > 0 && markets.length > 0) {
-        // Use the warehouse closest to a market
-        const market = markets[0];
-        const warehouse = this.closestTo(market, warehouses);
-        this.spawnCart(warehouse, market, e.resource!);
+    // Listen for delivered events for floating money text
+    sim.onEvent((e: EconomyEvent) => {
+      if (e.type === 'delivered' && e.amount > 0 && e.pixelX != null && e.pixelY != null) {
+        this.spawnMoneyText(e.pixelX, e.pixelY, e.amount);
       }
-      return;
+    });
+  }
+
+  /** Set the map grid to build the walkability grid for pathfinding. */
+  setGrid(grid: GridTile[][]): void {
+    this.walkable = buildWalkabilityGrid(grid);
+  }
+
+  /** No-op — kept for backward compatibility. Building refs come via requestDelivery(). */
+  setBuildings(_buildings: EconomyBuilding[]): void {
+    // Building references are provided directly by EconomySimulation.requestDelivery()
+  }
+
+  // ─── Delivery dispatch ───────────────────────────────────────────────────
+
+  /**
+   * Called by EconomySimulation when a producer has goods ready for a consumer.
+   * Pathfinds between the buildings and spawns a cart. Returns true if a cart
+   * was successfully dispatched (path found + cart available).
+   */
+  requestDelivery(
+    from: EconomyBuilding,
+    to: EconomyBuilding,
+    resource: EconomyResource,
+    deliveryType: 'consumer' | 'warehouse',
+  ): boolean {
+    if (!this.walkable) return false;
+
+    const cartSprite = this.getPooledCart();
+    if (!cartSprite) return false;
+
+    // Pathfind from the producer's grid cell to the consumer's grid cell
+    const path = findCartPath(
+      this.walkable,
+      new Set(), // Don't block on building footprints — carts need to reach buildings
+      from.gridRow, from.gridCol,
+      to.gridRow, to.gridCol,
+    );
+    if (!path || path.length < 2) return false;
+
+    // Smooth the path for natural-looking movement
+    const smoothed = smoothCartPath(path);
+
+    // Compute total path length
+    let totalLength = 0;
+    for (let i = 1; i < smoothed.length; i++) {
+      const dx = smoothed[i].x - smoothed[i - 1].x;
+      const dy = smoothed[i].y - smoothed[i - 1].y;
+      totalLength += Math.sqrt(dx * dx + dy * dy);
     }
 
-    // Find the producer (building that produced this resource)
-    const producer = this.findProducer(e.resource);
-    // Find the consumer (building that consumed this resource)
-    const consumerType = this.getConsumerType(e.resource);
-    if (!consumerType) return;
-    const consumer = this.findConsumer(consumerType);
-    if (!producer || !consumer) return;
+    const tint = CARGO_TINTS[resource] ?? 0xffffff;
 
-    this.spawnCart(producer, consumer, e.resource);
+    cartSprite.sprite
+      .setPosition(from.pixelX, from.pixelY)
+      .setTint(tint)
+      .setVisible(true)
+      .setActive(true)
+      .setAlpha(1)
+      .setFlipX(to.pixelX < from.pixelX);
+    cartSprite.alive = true;
+
+    this.deliveries.push({
+      cart: cartSprite,
+      from,
+      to,
+      resource,
+      deliveryType,
+      path: smoothed,
+      totalLength,
+      distTraveled: 0,
+    });
+
+    return true;
   }
 
-  private getConsumerType(resource: EconomyResource): string | null {
-    const map: Record<EconomyResource, string> = {
-      wheat: 'mill',
-      flour: 'bakery',
-      fish:  'harbor',
-      bread: null!, // endpoint, no further consumer
-      goods: null!, // goes to warehouse → market
-    };
-    return map[resource] ?? null;
-  }
+  // ─── Update ──────────────────────────────────────────────────────────────
 
-  private findProducer(resource: EconomyResource): EconomyBuilding | null {
-    // Find building that produces this resource and has inventory
-    return this.buildings.find(b => {
-      const def = ECO_BUILDING_DEFS[b.buildingType];
-      return def.produces === resource;
-    }) ?? null;
-  }
+  update(delta: number): void {
+    const dt = delta / 1000; // ms → s
+    const toComplete: PendingDelivery[] = [];
 
-  private findConsumer(type: string): EconomyBuilding | null {
-    return this.buildings.find(b => b.buildingType === type) ?? null;
-  }
+    for (const delivery of this.deliveries) {
+      delivery.distTraveled += CART_SPEED * dt;
 
-  /** Find the closest building in a list to a reference building. */
-  private closestTo(ref: EconomyBuilding, candidates: EconomyBuilding[]): EconomyBuilding {
-    let best = candidates[0];
-    let bestDist = Infinity;
-    for (const c of candidates) {
-      const dx = c.pixelX - ref.pixelX;
-      const dy = c.pixelY - ref.pixelY;
-      const d = dx * dx + dy * dy;
-      if (d < bestDist) { bestDist = d; best = c; }
+      // Find the position along the path at the current distance traveled
+      const pos = this.pointAtDistance(delivery.path, delivery.distTraveled, delivery.totalLength);
+      delivery.cart.sprite.setPosition(pos.x, pos.y);
+
+      // Update flip direction based on movement
+      if (delivery.distTraveled > 0 && delivery.path.length > 1) {
+        const nextIdx = this.pathIndexAtDistance(delivery.path, delivery.distTraveled, delivery.totalLength);
+        if (nextIdx < delivery.path.length) {
+          const dx = delivery.path[nextIdx].x - delivery.cart.sprite.x;
+          if (Math.abs(dx) > 1) delivery.cart.sprite.setFlipX(dx < 0);
+        }
+      }
+
+      // Arrived?
+      if (delivery.distTraveled >= delivery.totalLength) {
+        toComplete.push(delivery);
+      }
     }
-    return best;
+
+    // Complete deliveries (outside the iteration to avoid mutation issues)
+    for (const delivery of toComplete) {
+      // Transfer goods from cart to receiver
+      this.economySim.completeDelivery(delivery.to, delivery.resource, delivery.deliveryType);
+
+      // Recycle the cart sprite
+      this.recycleCart(delivery.cart);
+
+      // Remove from active deliveries
+      const idx = this.deliveries.indexOf(delivery);
+      if (idx >= 0) this.deliveries.splice(idx, 1);
+    }
+  }
+
+  // ─── Path utilities ──────────────────────────────────────────────────────
+
+  /** Get the interpolated position at a given distance along the path. */
+  private pointAtDistance(path: Vec2[], dist: number, totalLength: number): Vec2 {
+    if (path.length === 0) return { x: 0, y: 0 };
+    if (dist <= 0) return path[0];
+    if (dist >= totalLength) return path[path.length - 1];
+
+    let traveled = 0;
+    for (let i = 1; i < path.length; i++) {
+      const dx = path[i].x - path[i - 1].x;
+      const dy = path[i].y - path[i - 1].y;
+      const segLen = Math.sqrt(dx * dx + dy * dy);
+
+      if (traveled + segLen >= dist) {
+        const t = (dist - traveled) / segLen;
+        return {
+          x: path[i - 1].x + dx * t,
+          y: path[i - 1].y + dy * t,
+        };
+      }
+      traveled += segLen;
+    }
+
+    return path[path.length - 1];
+  }
+
+  /** Get the index of the next path point ahead of the current distance. */
+  private pathIndexAtDistance(path: Vec2[], dist: number, totalLength: number): number {
+    if (dist >= totalLength) return path.length - 1;
+    let traveled = 0;
+    for (let i = 1; i < path.length; i++) {
+      const dx = path[i].x - path[i - 1].x;
+      const dy = path[i].y - path[i - 1].y;
+      traveled += Math.sqrt(dx * dx + dy * dy);
+      if (traveled > dist) return i;
+    }
+    return path.length - 1;
+  }
+
+  // ─── Cart pool ───────────────────────────────────────────────────────────
+
+  private getPooledCart(): CartSprite | null {
+    for (const cart of this.cartPool) {
+      if (!cart.alive) return cart;
+    }
+    return null;
+  }
+
+  private recycleCart(cart: CartSprite): void {
+    cart.alive = false;
+    cart.sprite.setVisible(false).setActive(false).setPosition(-100, -100);
   }
 
   // ─── Floating money text ────────────────────────────────────────────────
@@ -164,76 +287,32 @@ export class TransportSystem {
     });
   }
 
-  // ─── Cart spawning ───────────────────────────────────────────────────────
-
-  private spawnCart(from: EconomyBuilding, to: EconomyBuilding, resource: EconomyResource): void {
-    const cart = this.getPooledCart();
-    if (!cart) return;
-
-    const tint = CARGO_TINTS[resource] ?? 0xffffff;
-
-    cart.sprite
-      .setPosition(from.pixelX, from.pixelY)
-      .setTint(tint)
-      .setVisible(true)
-      .setActive(true)
-      .setAlpha(1);
-    cart.alive = true;
-
-    // Travel in a straight line from producer to consumer.
-    // TODO Phase 4+: follow actual road polylines from CityRoadNetwork
-    // for now straight-line movement gives immediate visual feedback.
-    const dx = to.pixelX - from.pixelX;
-    const dy = to.pixelY - from.pixelY;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const duration = (dist / this.CART_SPEED) * 1000;
-
-    // Face movement direction
-    cart.sprite.setFlipX(dx < 0);
-
-    cart.tween = this.scene.tweens.add({
-      targets: cart.sprite,
-      x: to.pixelX,
-      y: to.pixelY,
-      duration,
-      ease: 'Linear',
-      onComplete: () => {
-        this.recycleCart(cart);
-      },
-    });
-  }
-
-  // ─── Cart pool ───────────────────────────────────────────────────────────
-
-  private getPooledCart(): Cart | null {
-    for (const cart of this.cartPool) {
-      if (!cart.alive) return cart;
-    }
-    return null;
-  }
-
-  private recycleCart(cart: Cart): void {
-    cart.alive = false;
-    cart.sprite.setVisible(false).setActive(false).setPosition(-100, -100);
-    if (cart.tween) {
-      cart.tween.stop();
-      cart.tween = null;
-    }
-  }
-
-  // ─── Update ──────────────────────────────────────────────────────────────
-
-  update(_delta: number): void {
-    // Carts are tween-driven, no per-frame update needed.
-    // Future: if switching to manual movement along road polylines,
-    // update cart positions here.
-  }
+  // ─── Cleanup ─────────────────────────────────────────────────────────────
 
   destroy(): void {
+    for (const delivery of this.deliveries) {
+      this.recycleCart(delivery.cart);
+    }
+    this.deliveries = [];
     for (const cart of this.cartPool) {
-      if (cart.tween) cart.tween.stop();
       cart.sprite.destroy();
     }
     this.cartPool = [];
   }
 }
+
+// ─── Path smoothing (light Chaikin for cart paths) ──────────────────────────
+
+function smoothCartPath(points: Vec2[]): Vec2[] {
+  if (points.length < 3) return points;
+  // One iteration of Chaikin corner-cutting
+  const out: Vec2[] = [points[0]];
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i], b = points[i + 1];
+    out.push({ x: a.x * 0.75 + b.x * 0.25, y: a.y * 0.75 + b.y * 0.25 });
+    out.push({ x: a.x * 0.25 + b.x * 0.75, y: a.y * 0.25 + b.y * 0.75 });
+  }
+  out.push(points[points.length - 1]);
+  return out;
+}
+

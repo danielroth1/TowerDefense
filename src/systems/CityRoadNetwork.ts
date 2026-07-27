@@ -2,6 +2,7 @@ import { type GridTile } from './MapGenerator';
 import { type DecorationPlacement } from './CityDecorator';
 import { TILE_SIZE, GRID_COLS, GRID_ROWS } from '../utils/constants';
 import { createPRNG } from '../utils/helpers';
+import { buildWalkabilityGrid, findCartPath } from './CartPathfinder';
 
 /*
  * ─── Decorative City Road Network ──────────────────────────────────────
@@ -78,93 +79,8 @@ class UnionFind {
   }
 }
 
-// ─── A* on grid ─────────────────────────────────────────────────────────────
-
-interface AStarNode {
-  r: number; c: number;
-  g: number; f: number;
-  parent: AStarNode | null;
-}
-
-function aStar(
-  walkable: Uint8Array,
-  sr: number, sc: number,
-  er: number, ec: number,
-  blocked: Set<string>,
-): Vec2[] | null {
-  const COLS = GRID_COLS, ROWS = GRID_ROWS;
-  const key = (r: number, c: number) => r * COLS + c;
-
-  // Don't pathfind into blocked cells
-  if (blocked.has(`${er},${ec}`)) return null;
-
-  const open: AStarNode[] = [];
-  const closed = new Set<number>();
-
-  const heuristic = (r: number, c: number) =>
-    Math.abs(r - er) + Math.abs(c - ec);
-
-  const start: AStarNode = { r: sr, c: sc, g: 0, f: heuristic(sr, sc), parent: null };
-  open.push(start);
-
-  const bestG = new Map<number, number>();
-  bestG.set(key(sr, sc), 0);
-
-  const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-
-  while (open.length > 0) {
-    // Find node with lowest f
-    let bestIdx = 0;
-    for (let i = 1; i < open.length; i++) {
-      if (open[i].f < open[bestIdx].f) bestIdx = i;
-    }
-    const cur = open.splice(bestIdx, 1)[0];
-
-    if (cur.r === er && cur.c === ec) {
-      // Reconstruct path
-      const path: Vec2[] = [];
-      let node: AStarNode | null = cur;
-      while (node) {
-        path.push({
-          x: node.c * TILE_SIZE + TILE_SIZE / 2,
-          y: node.r * TILE_SIZE + TILE_SIZE / 2,
-        });
-        node = node.parent;
-      }
-      path.reverse();
-      return path;
-    }
-
-    const ck = key(cur.r, cur.c);
-    if (closed.has(ck)) continue;
-    closed.add(ck);
-
-    for (const [dr, dc] of dirs) {
-      const nr = cur.r + dr, nc = cur.c + dc;
-      if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) continue;
-      const nk = key(nr, nc);
-      if (closed.has(nk)) continue;
-
-      // Walkability: 0 = blocked, 1 = walkable (1.0 cost), 2 = path (0.5 cost)
-      const cell = walkable[nk];
-      if (cell === 0) continue;
-
-      // Skip cells that are blocked by buildings (unless it's the destination)
-      if (blocked.has(`${nr},${nc}`) && !(nr === er && nc === ec)) continue;
-
-      const moveCost = cell === 2 ? 0.5 : 1.0;
-      const ng = cur.g + moveCost;
-      const prevG = bestG.get(nk);
-      if (prevG !== undefined && ng >= prevG) continue;
-      bestG.set(nk, ng);
-
-      const nf = ng + heuristic(nr, nc);
-      open.push({ r: nr, c: nc, g: ng, f: nf, parent: cur });
-    }
-  }
-
-  return null; // No path found
-}
+// ─── A* pathfinding delegated to CartPathfinder ────────────────────────────
+// findCartPath() from CartPathfinder is used for all A* calls.
 
 // ─── Smoothing ──────────────────────────────────────────────────────────────
 
@@ -213,20 +129,8 @@ export function generateCityRoads(
 
   const rng = createPRNG(seed + 0xC0DE);
 
-  // ── 1. Build walkability grid ──────────────────────────────────────────
-  // 0 = blocked, 1 = buildable/grass (cost 1.0), 2 = path (cost 0.5)
-  const walkable = new Uint8Array(GRID_ROWS * GRID_COLS);
-  for (let r = 0; r < GRID_ROWS; r++) {
-    for (let c = 0; c < GRID_COLS; c++) {
-      const t = grid[r][c].type;
-      if (t === 'path' || t === 'spawn' || t === 'goal') {
-        walkable[r * GRID_COLS + c] = 2;
-      } else if (t === 'buildable') {
-        walkable[r * GRID_COLS + c] = 1;
-      }
-      // 'ground' (water) stays 0
-    }
-  }
+  // ── 1. Build walkability grid (shared with CartPathfinder) ────────────
+  const walkable = buildWalkabilityGrid(grid);
 
   // ── 2. Compute building center nodes ───────────────────────────────────
   interface BuildingNode {
@@ -385,7 +289,7 @@ export function generateCityRoads(
     const junc = junctions[ji];
     for (const bi of junc.buildingIndices) {
       const b = buildings[bi];
-      const path = aStar(walkable, b.row, b.col, junc.gridR, junc.gridC, blockedCells);
+      const path = findCartPath(walkable, blockedCells, b.row, b.col, junc.gridR, junc.gridC);
       if (path && path.length > 0) {
         // Prepend building center so the road visually extends under the building sprite
         path.unshift({ x: b.cx, y: b.cy });
@@ -415,7 +319,7 @@ export function generateCityRoads(
     if (nearestIdx === -1) continue;
 
     const target = junctions[nearestIdx];
-    const path = aStar(walkable, junc.gridR, junc.gridC, target.gridR, target.gridC, blockedCells);
+    const path = findCartPath(walkable, blockedCells, junc.gridR, junc.gridC, target.gridR, target.gridC);
     if (path && path.length > 0) {
       // This is a road from isolated junction to the nearest connected junction
       // Add it as a segment — we'll track it for intersection detection

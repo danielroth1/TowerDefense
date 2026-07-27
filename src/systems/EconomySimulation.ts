@@ -4,6 +4,7 @@ import { ECO_BUILDING_DEFS, CHAIN_BONUS_MULTIPLIER, WAREHOUSE_CAPACITY, WAREHOUS
 import type { EconomyBuilding } from '../entities/EconomyBuilding';
 import { FisherShip } from '../entities/FisherShip';
 import type { EconomyManager } from './EconomyManager';
+import type { TransportSystem } from './TransportSystem';
 
 /*
  * ─── Economy Simulation System ───────────────────────────────────────────
@@ -11,8 +12,8 @@ import type { EconomyManager } from './EconomyManager';
  * Manages all player-placed economy buildings and their production cycles.
  *
  *   - Ticks each building's cycle timer
- *   - When a producer finishes, tries to push goods to a connected consumer
- *   - Transport is immediate for now (cart visuals come in Phase 4)
+ *   - When a producer finishes, TransportSystem dispatches a cart
+ *   - Carts travel along road paths — goods arrive only when cart reaches destination
  *   - Chain bonus: if goods pass through 3+ buildings, apply multiplier
  *   - Warehouse: buffers up to WAREHOUSE_CAPACITY goods, bulk-delivers
  */
@@ -55,6 +56,9 @@ export class EconomySimulation {
   private scene: Phaser.Scene;
   private eventListeners: Array<(e: EconomyEvent) => void> = [];
 
+  /** Transport system for dispatching carts (set after construction). */
+  private transportSys?: TransportSystem;
+
   /** Tracks what resource type each warehouse is storing (by building reference). */
   private warehouseResources = new WeakMap<EconomyBuilding, EconomyResource>();
 
@@ -67,6 +71,11 @@ export class EconomySimulation {
   constructor(economy: EconomyManager, scene: Phaser.Scene) {
     this.economy = economy;
     this.scene = scene;
+  }
+
+  /** Set the transport system for dispatching delivery carts. */
+  setTransportSystem(ts: TransportSystem): void {
+    this.transportSys = ts;
   }
 
   /** Set the map grid for fisher ship pathfinding. */
@@ -215,8 +224,15 @@ export class EconomySimulation {
 
   // ─── Consumption / transport ────────────────────────────────────────────
 
+  /**
+   * Dispatch pending producer inventory to consumers via the TransportSystem.
+   * Goods are no longer transferred instantly — a cart must physically
+   * travel the road network and arrive before the consumer receives them.
+   */
   private processConsumption(): void {
-    // Phase 1: Move goods from producers to warehouses (if available) or directly to consumers.
+    if (!this.transportSys) return;
+
+    // Phase 1: Dispatch carts from producers to consumers/warehouses.
     for (const producer of this.buildings) {
       if (producer.inventory <= 0) continue;
 
@@ -229,12 +245,13 @@ export class EconomySimulation {
       if (!consumerType) {
         const warehouse = this.findClosestAvailableWarehouse(producer, resource);
         if (warehouse) {
-          producer.inventory--;
-          warehouse.inventory++;
-          this.warehouseResources.set(warehouse, resource);
-          producer.redraw();
-          warehouse.redraw();
-          this.emit({ type: 'consumed', buildingType: 'warehouse', resource, amount: 1 });
+          // Warehouse delivery: dispatch a cart. Goods leave producer now,
+          // arrive at warehouse when cart gets there.
+          const accepted = this.transportSys.requestDelivery(producer, warehouse, resource, 'warehouse');
+          if (accepted) {
+            producer.inventory--;
+            producer.redraw();
+          }
         }
         continue;
       }
@@ -247,15 +264,12 @@ export class EconomySimulation {
       if (consumers.length === 0) continue;
 
       const consumer = this.closestBuilding(producer, consumers);
-      producer.inventory--;
-      consumer.inputStock++;
-      producer.redraw();
-      consumer.redraw();
-      this.emit({ type: 'consumed', buildingType: consumer.buildingType, resource, amount: 1 });
 
-      const consumerDef = ECO_BUILDING_DEFS[consumer.buildingType];
-      if (consumerDef.isEndpoint && consumerDef.goldPerUnit > 0) {
-        this.deliverToEndpoint(consumer);
+      // Dispatch cart — goods leave producer now, arrive at consumer when cart gets there.
+      const accepted = this.transportSys.requestDelivery(producer, consumer, resource, 'consumer');
+      if (accepted) {
+        producer.inventory--;
+        producer.redraw();
       }
     }
 
@@ -397,6 +411,36 @@ export class EconomySimulation {
         });
       }
     }
+  }
+
+  /**
+   * Called by TransportSystem when a cart arrives at its destination.
+   * Transfers the carried goods into the receiver's inventory/inputStock.
+   *
+   * @param receiver  The building receiving the goods (consumer or warehouse).
+   * @param resource  The type of resource being delivered.
+   * @param deliveryType  'consumer' → inputStock, 'warehouse' → inventory.
+   */
+  completeDelivery(
+    receiver: EconomyBuilding,
+    resource: EconomyResource,
+    deliveryType: 'consumer' | 'warehouse',
+  ): void {
+    if (deliveryType === 'warehouse') {
+      receiver.inventory++;
+      this.warehouseResources.set(receiver, resource);
+    } else {
+      receiver.inputStock++;
+    }
+    receiver.redraw();
+    this.emit({
+      type: 'consumed',
+      buildingType: receiver.buildingType,
+      resource,
+      amount: 1,
+      pixelX: receiver.pixelX,
+      pixelY: receiver.pixelY,
+    });
   }
 
   private deliverToEndpoint(endpoint: EconomyBuilding): void {
