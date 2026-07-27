@@ -24,6 +24,9 @@ export interface EconomyEvent {
   buildingType: EconomyBuildingType;
   resource: EconomyResource | null;
   amount: number;
+  /** Pixel position for visual effects (floating text, carts). */
+  pixelX?: number;
+  pixelY?: number;
 }
 
 // ─── Production chain graph ─────────────────────────────────────────────────
@@ -133,6 +136,9 @@ export class EconomySimulation {
       // Don't produce if inventory is full
       if (b.inventory >= b.maxInventory) continue;
 
+      // Buildings that consume a resource need input stock to produce
+      if (def.consumes && b.inputStock <= 0) continue;
+
       // Fisher ships: use ship-based production instead of direct timer
       if (b.buildingType === 'fishery') {
         this.updateFishery(b, delta);
@@ -142,6 +148,8 @@ export class EconomySimulation {
       b.cycleTimer += delta;
       if (b.cycleTimer >= b.cycleTime) {
         b.cycleTimer -= b.cycleTime;
+        // Consume input stock for buildings that need it
+        if (def.consumes) b.inputStock--;
         b.inventory++;
         b.redraw();
         this.emit({ type: 'produced', buildingType: b.buildingType, resource: def.produces, amount: 1 });
@@ -198,6 +206,8 @@ export class EconomySimulation {
           buildingType: b.buildingType,
           resource: def.consumes ?? def.produces,
           amount: gold,
+          pixelX: b.pixelX,
+          pixelY: b.pixelY,
         });
       }
     }
@@ -217,7 +227,7 @@ export class EconomySimulation {
 
       // Goods with no consumer (e.g. bread from bakery) go to warehouse → market.
       if (!consumerType) {
-        const warehouse = this.findAvailableWarehouse(resource);
+        const warehouse = this.findClosestAvailableWarehouse(producer, resource);
         if (warehouse) {
           producer.inventory--;
           warehouse.inventory++;
@@ -230,14 +240,15 @@ export class EconomySimulation {
       }
 
       // Raw materials: deliver directly to consumer (production chain).
+      // Prefer the closest consumer that has input capacity.
       const consumers = this.buildings.filter(
-        b => b.buildingType === consumerType && b.inventory < b.maxInventory,
+        b => b.buildingType === consumerType && b.inputStock < b.maxInventory,
       );
       if (consumers.length === 0) continue;
 
-      const consumer = consumers[0];
+      const consumer = this.closestBuilding(producer, consumers);
       producer.inventory--;
-      consumer.inventory++;
+      consumer.inputStock++;
       producer.redraw();
       consumer.redraw();
       this.emit({ type: 'consumed', buildingType: consumer.buildingType, resource, amount: 1 });
@@ -252,19 +263,37 @@ export class EconomySimulation {
     this.processWarehouses();
   }
 
-  /** Find a warehouse that can accept this resource (empty or matching type, has space). */
-  private findAvailableWarehouse(resource: EconomyResource): EconomyBuilding | null {
+  /** Find the closest building from a list. */
+  private closestBuilding(from: EconomyBuilding, candidates: EconomyBuilding[]): EconomyBuilding {
+    let best = candidates[0];
+    let bestDist = Infinity;
+    for (const c of candidates) {
+      const dx = c.pixelX - from.pixelX;
+      const dy = c.pixelY - from.pixelY;
+      const d = dx * dx + dy * dy;
+      if (d < bestDist) { bestDist = d; best = c; }
+    }
+    return best;
+  }
+
+  /** Find the closest warehouse that can accept this resource (empty or matching type, has space). */
+  private findClosestAvailableWarehouse(from: EconomyBuilding, resource: EconomyResource): EconomyBuilding | null {
+    let best: EconomyBuilding | null = null;
+    let bestDist = Infinity;
     for (const b of this.buildings) {
       if (!ECO_BUILDING_DEFS[b.buildingType].isStorage) continue;
       if (b.inventory >= b.maxInventory) continue;
 
       const stored = this.warehouseResources.get(b);
       // Empty warehouse accepts anything; non-empty must match resource type
-      if (stored === undefined || stored === resource) {
-        return b;
-      }
+      if (stored !== undefined && stored !== resource) continue;
+
+      const dx = b.pixelX - from.pixelX;
+      const dy = b.pixelY - from.pixelY;
+      const d = dx * dx + dy * dy;
+      if (d < bestDist) { bestDist = d; best = b; }
     }
-    return null;
+    return best;
   }
 
   /** Bulk-deliver goods from full warehouses to market (if available) or directly to consumer. */
@@ -276,10 +305,11 @@ export class EconomySimulation {
       const resource = this.warehouseResources.get(warehouse);
       if (!resource) continue;
 
-      // Try market first — market slowly converts goods to gold
-      const market = this.buildings.find(
+      // Try market first — prefer closest non-full market
+      const markets = this.buildings.filter(
         b => b.buildingType === 'market' && b.inventory < b.maxInventory,
       );
+      const market = markets.length > 0 ? this.closestBuilding(warehouse, markets) : null;
 
       if (market) {
         // Bulk deliver to market
@@ -296,7 +326,8 @@ export class EconomySimulation {
         market.inventory += transfer;
         market.redraw();
 
-        this.emit({ type: 'consumed', buildingType: 'market', resource, amount: transfer });
+        this.emit({ type: 'consumed', buildingType: 'market', resource, amount: transfer,
+          pixelX: warehouse.pixelX, pixelY: warehouse.pixelY });
         continue;
       }
 
@@ -304,10 +335,11 @@ export class EconomySimulation {
       let delivered = false;
       const consumerType = CONSUMER_MAP[resource];
       if (consumerType) {
-        const consumer = this.buildings.find(
-          b => b.buildingType === consumerType && b.inventory < b.maxInventory,
+        const consumers = this.buildings.filter(
+          b => b.buildingType === consumerType && b.inputStock < b.maxInventory,
         );
-        if (consumer) {
+        if (consumers.length > 0) {
+          const consumer = this.closestBuilding(warehouse, consumers);
           const count = warehouse.inventory;
           const bonusCount = Math.floor(count * (WAREHOUSE_BULK_BONUS - 1));
 
@@ -315,17 +347,16 @@ export class EconomySimulation {
           this.warehouseResources.delete(warehouse);
           warehouse.redraw();
 
-          consumer.inventory += Math.min(count, consumer.maxInventory - consumer.inventory + count);
-          if (consumer.inventory > consumer.maxInventory) {
-            consumer.inventory = consumer.maxInventory;
-          }
+          const space = consumer.maxInventory - consumer.inputStock;
+          const transfer = Math.min(count, space);
+          consumer.inputStock += transfer;
           consumer.redraw();
 
-          this.emit({ type: 'consumed', buildingType: consumer.buildingType, resource, amount: count });
+          this.emit({ type: 'consumed', buildingType: consumer.buildingType, resource, amount: transfer });
 
           const consumerDef = ECO_BUILDING_DEFS[consumer.buildingType];
           if (consumerDef.isEndpoint && consumerDef.goldPerUnit > 0) {
-            for (let i = 0; i < count; i++) {
+            for (let i = 0; i < transfer; i++) {
               if (consumer.inventory > 0) {
                 this.deliverToEndpoint(consumer);
               }
@@ -338,6 +369,7 @@ export class EconomySimulation {
                 buildingType: consumer.buildingType,
                 resource,
                 amount: Math.floor(bonusGold),
+                pixelX: consumer.pixelX, pixelY: consumer.pixelY,
               });
             }
           }
@@ -361,6 +393,7 @@ export class EconomySimulation {
           buildingType: 'warehouse',
           resource,
           amount: totalGold,
+          pixelX: warehouse.pixelX, pixelY: warehouse.pixelY,
         });
       }
     }
@@ -385,6 +418,8 @@ export class EconomySimulation {
       buildingType: endpoint.buildingType,
       resource: def.consumes ?? def.produces,
       amount: gold,
+      pixelX: endpoint.pixelX,
+      pixelY: endpoint.pixelY,
     });
   }
 

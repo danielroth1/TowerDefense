@@ -18,6 +18,8 @@ export class EconomyBuilding extends Phaser.GameObjects.Container {
   inventory: number = 0;
   /** Max inventory before production stalls. */
   maxInventory: number = 3;
+  /** Input stock — consumed resource waiting to be processed (e.g. wheat in a mill). */
+  inputStock: number = 0;
 
   // Visual
   private sprite: Phaser.GameObjects.Image | null = null;
@@ -108,11 +110,12 @@ export class EconomyBuilding extends Phaser.GameObjects.Container {
     }
 
     // Inventory indicator — colored dots below building
-    if (this.inventory > 0 && (this.def.produces || this.def.isStorage || this.def.isEndpoint)) {
+    if ((this.inventory > 0 || this.inputStock > 0) && (this.def.produces || this.def.isStorage || this.def.isEndpoint)) {
       const dotColors: Record<string, number> = {
         wheat: 0xd4a843, flour: 0xeee8d5, bread: 0xc89a5c, fish: 0x6699cc,
       };
       const color = dotColors[this.def.produces ?? 'wheat'] ?? 0xffffff;
+      const inputColor = dotColors[this.def.consumes ?? 'wheat'] ?? 0x888888;
 
       if (this.def.isStorage) {
         // Warehouse: show fill level bar on the right side
@@ -138,6 +141,7 @@ export class EconomyBuilding extends Phaser.GameObjects.Container {
         barBorder.strokeRect(barX, barY, barW, barH);
         this.add(barBorder);
       } else {
+        // Output inventory dots (produced goods, below building)
         for (let i = 0; i < Math.min(this.inventory, this.maxInventory); i++) {
           const dot = this.scene.add.graphics();
           dot.fillStyle(color, 1);
@@ -147,6 +151,19 @@ export class EconomyBuilding extends Phaser.GameObjects.Container {
             2,
           );
           this.add(dot);
+        }
+        // Input stock dots (consumed goods waiting, above building)
+        if (this.inputStock > 0 && this.def.consumes) {
+          for (let i = 0; i < this.inputStock; i++) {
+            const dot = this.scene.add.graphics();
+            dot.fillStyle(inputColor, 0.7);
+            dot.fillCircle(
+              -((this.inputStock - 1) * 5) / 2 + i * 5,
+              -displayH / 2 - 4,
+              1.5,
+            );
+            this.add(dot);
+          }
         }
       }
     }

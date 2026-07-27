@@ -653,9 +653,17 @@ export class BottomBar {
     this.drawTowerBtn(infoBg, cx0, CY, this._TBW, this._TBH, def.color, false, false, true);
     this.upgRoot.add(infoBg);
 
+    // Use upgrade variant texture if available
+    let texKey = def.textureKey;
+    if (building.level > 1) {
+      const variantKey = `${def.textureKey}_${building.level - 1}`;
+      if (this.scene.textures.exists(variantKey)) {
+        texKey = variantKey;
+      }
+    }
     const iconSize = Math.round(this._TBW * 0.5);
-    if (this.scene.textures.exists(def.textureKey)) {
-      this.upgRoot.add(this.scene.add.image(cx0, CY - this._TBH * 0.25, def.textureKey).setDisplaySize(iconSize, iconSize));
+    if (this.scene.textures.exists(texKey)) {
+      this.upgRoot.add(this.scene.add.image(cx0, CY - this._TBH * 0.25, texKey).setDisplaySize(iconSize, iconSize));
     }
 
     const nameFSPx = Math.max(10, Math.round(this._TBW * 0.115));
@@ -664,13 +672,30 @@ export class BottomBar {
         fontSize: nameFSPx + 'px', fontFamily: 'monospace', color: '#eef0f4', align: 'center', lineSpacing: 2,
       }).setOrigin(0.5));
 
-    // Show production stats
+    // Show production stats + stockpile
     const stats: string[] = [];
     if (def.produces) {
       stats.push(`⏱ ${(building.cycleTime / 1000).toFixed(1)}s`);
     }
-    if (building.def.isStorage) {
+    if (def.isStorage) {
       stats.push(`📦 ${building.inventory}/${building.maxInventory}`);
+    }
+    if (def.consumes) {
+      const goodNames: Record<string, string> = {
+        wheat: '🌾', flour: '🫓', bread: '🍞', fish: '🐟', goods: '📦',
+      };
+      const icon = goodNames[def.consumes] ?? def.consumes;
+      stats.push(`←${icon}:${building.inputStock}`);
+    }
+    if (def.produces) {
+      const goodNames: Record<string, string> = {
+        wheat: '🌾', flour: '🫓', bread: '🍞', fish: '🐟', goods: '📦',
+      };
+      const icon = goodNames[def.produces] ?? def.produces;
+      stats.push(`${icon}:${building.inventory}/${building.maxInventory}`);
+    }
+    if (def.isEndpoint && building.buildingType === 'market') {
+      stats.push(`💰 ${building.inventory} goods`);
     }
     if (stats.length > 0) {
       this.upgRoot.add(this.scene.add.text(cx0, CY + this._TBH * 0.41,
@@ -702,9 +727,12 @@ export class BottomBar {
       });
     }
 
-    const sellVal = building.sellValue();
-    actions.push({ label: '💰 Sell', cost: sellVal, color: 0x4a1a1a, enabled: true,
-      previewStats: `+${sellVal}g`, cb: () => this.onSellEco?.() });
+    // Markets cannot be sold
+    if (building.buildingType !== 'market') {
+      const sellVal = building.sellValue();
+      actions.push({ label: '💰 Sell', cost: sellVal, color: 0x4a1a1a, enabled: true,
+        previewStats: `+${sellVal}g`, cb: () => this.onSellEco?.() });
+    }
 
     actions.forEach((act, i) => {
       const cx = this.upgradeCX(i + 1);

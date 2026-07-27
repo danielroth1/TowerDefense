@@ -72,17 +72,25 @@ export class TransportSystem {
   // ─── Event handler ───────────────────────────────────────────────────────
 
   private onEconomyEvent(e: EconomyEvent): void {
+    // Spawn floating money text when gold is earned from market/endpoint
+    if (e.type === 'delivered' && e.amount > 0 && e.pixelX != null && e.pixelY != null) {
+      this.spawnMoneyText(e.pixelX, e.pixelY, e.amount);
+    }
+
     if (e.type !== 'consumed') return;
     if (!e.resource) return;
 
     // Warehouse → Market delivery: cart from a warehouse to the market
     if (e.buildingType === 'market') {
-      const warehouse = this.buildings.find(
+      const warehouses = this.buildings.filter(
         b => ECO_BUILDING_DEFS[b.buildingType].isStorage,
       );
-      const market = this.buildings.find(b => b.buildingType === 'market');
-      if (warehouse && market) {
-        this.spawnCart(warehouse, market, e.resource);
+      const markets = this.buildings.filter(b => b.buildingType === 'market');
+      if (warehouses.length > 0 && markets.length > 0) {
+        // Use the warehouse closest to a market
+        const market = markets[0];
+        const warehouse = this.closestTo(market, warehouses);
+        this.spawnCart(warehouse, market, e.resource!);
       }
       return;
     }
@@ -119,6 +127,41 @@ export class TransportSystem {
 
   private findConsumer(type: string): EconomyBuilding | null {
     return this.buildings.find(b => b.buildingType === type) ?? null;
+  }
+
+  /** Find the closest building in a list to a reference building. */
+  private closestTo(ref: EconomyBuilding, candidates: EconomyBuilding[]): EconomyBuilding {
+    let best = candidates[0];
+    let bestDist = Infinity;
+    for (const c of candidates) {
+      const dx = c.pixelX - ref.pixelX;
+      const dy = c.pixelY - ref.pixelY;
+      const d = dx * dx + dy * dy;
+      if (d < bestDist) { bestDist = d; best = c; }
+    }
+    return best;
+  }
+
+  // ─── Floating money text ────────────────────────────────────────────────
+
+  private spawnMoneyText(x: number, y: number, amount: number): void {
+    const text = this.scene.add.text(x, y - 8, `+$${amount}`, {
+      fontSize: '14px',
+      fontFamily: 'monospace',
+      color: '#ffd700',
+      stroke: '#000000',
+      strokeThickness: 3,
+      fontStyle: 'bold',
+    }).setOrigin(0.5).setDepth(2);
+
+    this.scene.tweens.add({
+      targets: text,
+      y: y - 36,
+      alpha: 0,
+      duration: 1200,
+      ease: 'Cubic.easeOut',
+      onComplete: () => text.destroy(),
+    });
   }
 
   // ─── Cart spawning ───────────────────────────────────────────────────────
