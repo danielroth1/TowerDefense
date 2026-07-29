@@ -65,8 +65,8 @@ export class EconomySimulation {
   /** Tracks what resource type each market is holding (by building reference). */
   private marketResources = new WeakMap<EconomyBuilding, EconomyResource>();
 
-  /** Fisher ships per fishery building. */
-  private fisherShips = new Map<EconomyBuilding, FisherShip>();
+  /** Fisher ships per fishery building (upgraded fisheries get 2 ships). */
+  private fisherShips = new Map<EconomyBuilding, FisherShip[]>();
 
   /** Map grid reference for ship pathfinding. */
   private grid: { type: string }[][] = [];
@@ -100,21 +100,40 @@ export class EconomySimulation {
     if (building.buildingType === 'fishery' && this.grid.length > 0) {
       const ship = new FisherShip(this.scene, building, this.grid);
       ship.setFishingDuration(building.cycleTime);
-      this.fisherShips.set(building, ship);
+      this.fisherShips.set(building, [ship]);
     }
   }
 
   removeBuilding(building: EconomyBuilding): void {
     const idx = this.buildings.indexOf(building);
     if (idx >= 0) this.buildings.splice(idx, 1);
-    const ship = this.fisherShips.get(building);
-    if (ship) { ship.destroy(); this.fisherShips.delete(building); }
+    const ships = this.fisherShips.get(building);
+    if (ships) { ships.forEach(s => s.destroy()); this.fisherShips.delete(building); }
     this.warehouseTimers.delete(building);
     building.destroy();
   }
 
   getFisherShip(building: EconomyBuilding): FisherShip | undefined {
-    return this.fisherShips.get(building);
+    return this.fisherShips.get(building)?.[0];
+  }
+
+  /** Get all fisher ships for a building (for UI camera ignore). */
+  getAllFisherShips(building: EconomyBuilding): FisherShip[] {
+    return this.fisherShips.get(building) ?? [];
+  }
+
+  /** Called when a fishery is upgraded — spawns an additional ship (level 2 = 2 ships). */
+  onFisheryUpgraded(building: EconomyBuilding): void {
+    if (building.buildingType !== 'fishery') return;
+    const ships = this.fisherShips.get(building);
+    if (!ships) return;
+    // Level 2 gets 2 ships; higher levels could get more in the future
+    const targetCount = building.level;
+    while (ships.length < targetCount) {
+      const ship = new FisherShip(this.scene, building, this.grid);
+      ship.setFishingDuration(building.cycleTime);
+      ships.push(ship);
+    }
   }
 
   getBuildings(): readonly EconomyBuilding[] {
@@ -159,12 +178,14 @@ export class EconomySimulation {
     }
 
     // ── 2. Fisher ships ────────────────────────────────────────────────
-    for (const [building, ship] of this.fisherShips) {
-      const fishReady = ship.updateShip(delta);
-      if (fishReady) {
-        building.inventory++;
-        building.redraw();
-        this.emit({ type: 'produced', buildingType: 'fishery', resource: 'fish', amount: 1 });
+    for (const [building, ships] of this.fisherShips) {
+      for (const ship of ships) {
+        const fishReady = ship.updateShip(delta);
+        if (fishReady) {
+          building.inventory++;
+          building.redraw();
+          this.emit({ type: 'produced', buildingType: 'fishery', resource: 'fish', amount: 1 });
+        }
       }
     }
 
@@ -181,10 +202,12 @@ export class EconomySimulation {
   // ─── Fishery ────────────────────────────────────────────────────────────
 
   private updateFishery(building: EconomyBuilding, _delta: number): void {
-    const ship = this.fisherShips.get(building);
-    if (!ship) return;
-    ship.setFishingDuration(building.cycleTime);
-    if (ship.isIdle()) ship.startTrip();
+    const ships = this.fisherShips.get(building);
+    if (!ships || ships.length === 0) return;
+    for (const ship of ships) {
+      ship.setFishingDuration(building.cycleTime);
+      if (ship.isIdle()) ship.startTrip();
+    }
   }
 
   // ─── Markets ────────────────────────────────────────────────────────────

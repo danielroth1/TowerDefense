@@ -38,9 +38,15 @@ export class FisherShip extends Phaser.GameObjects.Container {
   private grid: { type: string }[][] = [];
 
   constructor(scene: Phaser.Scene, fishery: EconomyBuilding, grid: { type: string }[][]) {
-    // Spawn at the water-side of the fishery (right cell for straddlesWater)
-    const spawnCol = fishery.gridCol + 1; // water side
-    const spawnRow = fishery.gridRow;
+    // Spawn at the water-side of the fishery based on rotation
+    let spawnCol = fishery.gridCol;
+    let spawnRow = fishery.gridRow;
+    switch (fishery.rotationDeg) {
+      case 0:   spawnCol = fishery.gridCol + 1; break; // water right
+      case 180: spawnCol = fishery.gridCol - 1; break; // water left
+      case 90:  spawnRow = fishery.gridRow + 1; break; // water below
+      case 270: spawnRow = fishery.gridRow - 1; break; // water above
+    }
     const cx = (spawnCol + 0.5) * TILE_SIZE;
     const cy = (spawnRow + 0.5) * TILE_SIZE;
     super(scene, cx, cy);
@@ -104,8 +110,15 @@ export class FisherShip extends Phaser.GameObjects.Container {
 
   /** Find an adjacent water cell to fish at. Prefers cells further from shore. */
   private findFishingSpot(): { col: number; row: number } | null {
-    const baseCol = this.fishery.gridCol + 1; // water side of fishery
-    const baseRow = this.fishery.gridRow;
+    // Determine water-side cell based on fishery rotation
+    let baseCol = this.fishery.gridCol;
+    let baseRow = this.fishery.gridRow;
+    switch (this.fishery.rotationDeg) {
+      case 0:   baseCol = this.fishery.gridCol + 1; break; // water right
+      case 180: baseCol = this.fishery.gridCol - 1; break; // water left
+      case 90:  baseRow = this.fishery.gridRow + 1; break; // water below
+      case 270: baseRow = this.fishery.gridRow - 1; break; // water above
+    }
 
     // BFS to find water cells, preferring deeper water (further from land)
     const visited = new Set<string>();
@@ -169,11 +182,13 @@ export class FisherShip extends Phaser.GameObjects.Container {
 
       case ShipState.MOVING_OUT: {
         const arrived = this.moveToward(this.targetX, this.targetY, delta);
-        // Rotate sprite to face movement direction
-        this.updateRotation(this.targetX, this.targetY);
+        // Mirror sprite to face movement direction (like trade carts)
+        this.updateMirror(this.targetX, this.targetY);
         if (arrived) {
           this.state = ShipState.FISHING;
           this.fishingTimer = 0;
+          // Reset to default orientation while fishing
+          this.scaleX = 1;
         }
         return false;
       }
@@ -186,17 +201,26 @@ export class FisherShip extends Phaser.GameObjects.Container {
         }
         if (this.fishingTimer >= this.fishingDuration) {
           this.state = ShipState.RETURNING;
-          // Target is the water-side of the fishery
-          this.targetX = (this.fishery.gridCol + 1 + 0.5) * TILE_SIZE;
-          this.targetY = (this.fishery.gridRow + 0.5) * TILE_SIZE;
+          // Target is the water-side of the fishery based on rotation
+          let retCol = this.fishery.gridCol;
+          let retRow = this.fishery.gridRow;
+          switch (this.fishery.rotationDeg) {
+            case 0:   retCol = this.fishery.gridCol + 1; break;
+            case 180: retCol = this.fishery.gridCol - 1; break;
+            case 90:  retRow = this.fishery.gridRow + 1; break;
+            case 270: retRow = this.fishery.gridRow - 1; break;
+          }
+          this.targetX = (retCol + 0.5) * TILE_SIZE;
+          this.targetY = (retRow + 0.5) * TILE_SIZE;
         }
         return false;
 
       case ShipState.RETURNING: {
         const arrived = this.moveToward(this.targetX, this.targetY, delta);
-        this.updateRotation(this.targetX, this.targetY);
+        this.updateMirror(this.targetX, this.targetY);
         if (arrived) {
           this.state = ShipState.IDLE;
+          this.scaleX = 1; // Reset orientation
           return true; // Fish ready!
         }
         return false;
@@ -220,9 +244,11 @@ export class FisherShip extends Phaser.GameObjects.Container {
     return false;
   }
 
-  private updateRotation(tx: number, ty: number) {
-    const angle = Phaser.Math.Angle.Between(this.x, this.y, tx, ty);
-    this.setRotation(angle + Math.PI / 2); // Sprite faces up by default
+  /** Mirror sprite horizontally based on movement direction (like trade carts). */
+  private updateMirror(tx: number, _ty: number) {
+    const dx = tx - this.x;
+    // Only flip when moving predominantly horizontally
+    if (Math.abs(dx) > 1) this.scaleX = dx < 0 ? -1 : 1;
   }
 
   isIdle(): boolean {

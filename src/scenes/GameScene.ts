@@ -12,7 +12,7 @@ import { EconomySimulation } from '../systems/EconomySimulation';
 import { TransportSystem } from '../systems/TransportSystem';
 import { EconomyBuilding } from '../entities/EconomyBuilding';
 import type { EconomyBuildingType } from '../data/economy';
-import { ECO_BUILDING_DEFS, escalatedCost } from '../data/economy';
+import { ECO_BUILDING_DEFS, ECO_BUILDING_TYPES, escalatedCost } from '../data/economy';
 import { WaveManager } from '../systems/WaveManager';
 import { AbilitySystem } from '../systems/AbilitySystem';
 import { SynergySystem } from '../systems/SynergySystem';
@@ -37,6 +37,7 @@ import {
 import type { TowerType } from '../data/towers';
 import { TOWER_DEFS, TOWER_TYPES_ORDERED } from '../data/towers';
 import { ABILITY_DEFS, type AbilityType } from '../data/abilities';
+import { HOTKEYS } from '../data/hotkeys';
 
 /** Unique background fill per ability (themed visuals, Phase 6). */
 const ABILITY_FILL: Record<AbilityType, number> = {
@@ -708,33 +709,9 @@ export class GameScene extends Phaser.Scene {
       const def = b.def;
 
       if (def.placement.straddlesWater) {
-        // For straddle buildings, only restore the grass cell.
-        // Determine which cell is grass based on the building's rotation.
-        switch (b.rotationDeg) {
-          case 0: // Land left, water right
-            this.mapData.grid[b.gridRow][b.gridCol].type = 'buildable';
-            this.refreshTileSprite(b.gridRow, b.gridCol);
-            break;
-          case 180: // Water left, land right
-            this.mapData.grid[b.gridRow][b.gridCol + 1].type = 'buildable';
-            this.refreshTileSprite(b.gridRow, b.gridCol + 1);
-            break;
-          case 90: // Land top, water bottom
-            this.mapData.grid[b.gridRow][b.gridCol].type = 'buildable';
-            this.refreshTileSprite(b.gridRow, b.gridCol);
-            break;
-          case 270: // Water top, land bottom
-            this.mapData.grid[b.gridRow + 1][b.gridCol].type = 'buildable';
-            this.refreshTileSprite(b.gridRow + 1, b.gridCol);
-            break;
-          default: // Fallback: restore both cells
-            for (let dr = 0; dr < def.height; dr++) {
-              for (let dc = 0; dc < def.width; dc++) {
-                this.mapData.grid[b.gridRow + dr][b.gridCol + dc].type = 'buildable';
-                this.refreshTileSprite(b.gridRow + dr, b.gridCol + dc);
-              }
-            }
-        }
+        // Land cell is always at (gridRow, gridCol) — restore it to buildable.
+        this.mapData.grid[b.gridRow][b.gridCol].type = 'buildable';
+        this.refreshTileSprite(b.gridRow, b.gridCol);
       } else {
         for (let dr = 0; dr < def.height; dr++) {
           for (let dc = 0; dc < def.width; dc++) {
@@ -757,8 +734,25 @@ export class GameScene extends Phaser.Scene {
       if (!this.selectedEcoBuilding) return;
       const cost = this.selectedEcoBuilding.upgradeCost();
       if (!this.economy.spend(cost)) return;
+      const type = this.selectedEcoBuilding.buildingType;
       this.sfx.play('tower_place');
       this.selectedEcoBuilding.upgrade();
+
+      // Fishery upgrade: spawn additional ship
+      if (type === 'fishery') {
+        this.economySim.onFisheryUpgraded(this.selectedEcoBuilding);
+        // Ignore new ships on UI camera
+        const ships = this.economySim.getAllFisherShips(this.selectedEcoBuilding);
+        for (const ship of ships) {
+          if (this.uiCam) this.uiCam.ignore(ship);
+        }
+      }
+
+      // Market upgrade: update decorative sprite texture
+      if (type === 'market') {
+        this.updateMarketDecoSprite(this.selectedEcoBuilding);
+      }
+
       this.bottomBar.showEconomyMode(this.selectedEcoBuilding);
     };
 
@@ -889,29 +883,46 @@ export class GameScene extends Phaser.Scene {
         this.placingBarricade = true; this.placingTower = null;
       }
     });
-    // Tower hotkeys: Q,W,E,A,S,D for tower types 0-5
-    const towerHotkeys = ['Q','W','E','A','S','D'];
-    towerHotkeys.forEach((hk, i) => {
+    // Tower hotkeys — configured in src/data/hotkeys.json
+    TOWER_TYPES_ORDERED.forEach((towerType) => {
+      const hk = HOTKEYS.tower[towerType];
+      if (!hk) return;
       kb.on('keydown-' + hk, () => {
-        if (i < TOWER_TYPES_ORDERED.length) {
-          this.placingTower = TOWER_TYPES_ORDERED[i];
-          this.placingBarricade = false;
-        }
+        this.placingTower = towerType;
+        this.placingBarricade = false;
+        this.placingEconomy = null;
       });
     });
-    // Upgrade / evolve selected tower
-    kb.on('keydown-U', () => {
-      if (this.selectedTower?.canEvolve()) {
-        this.bottomBar.onEvolve?.(0);
-      } else {
-        this.bottomBar.onUpgrade?.();
-      }
+
+    // Economy building hotkeys — configured in src/data/hotkeys.json
+    ECO_BUILDING_TYPES.forEach((ecoType) => {
+      const hk = HOTKEYS.economy[ecoType];
+      if (!hk) return;
+      kb.on('keydown-' + hk, () => {
+        this.placingEconomy = ecoType;
+        this.placingTower = null;
+        this.placingBarricade = false;
+      });
     });
-    kb.on('keydown-I', () => {
-      if (this.selectedTower?.canEvolve()) {
-        this.bottomBar.onEvolve?.(1);
-      }
-    });
+    // Upgrade / evolve selected tower — configured in src/data/hotkeys.json
+    const upgKey = HOTKEYS.actions.upgradeEvolve0;
+    if (upgKey) {
+      kb.on('keydown-' + upgKey, () => {
+        if (this.selectedTower?.canEvolve()) {
+          this.bottomBar.onEvolve?.(0);
+        } else {
+          this.bottomBar.onUpgrade?.();
+        }
+      });
+    }
+    const evo1Key = HOTKEYS.actions.evolve1;
+    if (evo1Key) {
+      kb.on('keydown-' + evo1Key, () => {
+        if (this.selectedTower?.canEvolve()) {
+          this.bottomBar.onEvolve?.(1);
+        }
+      });
+    }
   }
 
   private registerEvents() {
@@ -1273,6 +1284,23 @@ export class GameScene extends Phaser.Scene {
     this.bottomBar.showEconomyMode(building);
   }
 
+  /** Update the decorative sprite for a market when it upgrades. */
+  private updateMarketDecoSprite(building: EconomyBuilding): void {
+    if (building.buildingType !== 'market') return;
+    const px = (building.gridCol + building.def.width / 2) * TILE_SIZE;
+    const py = (building.gridRow + building.def.height / 2) * TILE_SIZE;
+    // Find and update the decorative sprite at this position
+    for (const spr of this.wallDecorations) {
+      if (Math.abs(spr.x - px) < 2 && Math.abs(spr.y - py) < 2) {
+        const variantKey = `${building.def.textureKey}_${building.level - 1}`;
+        if (this.textures.exists(variantKey)) {
+          spr.setTexture(variantKey);
+        }
+        break;
+      }
+    }
+  }
+
   private towerCol(tower: Tower): number {
     return Math.round((tower.x - TILE_SIZE / 2) / TILE_SIZE);
   }
@@ -1289,25 +1317,22 @@ export class GameScene extends Phaser.Scene {
 
     const def = ECO_BUILDING_DEFS[type];
 
-    // Harbor / fishery: straddles water — check all 4 orientations
+    // Harbor / fishery: straddles water — must click on land, water auto-detected
     if (def.placement.straddlesWater) {
-      // Check horizontal: tile at (row,col) and (row,col+1)
-      if (col + 1 < GRID_COLS) {
-        const tile2 = this.mapData.grid[row][col + 1];
-        const hasWaterH = tile.type === 'buildable' && tile2.type === 'ground';
-        const hasWaterRevH = tile.type === 'ground' && tile2.type === 'buildable';
-        if (hasWaterH || hasWaterRevH) {
-          if (!this.isStraddleBlocked(col, row, col + 1, row)) return true;
-        }
-      }
-      // Check vertical: tile at (row,col) and (row+1,col)
-      if (row + 1 < GRID_ROWS) {
-        const tile2 = this.mapData.grid[row + 1][col];
-        const hasWaterV = tile.type === 'buildable' && tile2.type === 'ground';
-        const hasWaterRevV = tile.type === 'ground' && tile2.type === 'buildable';
-        if (hasWaterV || hasWaterRevV) {
-          if (!this.isStraddleBlocked(col, row, col, row + 1)) return true;
-        }
+      // Must click on a land (buildable) tile
+      if (tile.type !== 'buildable') return false;
+      if (this.decorationBlockedCells.has(`${row},${col}`)) return false;
+      if (this.synergySystem.getTowerAt(col, row)) return false;
+      if (this.economyBuildings.some(b => b.gridCol === col && b.gridRow === row)) return false;
+
+      // Check all 4 cardinal directions for a water tile
+      const dirs: Array<[number, number]> = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+      for (const [dr, dc] of dirs) {
+        const nr = row + dr, nc = col + dc;
+        if (nr < 0 || nr >= GRID_ROWS || nc < 0 || nc >= GRID_COLS) continue;
+        if (this.mapData.grid[nr][nc].type !== 'ground') continue;
+        // Found water — check if both cells are unblocked
+        if (!this.isStraddleBlocked(col, row, nc, nr)) return true;
       }
       return false;
     }
@@ -1381,46 +1406,63 @@ export class GameScene extends Phaser.Scene {
     // Ignore on UI camera so it doesn't render twice (once on map, once on UI overlay)
     if (this.uiCam) this.uiCam.ignore(building);
 
-    // Ignore fisher ship on UI camera
-    const fisherShip = this.economySim.getFisherShip(building);
-    if (fisherShip && this.uiCam) this.uiCam.ignore(fisherShip);
+    // Ignore all fisher ships on UI camera
+    const ships = this.economySim.getAllFisherShips(building);
+    for (const ship of ships) {
+      if (this.uiCam) this.uiCam.ignore(ship);
+    }
 
     const def = ECO_BUILDING_DEFS[type];
 
     if (def.placement.straddlesWater) {
-      // Detect orientation from the two cells
-      const tile1 = this.mapData.grid[row][col];
+      // Detect orientation from the clicked land cell + adjacent water.
+      // Format: [dr, dc, rotationDeg] where (row+dr, col+dc) is the water cell.
+      // Rotation semantics (EconomyBuilding doc):
+      //   0   = land-left/water-right  → water at col+1
+      //   90  = land-top/water-bottom  → water at row+1
+      //   180 = water-left/land-right  → water at col-1
+      //   270 = water-top/land-bottom  → water at row-1
+      // FisherShip uses the same rotation to determine spawn/return cells.
+      const dirs: Array<[number, number, number]> = [
+        [1, 0, 90],    // water below (row+1) → rot 90  (land-top/water-bottom)
+        [-1, 0, 270],  // water above (row-1) → rot 270 (water-top/land-bottom)
+        [0, -1, 180],  // water left  (col-1) → rot 180 (water-left/land-right)
+        [0, 1, 0],     // water right (col+1) → rot 0   (land-left/water-right)
+      ];
 
-      // Check horizontal: (row, col) + (row, col+1)
-      if (col + 1 < GRID_COLS) {
-        const tile2h = this.mapData.grid[row][col + 1];
-        if (tile1.type === 'buildable' && tile2h.type === 'ground') {
-          // Land left, water right → rotation 0 (default)
-          building.rotationDeg = 0;
-          this.mapData.grid[row][col].type = 'path';
-          this.refreshTileSprite(row, col);
-        } else if (tile1.type === 'ground' && tile2h.type === 'buildable') {
-          // Water left, land right → rotation 180
-          building.rotationDeg = 180;
-          this.mapData.grid[row][col + 1].type = 'path';
-          this.refreshTileSprite(row, col + 1);
+      for (const [dr, dc, rot] of dirs) {
+        const nr = row + dr, nc = col + dc;
+        if (nr >= 0 && nr < GRID_ROWS && nc >= 0 && nc < GRID_COLS
+            && this.mapData.grid[nr][nc].type === 'ground') {
+          building.rotationDeg = rot;
+          break;
         }
       }
 
-      // Check vertical: (row, col) + (row+1, col)
-      if (row + 1 < GRID_ROWS) {
-        const tile2v = this.mapData.grid[row + 1][col];
-        if (tile1.type === 'buildable' && tile2v.type === 'ground') {
-          // Land top, water bottom → rotation 90
-          building.rotationDeg = 90;
-          this.mapData.grid[row][col].type = 'path';
-          this.refreshTileSprite(row, col);
-        } else if (tile1.type === 'ground' && tile2v.type === 'buildable') {
-          // Water top, land bottom → rotation 270
-          building.rotationDeg = 270;
-          this.mapData.grid[row + 1][col].type = 'path';
-          this.refreshTileSprite(row + 1, col);
-        }
+      // Mark land tile as path (occupied)
+      this.mapData.grid[row][col].type = 'path';
+      this.refreshTileSprite(row, col);
+
+      // Reposition container to the correct center for each orientation.
+      // Constructor default (rot 0): center at (col+1, row+0.5) for width=2.
+      // After rotation, the visual span changes, so we adjust the world position.
+      //   rot 0:   spans col→col+1 horizontally → center (col+1, row+0.5) [default]
+      //   rot 180: spans col-1→col horizontally → center (col, row+0.5)
+      //   rot 90:  spans row→row+1 vertically   → center (col+0.5, row+1)
+      //   rot 270: spans row-1→row vertically   → center (col+0.5, row)
+      switch (building.rotationDeg) {
+        case 0: // land-left/water-right — default, no reposition needed
+          building.setPosition((col + 1.0) * TILE_SIZE, (row + 0.5) * TILE_SIZE);
+          break;
+        case 180: // water-left/land-right — shift left by 1 cell
+          building.setPosition(col * TILE_SIZE, (row + 0.5) * TILE_SIZE);
+          break;
+        case 90: // land-top/water-bottom — vertical span, center at row+1
+          building.setPosition((col + 0.5) * TILE_SIZE, (row + 1.0) * TILE_SIZE);
+          break;
+        case 270: // water-top/land-bottom — vertical span, center at row
+          building.setPosition((col + 0.5) * TILE_SIZE, row * TILE_SIZE);
+          break;
       }
 
       building.redraw();

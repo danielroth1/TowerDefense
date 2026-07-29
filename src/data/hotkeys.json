@@ -1,0 +1,27 @@
+{
+  "tower": {
+    "arrow":     "Q",
+    "cannon":    "W",
+    "ice":       "E",
+    "lightning": "R",
+    "poison":    "T",
+    "boomerang": "Y"
+  },
+  "economy": {
+    "farm":      "A",
+    "fishery":   "S",
+    "mill":      "D",
+    "bakery":    "F",
+    "harbor":    "G",
+    "warehouse": "H"
+  },
+  "actions": {
+    "sendWave":       "SPACE",
+    "sendWaveAlt":    "N",
+    "pause":          "P",
+    "cancel":         "ESC",
+    "barricade":      "B",
+    "upgradeEvolve0": "U",
+    "evolve1":        "I"
+  }
+}

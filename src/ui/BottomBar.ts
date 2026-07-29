@@ -7,6 +7,7 @@ import type { EconomySimulation } from '../systems/EconomySimulation';
 import type { Tower } from '../entities/Tower';
 import type { EconomyBuilding } from '../entities/EconomyBuilding';
 import { drawElevatedButton } from '../utils/ButtonStyles';
+import { HOTKEYS } from '../data/hotkeys';
 
 const TLEFT = 0; // 12;  // left margin for tower button area
 
@@ -23,6 +24,13 @@ const BUILD_ITEMS: BuildItem[] = [
   ...TOWER_TYPES_ORDERED.map(t => ({ kind: 'tower' as const, type: t })),
   ...ECO_BUILDING_TYPES.map(t => ({ kind: 'eco' as const, type: t })),
 ];
+
+/** Hotkey labels indexed to match BUILD_ITEMS order, sourced from hotkeys.json. */
+const HOTKEYS_BUILD_LABELS: string[] = BUILD_ITEMS.map(it =>
+  it.kind === 'tower'
+    ? (HOTKEYS.tower[it.type as TowerType] ?? '')
+    : (HOTKEYS.economy[it.type as EconomyBuildingType] ?? ''),
+);
 
 export class BottomBar {
   // ─── Size constants ────────────────────────────────────────────────────
@@ -143,8 +151,8 @@ export class BottomBar {
       }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 2);
       this.buildNames.push(lbl);
 
-      const hkChars = ['Q', 'W', 'E', 'A', 'S', 'D', 'F', 'G', 'R', 'T', 'Y', 'H'];
-      const hkLbl = scene.add.text(-999, 0, i < hkChars.length ? `[${hkChars[i]}]` : '', {
+      const hkChars = HOTKEYS_BUILD_LABELS;
+      const hkLbl = scene.add.text(-999, 0, hkChars[i] ? `[${hkChars[i]}]` : '', {
         fontSize: '11px', fontFamily: 'monospace', color: '#667788', align: 'center',
       }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 2);
       this.hotkeyLabels.push(hkLbl);
@@ -206,7 +214,8 @@ export class BottomBar {
     this.waveLine1 = scene.add.text(0, 0, 'WAVE 0 / 50', {
       fontSize: '11px', fontFamily: 'monospace', color: '#8899aa', align: 'center',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(WD + 1);
-    this.waveLabel = scene.add.text(0, 0, '▶ SEND\n[SPACE]', {
+    const waveHk = `[${HOTKEYS.actions.sendWave || 'SPACE'}]`;
+    this.waveLabel = scene.add.text(0, 0, `▶ SEND\n${waveHk}`, {
       fontSize: '15px', fontFamily: 'monospace', color: '#44ff88', align: 'center', lineSpacing: 4,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(WD + 1);
     this.waveHit = scene.add.rectangle(0, 0, 100, 60, 0, 0)
@@ -464,11 +473,12 @@ export class BottomBar {
       this.waveHit.input!.enabled = false;
       this.stopWavePulse();
     } else if (countdown > 0) {
-      this.waveLabel.setText(Math.ceil(countdown / 1000) + 's\n[SPACE]').setColor('#aabbcc');
+      const waveHkLabel = `[${HOTKEYS.actions.sendWave || 'SPACE'}]`;
+      this.waveLabel.setText(Math.ceil(countdown / 1000) + 's\n' + waveHkLabel).setColor('#aabbcc');
       this.waveHit.input!.enabled = true;
       this.stopWavePulse();
     } else {
-      this.waveLabel.setText('▶ SEND\n[SPACE]').setColor('#44ff88');
+      this.waveLabel.setText('▶ SEND\n' + `[${HOTKEYS.actions.sendWave || 'SPACE'}]`).setColor('#44ff88');
       this.waveHit.input!.enabled = true;
       this.startWavePulse();
     }
@@ -613,7 +623,7 @@ export class BottomBar {
         tier.range  !== tower.range  ? `🎯${Math.round(tower.range)}→${tier.range}`  : '',
       ].filter(Boolean);
       actions.push({
-        label: `⬆ ${tier.label}`, hotkey: 'U', cost,
+        label: `⬆ ${tier.label}`, hotkey: HOTKEYS.actions.upgradeEvolve0 || 'U', cost,
         color: this.economy.canAfford(cost) ? 0x1e5a3a : 0x333333,
         enabled: this.economy.canAfford(cost),
         previewImgKey: `tower_${tower.towerType}_${Math.min(tower.level, 2)}`,
@@ -623,7 +633,7 @@ export class BottomBar {
     }
 
     if (tower.canEvolve()) {
-      ['U', 'I'].forEach((hotkey, b) => {
+      [HOTKEYS.actions.upgradeEvolve0 || 'U', HOTKEYS.actions.evolve1 || 'I'].forEach((hotkey, b) => {
         const evo = def.evolutions[b];
         const can = this.economy.canAfford(evo.cost);
         const evoDmg = evo.stats.damage ?? tower.damage;
@@ -805,7 +815,7 @@ export class BottomBar {
       // Preview texture: show the next level's upgraded building sprite
       const previewImgKey = `${def.textureKey}_${building.level}`;
       actions.push({
-        label: `⬆ ${tier.label}`, hotkey: 'U', cost,
+        label: `⬆ ${tier.label}`, hotkey: HOTKEYS.actions.upgradeEvolve0 || 'U', cost,
         color: this.economy.canAfford(cost) ? 0x1e5a3a : 0x333333,
         enabled: this.economy.canAfford(cost),
         previewStats: parts.join(' '),

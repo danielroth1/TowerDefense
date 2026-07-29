@@ -170,7 +170,7 @@ export class EconomyBuilding extends Phaser.GameObjects.Container {
       }
     }
 
-    // Apply semantic rotation (for straddle buildings like fishery/harbor)
+    // Apply semantic rotation (for straddle buildings like fishery/harbor).
     this.setRotation(Phaser.Math.DegToRad(this.rotationDeg));
   }
 
