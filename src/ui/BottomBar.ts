@@ -695,7 +695,7 @@ export class BottomBar {
       stats.push(`${icon}:${building.inventory}/${building.maxInventory}`);
     }
     if (def.isEndpoint && building.buildingType === 'market') {
-      stats.push(`💰 ${building.inventory} goods`);
+      stats.push(`💰 ${building.inventory}`);
     }
     if (stats.length > 0) {
       this.upgRoot.add(this.scene.add.text(cx0, CY + this._TBH * 0.41,
@@ -704,10 +704,37 @@ export class BottomBar {
         }).setOrigin(0.5));
     }
 
+    // ── Production progress bar (right of info panel) ────────────────────
+    if (def.produces || def.isEndpoint) {
+      const barH = this._TBH * 0.7;
+      const barW = 5;
+      const barX = cx0 + this._TBW / 2 + 4;
+      const barY = CY - barH / 2;
+      const pct = building.cycleTime > 0
+        ? Math.min(1, building.cycleTimer / building.cycleTime)
+        : 0;
+
+      // Background
+      const barBg = this.scene.add.graphics();
+      barBg.fillStyle(0x222222, 0.8);
+      barBg.fillRect(barX, barY, barW, barH);
+      barBg.lineStyle(1, 0x444444, 0.5);
+      barBg.strokeRect(barX, barY, barW, barH);
+      this.upgRoot.add(barBg);
+
+      // Fill (green-to-yellow gradient effect via color lerp)
+      const fillColor = pct > 0.7 ? 0x44cc44 : (pct > 0.3 ? 0xcccc44 : 0xcc8844);
+      const barFill = this.scene.add.graphics();
+      barFill.fillStyle(fillColor, 0.9);
+      barFill.fillRect(barX + 1, barY + barH * (1 - pct) + 1, barW - 2, barH * pct - 2);
+      this.upgRoot.add(barFill);
+    }
+
     // ── Action buttons ─────────────────────────────────────────────────────
     interface EcoAction {
       label: string; color: number; cb: () => void; enabled: boolean;
       hotkey?: string; cost: number; previewStats?: string; statsDiff?: string;
+      previewImgKey?: string;
     }
     const actions: EcoAction[] = [];
 
@@ -718,11 +745,14 @@ export class BottomBar {
       if (tier.cycleTime > 0) parts.push(`⏱ ${(tier.cycleTime / 1000).toFixed(1)}s`);
       if (tier.valueMultiplier && tier.valueMultiplier > 1.0) parts.push(`×${tier.valueMultiplier}`);
       if (tier.extraCapacity) parts.push(`+${tier.extraCapacity}📦`);
+      // Preview texture: show the next level's upgraded building sprite
+      const previewImgKey = `${def.textureKey}_${building.level}`;
       actions.push({
         label: `⬆ ${tier.label}`, hotkey: 'U', cost,
         color: this.economy.canAfford(cost) ? 0x1e5a3a : 0x333333,
         enabled: this.economy.canAfford(cost),
         previewStats: parts.join(' '),
+        previewImgKey,
         cb: () => { this.onUpgradeEco?.(); this.showEconomyMode(building); },
       });
     }
@@ -743,6 +773,13 @@ export class BottomBar {
       const bg4 = this.scene.add.graphics();
       this.upgRoot.add(bg4);
       this.drawUBtn(bg4, cx, CY, w - 4, h - 4, act.color, false, can);
+
+      // Preview image for upgrade (like tower upgrade preview)
+      if (act.previewImgKey && this.scene.textures.exists(act.previewImgKey)) {
+        const pvSize = Math.round(w * 0.37);
+        this.upgRoot.add(this.scene.add.image(cx, CY - h * 0.27, act.previewImgKey)
+          .setDisplaySize(pvSize, pvSize).setAlpha(can ? 1 : 0.4));
+      }
 
       const txt = this.scene.add.text(cx, CY + h * 0.08, act.label, {
         fontSize: actFSPx + 'px', fontFamily: 'monospace', color: can ? '#eef0f4' : '#445566', align: 'center',

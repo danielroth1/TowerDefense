@@ -8,6 +8,13 @@ export class EconomyBuilding extends Phaser.GameObjects.Container {
   level: number = 1;
   totalSpent: number = 0;
 
+  /**
+   * Semantic rotation in degrees (0, 90, 180, 270).
+   * For straddle buildings: 0 = land-left/water-right, 180 = water-left/land-right,
+   * 90 = land-top/water-bottom, 270 = water-top/land-bottom.
+   */
+  rotationDeg: number = 0;
+
   // Grid position (top-left cell)
   readonly gridRow: number;
   readonly gridCol: number;
@@ -27,7 +34,6 @@ export class EconomyBuilding extends Phaser.GameObjects.Container {
 
   // Visual
   private sprite: Phaser.GameObjects.Image | null = null;
-  private levelLabel: Phaser.GameObjects.Text | null = null;
   private selected: boolean = false;
   private rangeCircle: Phaser.GameObjects.Graphics | null = null;
 
@@ -56,6 +62,7 @@ export class EconomyBuilding extends Phaser.GameObjects.Container {
     gridCol: number,
     gridRow: number,
     type: EconomyBuildingType,
+    rotationDeg: number = 0,
   ) {
     const cx = (gridCol + ECO_BUILDING_DEFS[type].width / 2) * TILE_SIZE;
     const cy = (gridRow + ECO_BUILDING_DEFS[type].height / 2) * TILE_SIZE;
@@ -64,6 +71,7 @@ export class EconomyBuilding extends Phaser.GameObjects.Container {
     this.buildingType = type;
     this.gridRow = gridRow;
     this.gridCol = gridCol;
+    this.rotationDeg = rotationDeg;
     this.totalSpent = this.def.baseCost;
     if (this.def.isStorage) this.maxInventory = WAREHOUSE_CAPACITY;
 
@@ -101,16 +109,6 @@ export class EconomyBuilding extends Phaser.GameObjects.Container {
       g.lineStyle(1, 0xffffff, 0.3);
       g.strokeRoundedRect(-displayW / 2, -displayH / 2, displayW, displayH, 4);
       this.add(g);
-    }
-
-    // Level indicator
-    if (this.level > 1) {
-      this.levelLabel = this.scene.add.text(
-        displayW / 2 - 4, -displayH / 2 - 2,
-        `${this.level}`,
-        { fontSize: '10px', fontFamily: 'monospace', color: '#ffd700' },
-      ).setOrigin(1, 1);
-      this.add(this.levelLabel);
     }
 
     // Inventory indicator — colored dots below building
@@ -171,6 +169,9 @@ export class EconomyBuilding extends Phaser.GameObjects.Container {
         }
       }
     }
+
+    // Apply semantic rotation (for straddle buildings like fishery/harbor)
+    this.setRotation(Phaser.Math.DegToRad(this.rotationDeg));
   }
 
   // ─── Upgrade ────────────────────────────────────────────────────────────

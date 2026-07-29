@@ -716,12 +716,43 @@ export class GameScene extends Phaser.Scene {
       if (!this.selectedEcoBuilding) return;
       const b = this.selectedEcoBuilding;
       this.economy.earn(b.sellValue());
-      // Restore occupied tiles to buildable
+      // Restore occupied tiles to their original types
       const def = b.def;
-      for (let dr = 0; dr < def.height; dr++) {
-        for (let dc = 0; dc < def.width; dc++) {
-          this.mapData.grid[b.gridRow + dr][b.gridCol + dc].type = 'buildable';
-          this.refreshTileSprite(b.gridRow + dr, b.gridCol + dc);
+
+      if (def.placement.straddlesWater) {
+        // For straddle buildings, only restore the grass cell.
+        // Determine which cell is grass based on the building's rotation.
+        switch (b.rotationDeg) {
+          case 0: // Land left, water right
+            this.mapData.grid[b.gridRow][b.gridCol].type = 'buildable';
+            this.refreshTileSprite(b.gridRow, b.gridCol);
+            break;
+          case 180: // Water left, land right
+            this.mapData.grid[b.gridRow][b.gridCol + 1].type = 'buildable';
+            this.refreshTileSprite(b.gridRow, b.gridCol + 1);
+            break;
+          case 90: // Land top, water bottom
+            this.mapData.grid[b.gridRow][b.gridCol].type = 'buildable';
+            this.refreshTileSprite(b.gridRow, b.gridCol);
+            break;
+          case 270: // Water top, land bottom
+            this.mapData.grid[b.gridRow + 1][b.gridCol].type = 'buildable';
+            this.refreshTileSprite(b.gridRow + 1, b.gridCol);
+            break;
+          default: // Fallback: restore both cells
+            for (let dr = 0; dr < def.height; dr++) {
+              for (let dc = 0; dc < def.width; dc++) {
+                this.mapData.grid[b.gridRow + dr][b.gridCol + dc].type = 'buildable';
+                this.refreshTileSprite(b.gridRow + dr, b.gridCol + dc);
+              }
+            }
+        }
+      } else {
+        for (let dr = 0; dr < def.height; dr++) {
+          for (let dc = 0; dc < def.width; dc++) {
+            this.mapData.grid[b.gridRow + dr][b.gridCol + dc].type = 'buildable';
+            this.refreshTileSprite(b.gridRow + dr, b.gridCol + dc);
+          }
         }
       }
       // Remove from tracking arrays
@@ -1303,22 +1334,27 @@ export class GameScene extends Phaser.Scene {
 
     const def = ECO_BUILDING_DEFS[type];
 
-    // Harbor: straddles water — check that one cell is grass, one is water
+    // Harbor / fishery: straddles water — check all 4 orientations
     if (def.placement.straddlesWater) {
-      if (col + 1 >= GRID_COLS) return false;
-      const tile2 = this.mapData.grid[row][col + 1];
-      const hasWater = tile.type === 'buildable' && tile2.type === 'ground';
-      const hasWaterRev = tile.type === 'ground' && tile2.type === 'buildable';
-      if (!hasWater && !hasWaterRev) return false;
-      // Check cells aren't blocked by decorations, towers, or other eco buildings
-      if (this.decorationBlockedCells.has(`${row},${col}`)) return false;
-      if (this.decorationBlockedCells.has(`${row},${col + 1}`)) return false;
-      if (this.synergySystem.getTowerAt(col, row)) return false;
-      if (this.synergySystem.getTowerAt(col + 1, row)) return false;
-      if (this.economyBuildings.some(b =>
-        (b.gridCol === col && b.gridRow === row) ||
-        (b.gridCol === col + 1 && b.gridRow === row))) return false;
-      return true;
+      // Check horizontal: tile at (row,col) and (row,col+1)
+      if (col + 1 < GRID_COLS) {
+        const tile2 = this.mapData.grid[row][col + 1];
+        const hasWaterH = tile.type === 'buildable' && tile2.type === 'ground';
+        const hasWaterRevH = tile.type === 'ground' && tile2.type === 'buildable';
+        if (hasWaterH || hasWaterRevH) {
+          if (!this.isStraddleBlocked(col, row, col + 1, row)) return true;
+        }
+      }
+      // Check vertical: tile at (row,col) and (row+1,col)
+      if (row + 1 < GRID_ROWS) {
+        const tile2 = this.mapData.grid[row + 1][col];
+        const hasWaterV = tile.type === 'buildable' && tile2.type === 'ground';
+        const hasWaterRevV = tile.type === 'ground' && tile2.type === 'buildable';
+        if (hasWaterV || hasWaterRevV) {
+          if (!this.isStraddleBlocked(col, row, col, row + 1)) return true;
+        }
+      }
+      return false;
     }
 
     // All other buildings require a buildable tile
@@ -1342,6 +1378,18 @@ export class GameScene extends Phaser.Scene {
     }
 
     return true;
+  }
+
+  /** Check if two cells for a straddle building are blocked by existing structures. */
+  private isStraddleBlocked(col1: number, row1: number, col2: number, row2: number): boolean {
+    if (this.decorationBlockedCells.has(`${row1},${col1}`)) return true;
+    if (this.decorationBlockedCells.has(`${row2},${col2}`)) return true;
+    if (this.synergySystem.getTowerAt(col1, row1)) return true;
+    if (this.synergySystem.getTowerAt(col2, row2)) return true;
+    if (this.economyBuildings.some(b =>
+      (b.gridCol === col1 && b.gridRow === row1) ||
+      (b.gridCol === col2 && b.gridRow === row2))) return true;
+    return false;
   }
 
   private hasWaterNeighbor(row: number, col: number): boolean {
@@ -1385,21 +1433,42 @@ export class GameScene extends Phaser.Scene {
     const def = ECO_BUILDING_DEFS[type];
 
     if (def.placement.straddlesWater) {
-      // Harbor: rotate 180°, only mark the grass cell as occupied.
-      // The water cell stays 'ground' so the background water tile is preserved.
-      building.setRotation(Math.PI);
-
-      // Determine which cell is grass and mark only that one
+      // Detect orientation from the two cells
       const tile1 = this.mapData.grid[row][col];
-      const tile2 = this.mapData.grid[row][col + 1];
-      if (tile1.type === 'buildable') {
-        this.mapData.grid[row][col].type = 'path';
-        this.refreshTileSprite(row, col);
+
+      // Check horizontal: (row, col) + (row, col+1)
+      if (col + 1 < GRID_COLS) {
+        const tile2h = this.mapData.grid[row][col + 1];
+        if (tile1.type === 'buildable' && tile2h.type === 'ground') {
+          // Land left, water right → rotation 0 (default)
+          building.rotationDeg = 0;
+          this.mapData.grid[row][col].type = 'path';
+          this.refreshTileSprite(row, col);
+        } else if (tile1.type === 'ground' && tile2h.type === 'buildable') {
+          // Water left, land right → rotation 180
+          building.rotationDeg = 180;
+          this.mapData.grid[row][col + 1].type = 'path';
+          this.refreshTileSprite(row, col + 1);
+        }
       }
-      if (tile2.type === 'buildable') {
-        this.mapData.grid[row][col + 1].type = 'path';
-        this.refreshTileSprite(row, col + 1);
+
+      // Check vertical: (row, col) + (row+1, col)
+      if (row + 1 < GRID_ROWS) {
+        const tile2v = this.mapData.grid[row + 1][col];
+        if (tile1.type === 'buildable' && tile2v.type === 'ground') {
+          // Land top, water bottom → rotation 90
+          building.rotationDeg = 90;
+          this.mapData.grid[row][col].type = 'path';
+          this.refreshTileSprite(row, col);
+        } else if (tile1.type === 'ground' && tile2v.type === 'buildable') {
+          // Water top, land bottom → rotation 270
+          building.rotationDeg = 270;
+          this.mapData.grid[row + 1][col].type = 'path';
+          this.refreshTileSprite(row + 1, col);
+        }
       }
+
+      building.redraw();
     } else {
       // Mark all cells as occupied
       for (let dr = 0; dr < def.height; dr++) {

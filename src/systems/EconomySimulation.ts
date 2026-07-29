@@ -6,6 +6,7 @@ import {
   DELIVERY_TARGETS,
   WAREHOUSE_OUTBOUND_TARGETS,
   WAREHOUSE_DISPATCH_INTERVAL,
+  RESOURCE_GOLD_VALUES,
 } from '../data/economy';
 import type { EconomyBuilding } from '../entities/EconomyBuilding';
 import { FisherShip } from '../entities/FisherShip';
@@ -60,6 +61,9 @@ export class EconomySimulation {
 
   /** Tracks what resource type each warehouse is storing (by building reference). */
   private warehouseResources = new WeakMap<EconomyBuilding, EconomyResource>();
+
+  /** Tracks what resource type each market is holding (by building reference). */
+  private marketResources = new WeakMap<EconomyBuilding, EconomyResource>();
 
   /** Fisher ships per fishery building. */
   private fisherShips = new Map<EconomyBuilding, FisherShip>();
@@ -198,12 +202,14 @@ export class EconomySimulation {
         b.redraw();
 
         const def = ECO_BUILDING_DEFS[b.buildingType];
-        const gold = Math.floor(def.goldPerUnit * b.valueMultiplier);
+        const resource = this.marketResources.get(b);
+        const baseValue = resource ? RESOURCE_GOLD_VALUES[resource] : def.goldPerUnit;
+        const gold = Math.floor(baseValue * b.valueMultiplier);
         this.economy.earn(gold);
         this.emit({
           type: 'delivered',
           buildingType: b.buildingType,
-          resource: def.consumes ?? def.produces,
+          resource: resource ?? def.consumes ?? def.produces,
           amount: gold,
           pixelX: b.pixelX,
           pixelY: b.pixelY,
@@ -269,17 +275,12 @@ export class EconomySimulation {
   // ─── Warehouse → market dispatch ────────────────────────────────────────
 
   /**
-   * Warehouses actively dispatch carts to markets when they have inventory.
+   * Warehouses actively dispatch carts when they have inventory.
+   * Tries consumer buildings first (from DELIVERY_TARGETS), then markets.
    * Dispatch interval scales with warehouse level (higher = faster).
    */
   private dispatchWarehouses(delta: number): void {
     if (!this.transportSys) return;
-
-    const markets = this.buildings.filter(b =>
-      WAREHOUSE_OUTBOUND_TARGETS.includes(b.buildingType),
-    );
-
-    if (markets.length === 0) return;
 
     for (const warehouse of this.buildings) {
       if (!ECO_BUILDING_DEFS[warehouse.buildingType].isStorage) continue;
@@ -298,22 +299,39 @@ export class EconomySimulation {
 
       const resource = this.warehouseResources.get(warehouse) ?? 'goods';
 
-      // Find closest market with free capacity
-      const target = markets
-        .filter(m => this.hasFreeCapacity(m, resource))
-        .sort((a, b) => this.distSq(warehouse, a) - this.distSq(warehouse, b))[0];
+      // Build priority-ordered target list: consumers first, then markets
+      const deliveryTargets = DELIVERY_TARGETS[resource];
+      const targetTypes = deliveryTargets
+        ? [...deliveryTargets.filter(t => t !== 'warehouse'), ...WAREHOUSE_OUTBOUND_TARGETS]
+        : [...WAREHOUSE_OUTBOUND_TARGETS];
+
+      // Try each target type in priority order, closest-first within each type
+      let target: EconomyBuilding | undefined;
+      let targetDeliveryType: DeliveryType = 'market';
+      for (const targetType of targetTypes) {
+        const candidates = this.buildings
+          .filter(b => b.buildingType === targetType)
+          .filter(b => this.hasFreeCapacity(b, resource))
+          .sort((a, b) => this.distSq(warehouse, a) - this.distSq(warehouse, b));
+
+        if (candidates.length > 0) {
+          target = candidates[0];
+          targetDeliveryType = this.getDeliveryType(targetType);
+          break;
+        }
+      }
 
       if (!target) continue;
 
-      // Reserve on market
-      target.reservedInventory++;
+      // Reserve capacity
+      this.reserveCapacity(target, targetDeliveryType);
 
-      const accepted = this.transportSys.requestDelivery(warehouse, target, resource, 'market');
+      const accepted = this.transportSys.requestDelivery(warehouse, target, resource, targetDeliveryType);
       if (accepted) {
         warehouse.inventory--;
         warehouse.redraw();
       } else {
-        target.reservedInventory--;
+        this.releaseReservation(target, targetDeliveryType);
       }
     }
   }
@@ -374,6 +392,7 @@ export class EconomySimulation {
     } else if (deliveryType === 'market') {
       receiver.reservedInventory = Math.max(0, receiver.reservedInventory - 1);
       receiver.inventory++;
+      this.marketResources.set(receiver, resource);
     } else {
       // consumer
       receiver.reservedInput = Math.max(0, receiver.reservedInput - 1);
