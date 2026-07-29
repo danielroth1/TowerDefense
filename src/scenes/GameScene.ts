@@ -11,7 +11,6 @@ import { EconomyManager } from '../systems/EconomyManager';
 import { EconomySimulation } from '../systems/EconomySimulation';
 import { TransportSystem } from '../systems/TransportSystem';
 import { EconomyBuilding } from '../entities/EconomyBuilding';
-import { EconomyPanel } from '../ui/EconomyPanel';
 import type { EconomyBuildingType } from '../data/economy';
 import { ECO_BUILDING_DEFS, escalatedCost } from '../data/economy';
 import { WaveManager } from '../systems/WaveManager';
@@ -110,7 +109,6 @@ export class GameScene extends Phaser.Scene {
   // UI
   private hud!: HUD;
   private bottomBar!: BottomBar;
-  private economyPanel!: EconomyPanel;
   private sfx: SoundSystem = SoundSystem.instance;
 
   // Dual-camera system
@@ -134,10 +132,6 @@ export class GameScene extends Phaser.Scene {
   private hoverOverlay!: Phaser.GameObjects.Image;
   private selectedTower: Tower | null = null;
   private selectedEcoBuilding: EconomyBuilding | null = null;
-
-  /** Set when an economy panel button is clicked — prevents the same pointerup
-   *  from immediately placing the building on the map. */
-  private _skipNextPlacement: boolean = false;
 
   // Stats
   private totalKills: number = 0;
@@ -637,10 +631,7 @@ export class GameScene extends Phaser.Scene {
     };
 
     this.hud = new HUD(this);
-    this.bottomBar = new BottomBar(this, this.economy);
-    this.economyPanel = new EconomyPanel(this, this.economy, this.economySim);
-    // Economy panel is UI — only render on the UI camera, not the main camera
-    this.cameras.main.ignore(this.economyPanel.getContainer());
+    this.bottomBar = new BottomBar(this, this.economy, this.economySim);
     this.createFloatingAbilities();
 
     // Register all UI objects with the UI group for camera ignoring
@@ -666,15 +657,12 @@ export class GameScene extends Phaser.Scene {
       this.placingTower = type;
       this.placingBarricade = false;
       this.placingEconomy = null;
-      this.economyPanel.hide();
-      this.bottomBar.setEcoMode(false);
     };
 
-    this.economyPanel.callback = (type) => {
+    this.bottomBar.onPlaceEconomy = (type) => {
       this.placingEconomy = type;
       this.placingTower = null;
       this.placingBarricade = false;
-      this._skipNextPlacement = true;
     };
 
     this.bottomBar.onUpgrade = () => {
@@ -775,19 +763,6 @@ export class GameScene extends Phaser.Scene {
     };
 
     this.bottomBar.onSendWave = () => this.waveManager.sendEarlyWave();
-
-    this.bottomBar.onToggleEconomy = () => {
-      if (this.economyPanel.isVisible()) {
-        this.economyPanel.hide();
-        this.placingEconomy = null;
-        this.bottomBar.setEcoMode(false);
-      } else {
-        this.economyPanel.show();
-        this.placingTower = null;
-        this.placingBarricade = false;
-        this.bottomBar.setEcoMode(true);
-      }
-    };
 
     this.createMinimap();
   }
@@ -908,19 +883,6 @@ export class GameScene extends Phaser.Scene {
       this.cancelPlacing();
       this.deselectTower();
       this.heroSelected = false; this.hero.setSelected(false);
-    });
-    kb.on('keydown-V', () => {
-      // Toggle economy panel (V for "econoVy" — E conflicts with tower hotkey)
-      if (this.economyPanel.isVisible()) {
-        this.economyPanel.hide();
-        this.placingEconomy = null;
-        this.bottomBar.setEcoMode(false);
-      } else {
-        this.economyPanel.show();
-        this.placingTower = null;
-        this.placingBarricade = false;
-        this.bottomBar.setEcoMode(true);
-      }
     });
     kb.on('keydown-B', () => {
       if (this.economy.canAfford(BARRICADE_COST) && this.barricadeCount < MAX_BARRICADES) {
@@ -1192,10 +1154,6 @@ export class GameScene extends Phaser.Scene {
 
     // Placing economy building
     if (this.placingEconomy) {
-      if (this._skipNextPlacement) {
-        this._skipNextPlacement = false;
-        return;
-      }
       if (!this.canPlaceEconomy(this.placingEconomy, col, row)) return;
       const def = ECO_BUILDING_DEFS[this.placingEconomy];
       const count = this.economySim.countOfType(this.placingEconomy);
@@ -1242,9 +1200,6 @@ export class GameScene extends Phaser.Scene {
     this.placingTower = null;
     this.placingBarricade = false;
     this.placingEconomy = null;
-    this._skipNextPlacement = false;
-    this.economyPanel.hide();
-    this.bottomBar.setEcoMode(false);
     this.hoverOverlay.setAlpha(0);
   }
 

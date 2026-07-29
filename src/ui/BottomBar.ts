@@ -1,21 +1,48 @@
 import Phaser from 'phaser';
 import { TOWER_DEFS, TOWER_TYPES_ORDERED, type TowerType } from '../data/towers';
+import { ECO_BUILDING_DEFS, ECO_BUILDING_TYPES, escalatedCost, type EconomyBuildingType } from '../data/economy';
 import { COLORS } from '../utils/constants';
 import type { EconomyManager } from '../systems/EconomyManager';
+import type { EconomySimulation } from '../systems/EconomySimulation';
 import type { Tower } from '../entities/Tower';
 import type { EconomyBuilding } from '../entities/EconomyBuilding';
 import { drawElevatedButton } from '../utils/ButtonStyles';
 
 const TLEFT = 0; // 12;  // left margin for tower button area
 
+// ─── Unified build items (towers + eco buildings) ─────────────────────────
+
+type BuildItemKind = 'tower' | 'eco';
+
+interface BuildItem {
+  kind: BuildItemKind;
+  type: TowerType | EconomyBuildingType;
+}
+
+const BUILD_ITEMS: BuildItem[] = [
+  ...TOWER_TYPES_ORDERED.map(t => ({ kind: 'tower' as const, type: t })),
+  ...ECO_BUILDING_TYPES.map(t => ({ kind: 'eco' as const, type: t })),
+];
+
 export class BottomBar {
+  // ─── Size constants ────────────────────────────────────────────────────
+  /** Fraction of screen height the bottom bar occupies (0–1). */
+  private static readonly BAR_HEIGHT_PCT = 0.25;
+  /** Minimum bar height in pixels (for very small screens). */
+  private static readonly MIN_BAR_H = 110;
+  /** Maximum bar height in pixels (for very large screens). */
+  private static readonly MAX_BAR_H = 260;
+
+  private static readonly MIN_BTN_W = 70;
+
   private scene:   Phaser.Scene;
   private economy: EconomyManager;
+  private ecoSim:  EconomySimulation;
 
   // Background
   private bg: Phaser.GameObjects.Graphics;
 
-  // BUILD mode elements (all 6 created, hidden when scrolled)
+  // BUILD mode elements (all created, hidden when scrolled)
   private buildBgs:     Phaser.GameObjects.Graphics[] = [];
   private buildIcons:   Phaser.GameObjects.Image[]    = [];
   private buildNames:   Phaser.GameObjects.Text[]     = [];
@@ -23,7 +50,7 @@ export class BottomBar {
   private buildHits:    Phaser.GameObjects.Rectangle[] = [];
   private hotkeyLabels: Phaser.GameObjects.Text[]     = [];
 
-  // Scroll arrows (only shown when not all 6 fit)
+  // Scroll arrows (only shown when not all items fit)
   private scrollPrevBg:  Phaser.GameObjects.Graphics;
   private scrollPrevHit: Phaser.GameObjects.Rectangle;
   private scrollNextBg:  Phaser.GameObjects.Graphics;
@@ -59,23 +86,18 @@ export class BottomBar {
 
   // Callbacks
   onPlaceTower: ((type: TowerType) => void) | null = null;
+  onPlaceEconomy: ((type: EconomyBuildingType) => void) | null = null;
   onUpgrade:    (() => void) | null = null;
   onEvolve:     ((branch: 0 | 1) => void) | null = null;
   onSell:       (() => void) | null = null;
   onSellEco:    (() => void) | null = null;
   onUpgradeEco: (() => void) | null = null;
   onSendWave:   (() => void) | null = null;
-  onToggleEconomy: (() => void) | null = null;
 
-  // Economy mode toggle button
-  private ecoBtnBg:  Phaser.GameObjects.Graphics;
-  private ecoBtnTxt: Phaser.GameObjects.Text;
-  private ecoBtnHit: Phaser.GameObjects.Rectangle;
-  private _ecoMode: boolean = false;
-
-  constructor(scene: Phaser.Scene, economy: EconomyManager) {
+  constructor(scene: Phaser.Scene, economy: EconomyManager, ecoSim: EconomySimulation) {
     this.scene   = scene;
     this.economy = economy;
+    this.ecoSim  = ecoSim;
     const D = 40;
 
     // ── Background ──────────────────────────────────────────────────────────
@@ -93,50 +115,84 @@ export class BottomBar {
       .on('pointerup', () => this.scrollTowers(+this._visibleTowers));
 
     // ── Build section ────────────────────────────────────────────────────────
-    TOWER_TYPES_ORDERED.forEach((type, i) => {
-      const def = TOWER_DEFS[type];
+    BUILD_ITEMS.forEach((item, i) => {
+      const isTower = item.kind === 'tower';
+      const def = isTower
+        ? TOWER_DEFS[item.type as TowerType]
+        : ECO_BUILDING_DEFS[item.type as EconomyBuildingType];
+      const label = isTower
+        ? def.label.split(' ')[0]
+        : (def as any).label;
+      const color = (def as any).color ?? 0x888888;
+      const iconKey = isTower
+        ? `tower_${item.type}_0`
+        : (def as any).textureKey;
+      const cost = isTower
+        ? (def as any).baseCost
+        : escalatedCost(def as any, this.ecoSim.countOfType(item.type as EconomyBuildingType));
 
       const bg2 = scene.add.graphics().setScrollFactor(0).setDepth(D + 1);
       this.buildBgs.push(bg2);
 
-      const icon = scene.add.image(-999, 0, `tower_${type}_0`)
+      const icon = scene.add.image(-999, 0, iconKey)
         .setDisplaySize(60, 60).setScrollFactor(0).setDepth(D + 2);
       this.buildIcons.push(icon);
 
-      const lbl = scene.add.text(-999, 0, def.label.split(' ')[0], {
+      const lbl = scene.add.text(-999, 0, label, {
         fontSize: '13px', fontFamily: 'monospace', color: '#ccddee', align: 'center',
       }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 2);
       this.buildNames.push(lbl);
 
-      const hkChars = ['Q', 'W', 'E', 'A', 'S', 'D'];
-      const hkLbl = scene.add.text(-999, 0, `[${hkChars[i]}]`, {
+      const hkChars = ['Q', 'W', 'E', 'A', 'S', 'D', 'F', 'G', 'R', 'T', 'Y', 'H'];
+      const hkLbl = scene.add.text(-999, 0, i < hkChars.length ? `[${hkChars[i]}]` : '', {
         fontSize: '11px', fontFamily: 'monospace', color: '#667788', align: 'center',
       }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 2);
       this.hotkeyLabels.push(hkLbl);
 
-      const cost = scene.add.text(-999, 0, `${def.baseCost}g`, {
+      const costLabel = isTower ? `${cost}g` : `🏠${cost}g`;
+      const costTxt = scene.add.text(-999, 0, costLabel, {
         fontSize: '13px', fontFamily: 'monospace', color: '#ffd700', align: 'center',
       }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 2);
-      this.buildCosts.push(cost);
+      this.buildCosts.push(costTxt);
 
       const hit = scene.add.rectangle(-999, 0, 100, 80, 0, 0)
         .setScrollFactor(0).setInteractive({ useHandCursor: true }).setDepth(D + 3);
       hit.on('pointerover', () => {
         if (!this.isTowerVisible(i)) return;
-        this.drawTowerBtn(bg2, this.towerScreenX(i), this._TOWER_CY, this._TBW, this._TBH, def.color, true, false, this.economy.canAfford(def.baseCost));
+        const currentCost = isTower
+          ? (def as any).baseCost
+          : escalatedCost(def as any, this.ecoSim.countOfType(item.type as EconomyBuildingType));
+        this.drawTowerBtn(bg2, this.towerScreenX(i), this._TOWER_CY, this._TBW, this._TBH, color, true, false, this.economy.canAfford(currentCost));
       });
       hit.on('pointerout', () => {
         if (!this.isTowerVisible(i)) return;
-        this.drawTowerBtn(bg2, this.towerScreenX(i), this._TOWER_CY, this._TBW, this._TBH, def.color, false, false, this.economy.canAfford(def.baseCost));
+        const currentCost = isTower
+          ? (def as any).baseCost
+          : escalatedCost(def as any, this.ecoSim.countOfType(item.type as EconomyBuildingType));
+        this.drawTowerBtn(bg2, this.towerScreenX(i), this._TOWER_CY, this._TBW, this._TBH, color, false, false, this.economy.canAfford(currentCost));
       });
       hit.on('pointerup', () => {
-        if (!economy.canAfford(def.baseCost) || !this.isTowerVisible(i)) return;
-        this.onPlaceTower?.(type);
-        this.buildBgs.forEach((b, j) => {
-          if (!this.isTowerVisible(j)) return;
-          const t = TOWER_TYPES_ORDERED[j];
-          this.drawTowerBtn(b, this.towerScreenX(j), this._TOWER_CY, this._TBW, this._TBH, TOWER_DEFS[t].color, false, j === i, this.economy.canAfford(TOWER_DEFS[t].baseCost));
-        });
+        const currentCost = isTower
+          ? (def as any).baseCost
+          : escalatedCost(def as any, this.ecoSim.countOfType(item.type as EconomyBuildingType));
+        if (!economy.canAfford(currentCost) || !this.isTowerVisible(i)) return;
+        if (isTower) {
+          this.onPlaceTower?.(item.type as TowerType);
+          this.buildBgs.forEach((b, j) => {
+            if (!this.isTowerVisible(j)) return;
+            const bi = BUILD_ITEMS[j];
+            const bDef = bi.kind === 'tower'
+              ? TOWER_DEFS[bi.type as TowerType]
+              : ECO_BUILDING_DEFS[bi.type as EconomyBuildingType];
+            const bColor = (bDef as any).color ?? 0x888888;
+            const bCost = bi.kind === 'tower'
+              ? (bDef as any).baseCost
+              : escalatedCost(bDef as any, this.ecoSim.countOfType(bi.type as EconomyBuildingType));
+            this.drawTowerBtn(b, this.towerScreenX(j), this._TOWER_CY, this._TBW, this._TBH, bColor, false, j === i, this.economy.canAfford(bCost));
+          });
+        } else {
+          this.onPlaceEconomy?.(item.type as EconomyBuildingType);
+        }
       });
       this.buildHits.push(hit);
     });
@@ -161,20 +217,7 @@ export class BottomBar {
 
     this.drawWaveBtn(false);
 
-    // ── Economy mode toggle button ────────────────────────────────────────
-    const ED = D + 1;
-    this.ecoBtnBg = scene.add.graphics().setScrollFactor(0).setDepth(ED);
-    this.ecoBtnTxt = scene.add.text(0, 0, '[V] ECO', {
-      fontSize: '12px', fontFamily: 'monospace', color: '#aabbcc', align: 'center',
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(ED + 1);
-    this.ecoBtnHit = scene.add.rectangle(0, 0, 70, 24, 0, 0)
-      .setScrollFactor(0).setInteractive({ useHandCursor: true }).setDepth(ED + 2);
-    this.ecoBtnHit.on('pointerover', () => this.drawEcoBtn(true));
-    this.ecoBtnHit.on('pointerout',  () => this.drawEcoBtn(false));
-    this.ecoBtnHit.on('pointerup',   () => this.onToggleEconomy?.());
-    this.drawEcoBtn(false);
-
-    // Gold listener
+    // Gold listener — refresh affordability for all build items
     scene.events.on('gold_changed', () => {
       this.refreshBuildAffordability();
       if (this.upgRoot.visible && this.currentUpgradeTower) {
@@ -190,7 +233,9 @@ export class BottomBar {
 
   private towerScreenX(i: number): number {
     const slot = i - this._scrollOffset;
-    return TLEFT + this._ARROW_W + slot * (this._TBW + this._TGAP) + this._TBW / 2;
+    // Gap between prev arrow and first visible button
+    const arrowGap = this._ARROW_W > 0 ? this._TGAP : 0;
+    return TLEFT + this._ARROW_W + arrowGap + slot * (this._TBW + this._TGAP) + this._TBW / 2;
   }
 
   private upgradeCX(slot: number): number {
@@ -203,7 +248,7 @@ export class BottomBar {
   }
 
   private scrollTowers(delta: number) {
-    const max = TOWER_TYPES_ORDERED.length - this._visibleTowers;
+    const max = BUILD_ITEMS.length - this._visibleTowers;
     this._scrollOffset = Math.max(0, Math.min(max, this._scrollOffset + delta));
     this.repositionBuildButtons();
     this.updateScrollArrows();
@@ -216,7 +261,7 @@ export class BottomBar {
     const hkFSPx    = Math.max(9,  Math.round(this._TBW * 0.095));
     const costFSPx  = Math.max(10, Math.round(this._TBW * 0.115));
 
-    TOWER_TYPES_ORDERED.forEach((type, i) => {
+    BUILD_ITEMS.forEach((item, i) => {
       if (!this.isTowerVisible(i)) {
         this.buildBgs[i].clear();
         [this.buildIcons[i], this.buildNames[i], this.hotkeyLabels[i],
@@ -225,9 +270,16 @@ export class BottomBar {
         return;
       }
       const cx  = this.towerScreenX(i);
-      const def = TOWER_DEFS[type];
-      const can = this.economy.canAfford(def.baseCost);
-      this.drawTowerBtn(this.buildBgs[i], cx, cy, this._TBW, this._TBH, def.color, false, false, can);
+      const isTower = item.kind === 'tower';
+      const def = isTower
+        ? TOWER_DEFS[item.type as TowerType]
+        : ECO_BUILDING_DEFS[item.type as EconomyBuildingType];
+      const color = (def as any).color ?? 0x888888;
+      const cost = isTower
+        ? (def as any).baseCost
+        : escalatedCost(def as any, this.ecoSim.countOfType(item.type as EconomyBuildingType));
+      const can = this.economy.canAfford(cost);
+      this.drawTowerBtn(this.buildBgs[i], cx, cy, this._TBW, this._TBH, color, false, false, can);
       this.buildIcons[i].setPosition(cx, cy - this._TBH * 0.15).setDisplaySize(iconSize, iconSize);
       this.buildNames[i].setPosition(cx, cy + this._TBH * 0.17).setStyle({ fontSize: nameFSPx + 'px' });
       this.hotkeyLabels[i].setPosition(cx, cy + this._TBH * 0.31).setStyle({ fontSize: hkFSPx + 'px' });
@@ -254,7 +306,7 @@ export class BottomBar {
     // Arrow height matches tower button height
     const arrowH = this._TBH;
     const canPrev = this._scrollOffset > 0;
-    const canNext = this._scrollOffset + this._visibleTowers < TOWER_TYPES_ORDERED.length;
+    const canNext = this._scrollOffset + this._visibleTowers < BUILD_ITEMS.length;
 
     // Prev arrow
     const px = TLEFT;
@@ -270,10 +322,11 @@ export class BottomBar {
     }
     this.scrollPrevHit.setVisible(true).setPosition(px + aw / 2, cy).setSize(aw, arrowH);
 
-    // Next arrow — right after the last visible tower button
+    // Next arrow — gap after the last visible tower button
     const lastSlot = this._visibleTowers - 1;
-    const lastTowerRight = TLEFT + this._ARROW_W + lastSlot * (this._TBW + this._TGAP) + this._TBW;
-    const nx = lastTowerRight;
+    const arrowGap = this._ARROW_W > 0 ? this._TGAP : 0;
+    const lastTowerRight = TLEFT + this._ARROW_W + arrowGap + lastSlot * (this._TBW + this._TGAP) + this._TBW;
+    const nx = lastTowerRight + this._TGAP;
     this.scrollNextBg.clear().setVisible(true);
     this.scrollNextBg.fillStyle(canNext ? 0x1e3a5f : 0x151520, 0.9);
     this.scrollNextBg.fillRoundedRect(nx + 2, cy - arrowH / 2, aw - 2, arrowH, 4);
@@ -316,61 +369,65 @@ export class BottomBar {
       ...this.hotkeyLabels,
       this.waveHit,
       ...this.upgBtnList.flatMap(b => [b.bg, b.txt, b.hit]),
-      this.ecoBtnBg, this.ecoBtnTxt, this.ecoBtnHit,
     ];
   }
 
   resize(sw: number, sh: number) {
-    // ── 1. Compute tower button size from available width ──────────────────
-    // Reserve space for floating wave button on the right
+    const towerAreaW = sw - 2 * TLEFT;
+    const arrowW = 30;
+
+    // ── 0. Start with ideal bar height from screen pct ───────────────────
+    let barH = Math.max(
+      BottomBar.MIN_BAR_H,
+      Math.min(BottomBar.MAX_BAR_H, Math.round(sh * BottomBar.BAR_HEIGHT_PCT))
+    );
+
+    // ── 1. Buttons fill bar edge-to-edge (no vertical margins) ───────────
+    // Shrink bar until at least 3 buttons + 2 scroll arrows + gaps fit
+    while (barH >= BottomBar.MIN_BAR_H) {
+      const tbh = barH;
+      const tbw = Math.max(BottomBar.MIN_BTN_W, Math.round(tbh * 0.82));
+      const tgap = Math.max(2, Math.min(8, Math.round(tbw * 0.05)));
+      // Layout: [prev] [gap] [btn] [gap] [btn] [gap] [btn] [gap] [next]
+      if (3 * tbw + 4 * tgap + 2 * arrowW <= towerAreaW) break;
+      barH--;
+    }
+
+    this._BAR_H = barH;
+    this._BAR_Y = sh - this._BAR_H;
+    this._TOWER_CY = this._BAR_Y + Math.round(this._BAR_H * 0.5);
+
+    // ── 2. Button dimensions (no vertical pad) ───────────────────────────
+    this._TBH = this._BAR_H;
+    this._TBW = Math.max(BottomBar.MIN_BTN_W, Math.round(this._TBH * 0.82));
+    this._TGAP = Math.max(2, Math.min(8, Math.round(this._TBW * 0.05)));
+
+    // ── 3. Fit buttons across the bar width ──────────────────────────────
+    const totalItems = BUILD_ITEMS.length;
+    const fitsAll = totalItems * this._TBW + (totalItems - 1) * this._TGAP <= towerAreaW;
+
+    if (fitsAll) {
+      this._ARROW_W = 0;
+      this._visibleTowers = totalItems;
+    } else {
+      // Reserve room for arrows AND the gaps between arrows and edge buttons
+      const innerW = towerAreaW - 2 * arrowW - 2 * this._TGAP;
+      this._ARROW_W = arrowW;
+      this._visibleTowers = Math.max(3, Math.min(totalItems,
+        Math.floor((innerW + this._TGAP) / (this._TBW + this._TGAP))
+      ));
+    }
+
+    // ── 4. Floating wave button ──────────────────────────────────────────
     const waveW = Math.max(84, Math.round(sw * 0.078));
     const waveH = Math.max(52, Math.round(waveW * 0.6));
     this._WAVE_W = waveW;
     this._WAVE_H = waveH;
-
-    // Tower area uses full bar width (wave button floats separately)
-    const towerAreaW = sw - 2 * TLEFT;
-    const arrowW = 30;
-    const tgap = Math.max(4, Math.min(10, Math.round(towerAreaW * 0.009)));
-
-    const rawTBW = Math.floor((towerAreaW + tgap) / 6 - tgap);
-    const tbwFull = Math.max(68, Math.min(Math.round(sw * 0.20), rawTBW));
-    const fits6   = 6 * tbwFull + 5 * tgap <= towerAreaW;
-
-    if (fits6) {
-      this._ARROW_W = 0;
-      this._visibleTowers = 6;
-      this._TBW = tbwFull;
-    } else {
-      const innerW = towerAreaW - 2 * arrowW;
-      const maxVis = Math.max(3, Math.min(5, Math.floor((innerW + tgap) / (68 + tgap))));
-      this._ARROW_W = arrowW;
-      this._visibleTowers = maxVis;
-      this._TBW = Math.max(68, Math.floor((innerW - (maxVis - 1) * tgap) / maxVis));
-    }
-
-    this._TGAP = tgap;
-    this._TBH  = Math.max(60, Math.min(Math.round(this._TBW * 0.95), Math.round(sh * 0.20)));
-    // Enforce rectangular aspect ratio: width ≤ 90% of height so buttons
-    // are never wider than they are tall (avoids stretched look on wide screens)
-    const maxRectW = Math.round(this._TBH * 0.9);
-    if (this._TBW > maxRectW) {
-      this._TBW = maxRectW;
-    }
-
-    // ── 2. Bar height derived from tower button height ─────────────────────
-    const vertPad = 0; //Math.max(12, Math.round(this._TBH * 0.22));
-    this._BAR_H   = this._TBH + 2 * vertPad;
-    this._BAR_Y   = sh - this._BAR_H;
-    this._TOWER_CY = this._BAR_Y + Math.round(this._BAR_H * 0.5);
-
-    // ── 3. Wave button floats above the bar, bottom-right corner ────────────
     this._WAVE_CX = sw - waveW / 2 - 10;
-    // Center: partially above bar (1/3 above), visually floating
     this._WAVE_CY = this._BAR_Y - Math.round(waveH * 0.35);
 
     // Clamp scroll
-    this._scrollOffset = Math.min(this._scrollOffset, Math.max(0, TOWER_TYPES_ORDERED.length - this._visibleTowers));
+    this._scrollOffset = Math.min(this._scrollOffset, Math.max(0, BUILD_ITEMS.length - this._visibleTowers));
 
     // Wave font
     const waveFS = Math.max(12, Math.min(16, Math.round(waveW * 0.135)));
@@ -393,13 +450,6 @@ export class BottomBar {
     this.waveLabel.setPosition(this._WAVE_CX, this._WAVE_CY + Math.round(waveH * 0.1));
     this.waveHit.setPosition(this._WAVE_CX, this._WAVE_CY).setSize(waveW - 6, waveH - 4);
     this.drawWaveBtn(false);
-
-    // ── Economy mode toggle ────────────────────────────────────────────────
-    const ecoBtnX = TLEFT + 40;
-    const ecoBtnY = this._BAR_Y + 16;
-    this.ecoBtnHit.setPosition(ecoBtnX, ecoBtnY);
-    this.ecoBtnTxt.setPosition(ecoBtnX, ecoBtnY);
-    this.drawEcoBtn(false);
 
     // ── Upgrade section ────────────────────────────────────────────────────
     if (this.upgRoot.visible && this.currentUpgradeTower) {
@@ -468,12 +518,19 @@ export class BottomBar {
   }
 
   refreshBuildAffordability() {
-    TOWER_TYPES_ORDERED.forEach((type, i) => {
+    BUILD_ITEMS.forEach((item, i) => {
       if (!this.isTowerVisible(i)) return;
-      const def = TOWER_DEFS[type];
-      const can = this.economy.canAfford(def.baseCost);
+      const isTower = item.kind === 'tower';
+      const def = isTower
+        ? TOWER_DEFS[item.type as TowerType]
+        : ECO_BUILDING_DEFS[item.type as EconomyBuildingType];
+      const color = (def as any).color ?? 0x888888;
+      const cost = isTower
+        ? (def as any).baseCost
+        : escalatedCost(def as any, this.ecoSim.countOfType(item.type as EconomyBuildingType));
+      const can = this.economy.canAfford(cost);
       this.buildCosts[i].setColor(can ? '#ffd700' : '#885533');
-      this.drawTowerBtn(this.buildBgs[i], this.towerScreenX(i), this._TOWER_CY, this._TBW, this._TBH, def.color, false, false, can);
+      this.drawTowerBtn(this.buildBgs[i], this.towerScreenX(i), this._TOWER_CY, this._TBW, this._TBH, color, false, false, can);
     });
   }
 
@@ -831,24 +888,6 @@ export class BottomBar {
       w: this._WAVE_W, h: this._WAVE_H,
       theme: 'wave', hover, radius: 10,
     });
-  }
-
-  // ─── Economy mode toggle ────────────────────────────────────────────────
-
-  private drawEcoBtn(hover: boolean) {
-    const g = this.ecoBtnBg;
-    g.clear();
-    const active = this._ecoMode || hover;
-    g.fillStyle(active ? 0x2a5a2a : 0x1a2a1a, 0.9);
-    g.fillRoundedRect(this.ecoBtnHit.x - 35, this.ecoBtnHit.y - 12, 70, 24, 5);
-    g.lineStyle(1, this._ecoMode ? 0x44ff88 : 0x334433, 0.7);
-    g.strokeRoundedRect(this.ecoBtnHit.x - 35, this.ecoBtnHit.y - 12, 70, 24, 5);
-    this.ecoBtnTxt.setColor(this._ecoMode ? '#44ff88' : '#aabbcc');
-  }
-
-  setEcoMode(active: boolean) {
-    this._ecoMode = active;
-    this.drawEcoBtn(false);
   }
 
   private clearUpgHits() {
