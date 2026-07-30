@@ -22,6 +22,7 @@
     "cancel":         "ESC",
     "barricade":      "B",
     "upgradeEvolve0": "U",
-    "evolve1":        "I"
+    "evolve1":        "I",
+    "sell":           "C"
   }
 }

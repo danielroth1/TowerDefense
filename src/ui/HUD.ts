@@ -3,6 +3,7 @@ import {
   COLORS,
 } from '../utils/constants';
 import type { WeatherState } from '../systems/WeatherSystem';
+import type { WeatherSystem } from '../systems/WeatherSystem';
 import { SoundSystem } from '../systems/SoundSystem';
 import { drawPillBadge } from '../utils/ButtonStyles';
 
@@ -55,6 +56,11 @@ export class HUD {
   private modalPauseBtn: Phaser.GameObjects.Text;
   private modalCloseBtn: Phaser.GameObjects.Text;
 
+  // Weather debug buttons (only visible in debug mode)
+  private _debug: boolean;
+  private weatherSystem: WeatherSystem;
+  private modalWeatherBtns: Phaser.GameObjects.Text[] = [];
+
   // Lives low-health pulse tween
   private livesPulse: Phaser.Tweens.Tween | null = null;
 
@@ -65,9 +71,11 @@ export class HUD {
   private _W = 0;
   private _sc = 1.0;  // responsive scale factor vs 1366×768 reference
 
-  constructor(scene: Phaser.Scene) {
+  constructor(scene: Phaser.Scene, debug: boolean, weatherSystem: WeatherSystem) {
     this.scene = scene;
     this.sound = SoundSystem.instance;
+    this._debug = debug;
+    this.weatherSystem = weatherSystem;
     this.startTime = scene.time.now;
 
     const W = scene.scale.width;
@@ -180,6 +188,23 @@ export class HUD {
       .setInteractive({ useHandCursor: true })
       .on('pointerup', () => this.closeSettings());
 
+    // ── Weather debug buttons ────────────────────────────────────────────────
+    const weatherStates: WeatherState[] = ['sunny', 'rain', 'wind', 'eclipse'];
+    const weatherIcons: Record<WeatherState, string> = {
+      sunny: '☀ SUNNY', rain: '🌧 RAIN', wind: '💨 WIND', eclipse: '🌑 ECLIPSE',
+    };
+    const weatherColors: Record<WeatherState, string> = {
+      sunny: '#ffffaa', rain: '#88aaff', wind: '#aabbcc', eclipse: '#aa88ff',
+    };
+    for (const st of weatherStates) {
+      const btn = scene.add.text(0, 0, weatherIcons[st], {
+        fontSize: '16px', fontFamily: 'monospace', color: weatherColors[st],
+      }).setScrollFactor(0).setDepth(72).setOrigin(0.5).setVisible(false)
+        .setInteractive({ useHandCursor: true })
+        .on('pointerup', () => this.weatherSystem.forceWeather(st));
+      this.modalWeatherBtns.push(btn);
+    }
+
     // ── Event subscriptions ──────────────────────────────────────────────────
     scene.events.on('gold_changed',   (g: number)  => this.setGold(g));
     scene.events.on('lives_changed',  (l: number)  => this.setLives(l));
@@ -219,6 +244,7 @@ export class HUD {
       this.modalPerfBtn,
       this.modalPauseBtn,
       this.modalCloseBtn,
+      ...this.modalWeatherBtns,
     ];
   }
 
@@ -341,7 +367,9 @@ export class HUD {
     this.modalBackdrop.setPosition(0, 0).setSize(W, H);
 
     const panelW = Math.max(220, Math.round(300 * sc));
-    const panelH = Math.max(240, Math.round(300 * sc));
+    const panelH = this._debug
+      ? Math.max(340, Math.round(460 * sc))
+      : Math.max(240, Math.round(300 * sc));
     const px = W / 2 - panelW / 2;
     const py = H / 2 - panelH / 2;
     this.modalPanel.clear();
@@ -353,12 +381,22 @@ export class HUD {
     this.modalPanel.strokeRoundedRect(px, py, panelW, panelH, 12);
     const modalFS = Math.max(14, Math.round(20 * sc)) + 'px';
     const modalFS2 = Math.max(12, Math.round(18 * sc)) + 'px';
-    this.modalBgmBtn.setStyle({ fontSize: modalFS }).setPosition(W / 2, py + panelH * 0.17);
-    this.modalSfxBtn.setStyle({ fontSize: modalFS }).setPosition(W / 2, py + panelH * 0.33);
-    this.modalPerfBtn.setStyle({ fontSize: modalFS2 }).setPosition(W / 2, py + panelH * 0.49);
-    this.modalPauseBtn.setStyle({ fontSize: modalFS }).setPosition(W / 2, py + panelH * 0.65);
+    const modalFS3 = Math.max(11, Math.round(16 * sc)) + 'px';
+    this.modalBgmBtn.setStyle({ fontSize: modalFS }).setPosition(W / 2, py + panelH * 0.14);
+    this.modalSfxBtn.setStyle({ fontSize: modalFS }).setPosition(W / 2, py + panelH * 0.26);
+    this.modalPerfBtn.setStyle({ fontSize: modalFS2 }).setPosition(W / 2, py + panelH * 0.38);
+    // Weather buttons (only in debug mode) — placed between Perf and Pause
+    if (this._debug) {
+      const weatherY = [0.48, 0.55, 0.62, 0.69];
+      for (let i = 0; i < this.modalWeatherBtns.length; i++) {
+        this.modalWeatherBtns[i]
+          .setStyle({ fontSize: modalFS3 })
+          .setPosition(W / 2, py + panelH * weatherY[i]);
+      }
+    }
+    this.modalPauseBtn.setStyle({ fontSize: modalFS }).setPosition(W / 2, py + panelH * (this._debug ? 0.77 : 0.65));
     this.modalCloseBtn.setStyle({ fontSize: Math.max(12, Math.round(18 * sc)) + 'px' })
-      .setPosition(W / 2, py + panelH * 0.83);
+      .setPosition(W / 2, py + panelH * (this._debug ? 0.87 : 0.83));
   }
 
   private setGold(g: number) {
@@ -445,6 +483,9 @@ export class HUD {
     this.modalPerfBtn.setVisible(true);
     this.modalPauseBtn.setVisible(true);
     this.modalCloseBtn.setVisible(true);
+    if (this._debug) {
+      for (const btn of this.modalWeatherBtns) btn.setVisible(true);
+    }
   }
 
   closeSettings() {
@@ -456,5 +497,6 @@ export class HUD {
     this.modalPerfBtn.setVisible(false);
     this.modalPauseBtn.setVisible(false);
     this.modalCloseBtn.setVisible(false);
+    for (const btn of this.modalWeatherBtns) btn.setVisible(false);
   }
 }

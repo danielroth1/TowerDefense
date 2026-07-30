@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { WEATHER_CHANGE_INTERVAL, GRID_COLS, GRID_ROWS, TILE_SIZE } from '../utils/constants';
+import { WEATHER_CHANGE_INTERVAL } from '../utils/constants';
 
 export type WeatherState = 'sunny' | 'rain' | 'wind' | 'eclipse';
 
@@ -19,7 +19,7 @@ const WEATHER_MODS: Record<WeatherState, WeatherModifiers> = {
   eclipse:{ fireDamageMult: 1.1,  poisonTickMult: 1,    flyerSpeedMult: 1,    groundSpeedMult: 1,    towerRangeMult: 0.75, goldEarnMult: 1.4 },
 };
 
-const WEATHER_SEQUENCE: WeatherState[] = ['sunny', 'rain', 'wind', 'eclipse'];
+const WEATHER_SEQUENCE: WeatherState[] = ['sunny', 'rain'];
 
 export class WeatherSystem {
   private scene: Phaser.Scene;
@@ -66,6 +66,14 @@ export class WeatherSystem {
     this.transition(WEATHER_SEQUENCE[this.stateIndex]);
   }
 
+  /** Force a specific weather state (for debug). Resets the cycle timer. */
+  forceWeather(state: WeatherState) {
+    this.countdown = WEATHER_CHANGE_INTERVAL;
+    this.stateIndex = WEATHER_SEQUENCE.indexOf(state);
+    if (this.stateIndex === -1) this.stateIndex = 0;
+    this.transition(state);
+  }
+
   private transition(next: WeatherState) {
     const prev = this.current;
     this.current = next;
@@ -82,8 +90,8 @@ export class WeatherSystem {
     this.overlay.clear();
     this.overlay.setAlpha(1);
 
-    const W = GRID_COLS * TILE_SIZE;
-    const H = GRID_ROWS * TILE_SIZE;
+    const W = this.scene.scale.width;
+    const H = this.scene.scale.height;
 
     // Helper to add to UI group if set
     const reg = (obj: Phaser.GameObjects.GameObject) => {
@@ -92,15 +100,7 @@ export class WeatherSystem {
 
     switch (state) {
       case 'rain': {
-        // Blue tint overlay across full screen
-        this.overlay.fillStyle(0x1133aa, 0.12);
-        this.overlay.fillRect(0, 0, W, H);
-        // Horizontal streaks for rain feel
-        this.overlay.lineStyle(1, 0x5599ff, 0.06);
-        for (let y = 0; y < H; y += 18) {
-          this.overlay.lineBetween(0, y, W, y);
-        }
-        // Rain particles – screen fixed
+        // Rain particles only — no background tint, screen-fixed full-window
         this.particles = this.scene.add.particles(0, -10, 'particle_ice', {
           x: { min: 0, max: W },
           y: { min: -10, max: -5 },
@@ -211,6 +211,13 @@ export class WeatherSystem {
         });
       },
     });
+  }
+
+  /** Re-apply visuals for the current weather (called on window resize). */
+  resize() {
+    if (this.current !== 'sunny') {
+      this.updateVisuals(this.current);
+    }
   }
 
   destroy() {

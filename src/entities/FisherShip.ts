@@ -37,7 +37,10 @@ export class FisherShip extends Phaser.GameObjects.Container {
   // Map reference for water checking
   private grid: { type: string }[][] = [];
 
-  constructor(scene: Phaser.Scene, fishery: EconomyBuilding, grid: { type: string }[][]) {
+  /** 0-based index of this ship at its fishery (so each ship picks a different spot). */
+  private shipIndex: number;
+
+  constructor(scene: Phaser.Scene, fishery: EconomyBuilding, grid: { type: string }[][], shipIndex: number = 0) {
     // Spawn at the water-side of the fishery based on rotation.
     // placeEconomyBuilding sets: 0=water right, 90=water above, 180=water left, 270=water below.
     let spawnCol = fishery.gridCol;
@@ -54,6 +57,7 @@ export class FisherShip extends Phaser.GameObjects.Container {
 
     this.fishery = fishery;
     this.grid = grid;
+    this.shipIndex = shipIndex;
 
     scene.add.existing(this);
     this.setDepth(0.22); // Above water, below terrain overlays
@@ -164,8 +168,9 @@ export class FisherShip extends Phaser.GameObjects.Container {
     const good = candidates.filter(c => c.dist >= 2 && c.dist <= 4);
     const pool = good.length > 0 ? good : candidates;
 
-    // Pick a random one based on fishery position (deterministic)
-    const idx = (this.fishery.gridCol * 31 + this.fishery.gridRow * 17) % pool.length;
+    // Pick a different spot per ship using shipIndex to offset into the pool.
+    // Deterministic but unique per ship at the same fishery.
+    const idx = ((this.fishery.gridCol * 31 + this.fishery.gridRow * 17 + this.shipIndex * 73) >>> 0) % pool.length;
     return { col: pool[idx].col, row: pool[idx].row };
   }
 

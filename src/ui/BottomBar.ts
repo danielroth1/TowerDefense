@@ -653,7 +653,8 @@ export class BottomBar {
     }
 
     const sellVal = tower.sellValue();
-    actions.push({ label: '💰 Sell', cost: sellVal, color: 0x4a1a1a, enabled: true,
+    const sellHk = HOTKEYS.actions.sell || '';
+    actions.push({ label: '💰 Sell', cost: sellVal, color: 0x4a1a1a, enabled: true, hotkey: sellHk,
       previewStats: `+${sellVal}g`, cb: () => this.onSell?.() });
 
     actions.forEach((act, i) => {
@@ -827,7 +828,8 @@ export class BottomBar {
     // Markets cannot be sold
     if (building.buildingType !== 'market') {
       const sellVal = building.sellValue();
-      actions.push({ label: '💰 Sell', cost: sellVal, color: 0x4a1a1a, enabled: true,
+      const sellHk = HOTKEYS.actions.sell || '';
+      actions.push({ label: '💰 Sell', cost: sellVal, color: 0x4a1a1a, enabled: true, hotkey: sellHk,
         previewStats: `+${sellVal}g`, cb: () => this.onSellEco?.() });
     }
 

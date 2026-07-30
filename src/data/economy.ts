@@ -72,7 +72,7 @@ export const ECO_BUILDING_DEFS: Record<EconomyBuildingType, EconomyBuildingDef> 
   farm: {
     type: 'farm',
     label: 'Farm',
-    description: 'Grows wheat. Place on grass away from water.',
+    description: 'Grows wheat. Place on grass.',
     baseCost: 100,
     color: 0xd4a843,
     width: 1, height: 1,
@@ -88,7 +88,7 @@ export const ECO_BUILDING_DEFS: Record<EconomyBuildingType, EconomyBuildingDef> 
     placement: {
       tileType: 'buildable',
       requireWaterAdjacent: false,
-      forbidWaterAdjacent: true,
+      forbidWaterAdjacent: false,
       requireRoadAdjacent: false,
       straddlesWater: false,
     },

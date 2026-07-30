@@ -98,7 +98,7 @@ export class EconomySimulation {
       this.warehouseTimers.set(building, 0);
     }
     if (building.buildingType === 'fishery' && this.grid.length > 0) {
-      const ship = new FisherShip(this.scene, building, this.grid);
+      const ship = new FisherShip(this.scene, building, this.grid, 0);
       ship.setFishingDuration(building.cycleTime);
       this.fisherShips.set(building, [ship]);
     }
@@ -130,7 +130,7 @@ export class EconomySimulation {
     // Level 2 gets 2 ships; higher levels could get more in the future
     const targetCount = building.level;
     while (ships.length < targetCount) {
-      const ship = new FisherShip(this.scene, building, this.grid);
+      const ship = new FisherShip(this.scene, building, this.grid, ships.length);
       ship.setFishingDuration(building.cycleTime);
       ships.push(ship);
     }

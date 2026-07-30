@@ -1446,7 +1446,7 @@ export class GameScene extends Phaser.Scene {
       // 180/90/270 the building extends in a different direction.
       switch (building.rotationDeg) {
         case 0: // water left, Land right: center of (col, col+1) — default ✓
-          building.setPosition((col - 1.0) * TILE_SIZE, (row - 0.5) * TILE_SIZE);
+          building.setPosition(col * TILE_SIZE, (row + 0.5) * TILE_SIZE);
           break;
         case 180: // Water right, land left: center of (col-1, col)
           building.setPosition((col + 1.0) * TILE_SIZE, (row + 0.5) * TILE_SIZE);
