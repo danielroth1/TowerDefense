@@ -3,6 +3,7 @@
  * Serves the HTML UI and proxies requests to fal.ai with the API key.
  *
  * Usage: node tools/tile-generator/server.mjs
+ * Debug: DEBUG=1 node tools/tile-generator/server.mjs
  */
 
 import { createServer } from 'node:http';
@@ -13,8 +14,17 @@ import { fileURLToPath } from 'node:url';
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const PORT = 3456;
 const FAL_KEY = process.env.FAL_AI_KEY || '';
+const DEBUG = !!process.env.DEBUG;
 const OUTPUT_DIR = join(__dirname, '..', '..', 'public', 'assets', 'tiles');
 const ARCHIVE_DIR = join(__dirname, '..', '..', 'archive', 'tiles');
+
+function debugLog(...args) {
+  if (DEBUG) console.log('[debug]', ...args);
+}
+
+function debugWarn(...args) {
+  if (DEBUG) console.warn('[debug:WARN]', ...args);
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -29,50 +39,89 @@ const MIME = {
 };
 
 // Pricing cache — fetched live from fal.ai's Platform API.
-// Cache TTL: 1 hour (pricing doesn't change frequently).
-const _pricingCache = new Map(); // endpoint_id → { unit_price, unit, currency, fetched_at }
+// Cache TTL: 1 hour for successful fetches, 5 minutes for "not found".
+const _pricingCache = new Map(); // endpoint_id → { unit_price, unit, currency, fetched_at } or { not_found: true, fetched_at }
+const FETCH_TIMEOUT_MS = 10_000; // 10s timeout for fal.ai API calls
 
 async function fetchPricingFromFal(endpointIds) {
   if (!FAL_KEY) return {};
-  // Filter out cached entries (fetched within the last hour)
+  // Filter out cached entries (within their TTL)
   const now = Date.now();
   const toFetch = endpointIds.filter(id => {
     const cached = _pricingCache.get(id);
-    return !cached || (now - cached.fetched_at) > 3_600_000;
+    if (!cached) return true;
+    // "Not found" markers expire after 5 minutes; real pricing after 1 hour
+    const ttl = cached.not_found ? 300_000 : 3_600_000;
+    return (now - cached.fetched_at) > ttl;
   });
 
   if (toFetch.length === 0) {
-    // All cached — return from cache
+    // All cached — return from cache (filter out not_found markers as null)
     const result = {};
-    for (const id of endpointIds) result[id] = _pricingCache.get(id);
+    for (const id of endpointIds) {
+      const c = _pricingCache.get(id);
+      result[id] = (c && !c.not_found) ? c : null;
+    }
     return result;
   }
 
-  // Fetch in batches of 50 (API limit)
+  // Fetch in batches of 10 — URL length limit, not API limit
   const results = {};
-  for (let i = 0; i < toFetch.length; i += 50) {
-    const batch = toFetch.slice(i, i + 50);
+  debugLog(`[pricing] Fetching ${toFetch.length} uncached IDs in ${Math.ceil(toFetch.length / 10)} batch(es)`);
+  for (let i = 0; i < toFetch.length; i += 10) {
+    const batch = toFetch.slice(i, i + 10);
     const url = `https://api.fal.ai/v1/models/pricing?${batch.map(id => `endpoint_id=${encodeURIComponent(id)}`).join('&')}`;
+    debugLog(`[pricing] Fetching batch ${i / 50 + 1}: ${batch.length} IDs with url ${url}`);
     try {
-      const resp = await fetch(url, { headers: { 'Authorization': `Key ${FAL_KEY}` } });
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+      const resp = await fetch(url, {
+        headers: { 'Authorization': `Key ${FAL_KEY}` },
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
       if (!resp.ok) {
         console.error(`[pricing] HTTP ${resp.status} fetching batch of ${batch.length} IDs`);
+        debugWarn(`[pricing] Batch ${i / 50 + 1} failed with HTTP ${resp.status}`);
+        // Mark batch IDs as not-found so we don't hammer the API
+        for (const id of batch) {
+          _pricingCache.set(id, { not_found: true, fetched_at: now });
+        }
         continue;
       }
       const data = await resp.json();
+      const foundIds = new Set();
       for (const p of (data.prices || [])) {
         const entry = { ...p, fetched_at: now };
         _pricingCache.set(p.endpoint_id, entry);
         results[p.endpoint_id] = entry;
+        foundIds.add(p.endpoint_id);
+      }
+      debugLog(`[pricing] Batch ${i / 50 + 1}: got ${foundIds.size} prices, ${batch.length - foundIds.size} not found`);
+      // Mark batch IDs not in response as not-found
+      for (const id of batch) {
+        if (!foundIds.has(id)) {
+          _pricingCache.set(id, { not_found: true, fetched_at: now });
+        }
       }
     } catch (err) {
       console.error(`[pricing] Error fetching batch:`, err.message);
+      debugWarn(`[pricing] Batch ${i / 50 + 1} error: ${err.message}`);
+      // Mark batch IDs as not-found on error too (with short TTL for retry)
+      for (const id of batch) {
+        if (!_pricingCache.has(id)) {
+          _pricingCache.set(id, { not_found: true, fetched_at: now });
+        }
+      }
     }
   }
 
   // Merge with cache for any IDs that weren't in the fetch batches
   for (const id of endpointIds) {
-    if (!results[id]) results[id] = _pricingCache.get(id) || null;
+    if (!results[id]) {
+      const cached = _pricingCache.get(id);
+      results[id] = (cached && !cached.not_found) ? cached : null;
+    }
   }
 
   return results;
@@ -136,6 +185,8 @@ function uniqueArchivePath(fname) {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const pathname = url.pathname;
+
+  debugLog(`${req.method} ${pathname}${url.search ? '?' + url.search : ''}`);
 
   // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -403,18 +454,27 @@ const _estimateCache = new Map(); // key: "model:w:h" → { estimatedCost, curre
       const raw = await fetchPricingFromFal([model]);
       const priceInfo = raw[model];
 
+      // If no pricing available, return local estimate immediately
+      if (!priceInfo || priceInfo.unit_price == null) {
+        const fallback = computeLocalEstimate(priceInfo, 1);
+        _estimateCache.set(cacheKey, { data: fallback, ts: Date.now() });
+        return json(res, fallback);
+      }
+
       // Determine unit_quantity based on the billing unit
       let unitQuantity;
-      if (priceInfo?.unit === 'megapixels') {
+      if (priceInfo.unit === 'megapixels') {
         unitQuantity = Math.max(0.001, megapixels);
-      } else if (priceInfo?.unit === 'images' || priceInfo?.unit === 'units') {
+      } else if (priceInfo.unit === 'images' || priceInfo.unit === 'units') {
         unitQuantity = 1;
-      } else if (priceInfo?.unit === 'compute seconds') {
+      } else if (priceInfo.unit === 'compute seconds') {
         unitQuantity = 1;
       } else {
         unitQuantity = Math.max(0.001, megapixels);
       }
 
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
       const resp = await fetch('https://api.fal.ai/v1/models/pricing/estimate', {
         method: 'POST',
         headers: {
@@ -425,7 +485,9 @@ const _estimateCache = new Map(); // key: "model:w:h" → { estimatedCost, curre
           estimate_type: 'unit_price',
           endpoints: { [model]: { unit_quantity: parseFloat(unitQuantity.toFixed(6)) } },
         }),
+        signal: controller.signal,
       });
+      clearTimeout(timer);
 
       if (!resp.ok) {
         const errText = await resp.text();
@@ -471,6 +533,33 @@ function computeLocalEstimate(priceInfo, unitQuantity) {
     local: true,
   };
 }
+
+  // ─── API: debug/diagnostics ──────────────────────────────────────────
+  if (pathname === '/api/debug' && req.method === 'GET') {
+    const cacheEntries = [];
+    for (const [id, entry] of _pricingCache.entries()) {
+      cacheEntries.push({
+        id,
+        not_found: !!entry.not_found,
+        unit_price: entry.unit_price ?? null,
+        unit: entry.unit ?? null,
+        fetched_at: entry.fetched_at ? new Date(entry.fetched_at).toISOString() : null,
+        age_sec: entry.fetched_at ? Math.round((Date.now() - entry.fetched_at) / 1000) : null,
+      });
+    }
+    return json(res, {
+      debug: DEBUG,
+      falKey: FAL_KEY ? `Present (${FAL_KEY.length} chars)` : 'MISSING',
+      pricingCacheSize: _pricingCache.size,
+      pricingCache: cacheEntries.slice(0, 100), // limit to 100 entries
+      estimateCacheSize: _estimateCache.size,
+      estimateCacheKeys: [..._estimateCache.keys()].slice(0, 50),
+      outputDir: OUTPUT_DIR,
+      tileCount: existsSync(OUTPUT_DIR)
+        ? readdirSync(OUTPUT_DIR).filter(f => /\.(png|jpg|jpeg|webp)$/i.test(f)).length
+        : 0,
+    });
+  }
 
   // ─── API: test/health check ──────────────────────────────────────────
   if (pathname === '/api/test' && req.method === 'GET') {

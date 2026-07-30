@@ -476,6 +476,109 @@
       font-size: 16px;
       margin-left: 4px;
     }
+
+    /* ─── Debug panel ─────────────────────────────────────────── */
+    .debug-toggle {
+      position: fixed;
+      bottom: 12px;
+      right: 12px;
+      z-index: 2000;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 16px;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+      opacity: 0.6;
+    }
+    .debug-toggle:hover, .debug-toggle.active { opacity: 1; border-color: var(--yellow); color: var(--yellow); }
+    .debug-panel {
+      display: none;
+      position: fixed;
+      bottom: 56px;
+      right: 12px;
+      z-index: 1999;
+      width: 520px;
+      max-height: 60vh;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      flex-direction: column;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+    }
+    .debug-panel.open { display: flex; }
+    .debug-panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--yellow);
+    }
+    .debug-panel-body {
+      overflow-y: auto;
+      padding: 10px 14px;
+      font-size: 11px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      line-height: 1.5;
+      color: var(--muted);
+      max-height: 50vh;
+    }
+    .debug-section {
+      margin-bottom: 10px;
+    }
+    .debug-section h4 {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text);
+      margin-bottom: 4px;
+      padding-bottom: 3px;
+      border-bottom: 1px solid var(--border);
+    }
+    .debug-entry { padding: 2px 0; }
+    .debug-entry .key { color: var(--accent); }
+    .debug-entry .val { color: var(--green); }
+    .debug-entry .warn { color: var(--yellow); }
+    .debug-entry .err { color: var(--red); }
+    .debug-entry .muted { color: var(--muted); }
+    .debug-log {
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .debug-log .line {
+      padding: 1px 0;
+      border-bottom: 1px solid rgba(48,54,61,0.3);
+      white-space: nowrap;
+    }
+    .debug-log .line .ts { color: var(--muted); margin-right: 6px; }
+    .debug-actions {
+      display: flex;
+      gap: 6px;
+      padding: 8px 14px;
+      border-top: 1px solid var(--border);
+    }
+    .debug-actions button {
+      padding: 4px 10px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .debug-actions button:hover { border-color: var(--accent); }
   </style>
 </head>
 <body>
@@ -753,6 +856,41 @@
     </div>
   </div>
 
+  <!-- ─── Debug Panel ─────────────────────────────────────────────── -->
+  <button class="debug-toggle" id="debugToggle" title="Toggle debug panel (press ?)">🐛</button>
+  <div class="debug-panel" id="debugPanel">
+    <div class="debug-panel-header">
+      <span>🐛 Debug Panel</span>
+      <span style="font-weight:400;color:var(--muted);">press ? to toggle</span>
+    </div>
+    <div class="debug-panel-body">
+      <div class="debug-section">
+        <h4>📡 Server</h4>
+        <div id="debugServerInfo"><div class="debug-entry muted">Click refresh…</div></div>
+      </div>
+      <div class="debug-section">
+        <h4>💾 Client Pricing Cache</h4>
+        <div id="debugPricingCache"><div class="debug-entry muted">Click refresh…</div></div>
+      </div>
+      <div class="debug-section">
+        <h4>🔄 In-Flight Fetches</h4>
+        <div id="debugFetching"><div class="debug-entry muted">(none)</div></div>
+      </div>
+      <div class="debug-section">
+        <h4>❌ Recent Errors</h4>
+        <div id="debugLastError"><div class="debug-entry muted">(none)</div></div>
+      </div>
+      <div class="debug-section">
+        <h4>📋 Event Log</h4>
+        <div class="debug-log" id="debugLog"><div class="line muted">(empty)</div></div>
+      </div>
+    </div>
+    <div class="debug-actions">
+      <button id="debugRefreshBtn">🔄 Refresh</button>
+      <button id="debugClearBtn">🗑 Clear Log</button>
+    </div>
+  </div>
+
   <script>
     // ─── Constants ──────────────────────────────────────────────
     const STYLE_SUFFIX = 'completely flat 2D icon viewed from absolute 90-degree vertical top-down perspective, looking straight down from the sky, perfectly flat with zero depth, no side walls visible, no perspective lines, crisp clean 16-bit pixel art style, solid colors, sharp outlines, absolutely no 3D shading, no gradients, no depth, looks like a flat UI element or 2D map texture or floor emblem, isolated on a solid neutral background';
@@ -1025,14 +1163,14 @@
       },
       fishery: {
         name: 'Fishery',
-        prompt: 'top-down game asset, wooden fishing hut on stilts over blue water with nets and small boat docked alongside, isolated on dark transparent background, stylized fantasy art, sharp edges',
+        prompt: 'completely flat 2D game asset viewed from absolute 90-degree vertical top-down perspective, looking straight down from the sky, perfectly flat with zero depth, no side walls visible, no perspective lines, crisp clean stylized fantasy art, solid colors, sharp outlines, absolutely no 3D shading, no gradients, no depth, looks like a flat 2D map texture, wooden fishing hut on the right side and blue water surface on the left side, fishing nets laid flat on the dock, small rowboat shape seen from above, isolated on dark transparent background',
         color: '#5599bb',
         file: 'eco_fishery',
-        w: 256, h: 256,
+        w: 256, h: 128,
         variants: [
-          { label: 'Mk I',  file: 'eco_fishery', prompt: 'top-down game asset, simple wooden fishing hut on stilts over blue water, basic fishing nets and small rowboat, isolated on dark transparent background, stylized fantasy art, sharp edges' },
-          { label: 'Mk II', file: 'eco_fishery_1', prompt: 'top-down game asset, upgraded fishing station with larger wooden hut on stilts, improved nets draped over railing, motorized boat docked alongside, blue water below, isolated on dark transparent background, stylized fantasy art, sharp edges' },
-          { label: 'Mk III',file: 'eco_fishery_2', prompt: 'top-down game asset, advanced trawler fishing platform, large wooden deck extending over blue water, heavy-duty nets, big fishing trawler boat, crates of fish, isolated on dark transparent background, stylized fantasy art, sharp edges' },
+          { label: 'Mk I',  file: 'eco_fishery', prompt: 'completely flat 2D game asset viewed from absolute 90-degree vertical top-down perspective, looking straight down from the sky, perfectly flat with zero depth, no side walls visible, no perspective lines, crisp clean stylized fantasy art, solid colors, sharp outlines, absolutely no 3D shading, no gradients, no depth, looks like a flat 2D map texture, simple wooden fishing hut on the right side and blue water surface on the left side, basic fishing nets laid flat on a wooden dock, small rowboat shape seen from above, isolated on dark transparent background' },
+          { label: 'Mk II', file: 'eco_fishery_1', prompt: 'completely flat 2D game asset viewed from absolute 90-degree vertical top-down perspective, looking straight down from the sky, perfectly flat with zero depth, no side walls visible, no perspective lines, crisp clean stylized fantasy art, solid colors, sharp outlines, absolutely no 3D shading, no gradients, no depth, looks like a flat 2D map texture, larger wooden fishing hut on the right side and blue water surface on the left side with improved nets laid flat on an extended wooden dock, motorized fishing boat shape seen from above, isolated on dark transparent background' },
+          { label: 'Mk III',file: 'eco_fishery_2', prompt: 'completely flat 2D game asset viewed from absolute 90-degree vertical top-down perspective, looking straight down from the sky, perfectly flat with zero depth, no side walls visible, no perspective lines, crisp clean stylized fantasy art, solid colors, sharp outlines, absolutely no 3D shading, no gradients, no depth, looks like a flat 2D map texture, large wooden fishing hut building on the right side and blue water on the left side with an extended wooden dock, heavy-duty fishing nets laid flat across the dock, wooden crates of fish as flat rectangles from above, isolated on dark transparent background' },
         ],
       },
       harbor: {
@@ -1100,7 +1238,13 @@
     };
 
     // Pricing cache — populated from /api/pricing (fal.ai Platform API)
+    // Keys are endpoint IDs; values are the classified pricing objects.
+    // TTL: 5 minutes for "no info" entries, 1 hour for real pricing.
     const modelPricingCache = {};
+    const PRICING_CACHE_TTL_NOINFO = 300_000; // 5 min
+    const PRICING_CACHE_TTL_REAL = 3_600_000; // 1 hour
+    // Track in-flight fetches to avoid duplicate concurrent requests
+    const _pricingFetching = new Set();
 
     function pricingBadge(type) {
       const labels = { image: 'per img', 'per-unit': 'per unit', video: 'per vid', megapixel: 'per MP', gpu: 'GPU', unknown: 'no info' };
@@ -1108,19 +1252,40 @@
       return `<span class="pricing-badge ${t}">${labels[t] || labels.unknown}</span>`;
     }
 
+    /** Returns true if a cached pricing entry is still valid (not expired). */
+    function _isPricingFresh(entry) {
+      if (!entry || !entry._ts) return false;
+      const ttl = (entry.cost === '—') ? PRICING_CACHE_TTL_NOINFO : PRICING_CACHE_TTL_REAL;
+      return (Date.now() - entry._ts) < ttl;
+    }
+
     async function fetchPricing(ids) {
       if (ids.length === 0) return;
-      const uncached = ids.filter(id => !modelPricingCache[id]);
-      if (uncached.length === 0) return; // All cached
+      // Filter: skip IDs that are currently being fetched or have fresh cache
+      const uncached = ids.filter(id => {
+        if (_pricingFetching.has(id)) return false;
+        const cached = modelPricingCache[id];
+        if (cached && _isPricingFresh(cached)) return false;
+        return true;
+      });
+      if (uncached.length === 0) return;
+
+      // Mark as in-flight to avoid duplicate concurrent fetches
+      for (const id of uncached) _pricingFetching.add(id);
 
       try {
         const resp = await fetch(`/api/pricing?ids=${encodeURIComponent(uncached.join(','))}`);
         const data = await resp.json();
         if (data.prices) {
-          Object.assign(modelPricingCache, data.prices);
+          const now = Date.now();
+          for (const [id, p] of Object.entries(data.prices)) {
+            modelPricingCache[id] = { ...p, _ts: now };
+          }
         }
       } catch (err) {
         console.error('Failed to fetch pricing', err);
+      } finally {
+        for (const id of uncached) _pricingFetching.delete(id);
       }
     }
 
@@ -1141,11 +1306,14 @@
           return;
         }
         const data = await resp.json();
-        if (data.estimatedCost != null) {
+        if (data.estimatedCost != null && data.estimatedCost > 0) {
           const localNote = data.local ? ' <span style="font-size:9px;color:var(--yellow)">(est)</span>' : '';
           $estimateDisplay.innerHTML = `~$${data.estimatedCost.toFixed(4)} <span style="font-size:10px;color:var(--muted)">${data.currency}</span>${localNote}`;
+        } else if (data.local) {
+          // Local estimate with zero cost = pricing unavailable
+          $estimateDisplay.textContent = 'no estimate';
         } else if (data.estimatedCost === 0 && !data.local) {
-          // Pricing not available yet, don't show zero
+          // Server returned 0 but not local — pricing not available yet
           $estimateDisplay.textContent = 'loading…';
         } else {
           $estimateDisplay.textContent = '—';
@@ -1443,7 +1611,7 @@
       const modelId = $model.value;
       const p = modelPricingCache[modelId];
       let costStr, badge, type;
-      if (p && p.cost && p.cost !== '—') {
+      if (p && _isPricingFresh(p) && p.cost && p.cost !== '—') {
         costStr = `${p.cost}${p.unit || ''}`;
         type = p.type || 'unknown';
         badge = pricingBadge(type);
@@ -1451,11 +1619,10 @@
         costStr = '?';
         type = 'unknown';
         badge = pricingBadge('unknown');
-        // Lazy-fetch pricing for unknown models
+        // Lazy-fetch pricing for unknown/stale models
         fetchPricing([modelId]).then(() => updateModelInfo());
       }
       $modelInfo.innerHTML = `Cost: <span class="price">${costStr}</span>${badge} &bull; Speed: ?`;
-      // Don't auto-estimate here — caller decides
     }
 
     // ─── Model Browser ──────────────────────────────────────────
@@ -1627,9 +1794,8 @@
         $model.appendChild(opt);
         $model.value = modelId;
       }
-      updateModelInfo();
-      scheduleEstimate();
-      // Ensure pricing is cached for the selected model
+      // Setting $model.value triggers the 'change' event which calls
+      // updateModelInfo() + scheduleEstimate(). Also eagerly fetch pricing.
       fetchPricing([modelId]).then(() => updateModelInfo());
     }
 
@@ -1815,6 +1981,147 @@
     document.addEventListener('mouseout', () => $tooltip.classList.remove('visible'));
 
     init();
+
+    // ─── Debug Panel ───────────────────────────────────────────
+    const _debugLog = [];
+    const MAX_DEBUG_LOG = 200;
+
+    function _debugAddLog(level, msg) {
+      const ts = new Date().toLocaleTimeString();
+      _debugLog.push({ ts, level, msg });
+      if (_debugLog.length > MAX_DEBUG_LOG) _debugLog.shift();
+      if ($debugPanel.classList.contains('open')) _debugRenderLog();
+    }
+
+    function _debugRenderLog() {
+      const lines = _debugLog.slice(-50).map(e => {
+        const cls = e.level === 'error' ? 'err' : e.level === 'warn' ? 'warn' : 'muted';
+        return `<div class="line"><span class="ts">${e.ts}</span><span class="${cls}">${e.msg}</span></div>`;
+      }).join('');
+      $debugLog.innerHTML = lines || '<div class="line muted">(empty)</div>';
+      $debugLog.scrollTop = $debugLog.scrollHeight;
+    }
+
+    function _debugDumpCache() {
+      const entries = [];
+      for (const [id, p] of Object.entries(modelPricingCache)) {
+        const age = p._ts ? Math.round((Date.now() - p._ts) / 1000) + 's' : '?';
+        entries.push(`<span class="key">${id}</span> → <span class="val">${p.cost || '—'}${p.unit || ''}</span> <span class="muted">(${age} ago, ${p.type})</span>`);
+      }
+      return entries.length > 0
+        ? entries.slice(0, 30).map(e => `<div class="debug-entry">${e}</div>`).join('')
+        + (entries.length > 30 ? `<div class="debug-entry muted">... and ${entries.length - 30} more</div>` : '')
+        : '<div class="debug-entry muted">(empty)</div>';
+    }
+
+    async function _debugRefresh() {
+      $debugPricingCache.innerHTML = _debugDumpCache();
+      $debugFetching.innerHTML = _pricingFetching.size > 0
+        ? [..._pricingFetching].map(id => `<div class="debug-entry"><span class="key">${id}</span> <span class="warn">in-flight</span></div>`).join('')
+        : '<div class="debug-entry muted">(none)</div>';
+      $debugLastError.innerHTML = _debugDumpLastError();
+      try {
+        const resp = await fetch('/api/debug');
+        const data = await resp.json();
+        $debugServerInfo.innerHTML = [
+          `Debug mode: <span class="${data.debug ? 'val' : 'muted'}">${data.debug}</span>`,
+          `FAL key: <span class="${data.falKey.includes('Present') ? 'val' : 'err'}">${data.falKey}</span>`,
+          `Server pricing cache: <span class="val">${data.pricingCacheSize} entries</span>`,
+          `Estimate cache: <span class="val">${data.estimateCacheSize} entries</span>`,
+          `Tile count: <span class="val">${data.tileCount}</span>`,
+        ].map(s => `<div class="debug-entry">${s}</div>`).join('');
+        const notFound = data.pricingCache.filter(e => e.not_found);
+        if (notFound.length > 0) {
+          $debugServerInfo.innerHTML += `<div class="debug-entry warn">${notFound.length} not-found markers</div>`;
+        }
+      } catch (err) {
+        $debugServerInfo.innerHTML = `<div class="debug-entry err">Failed: ${err.message}</div>`;
+      }
+    }
+
+    function _debugDumpLastError() {
+      const errors = _debugLog.filter(e => e.level === 'error').slice(-5);
+      return errors.length > 0
+        ? errors.map(e => `<div class="debug-entry err">[${e.ts}] ${e.msg}</div>`).join('')
+        : '<div class="debug-entry muted">(no errors)</div>';
+    }
+
+    // Override fetchPricing to add debug logging
+    const _origFetchPricing = fetchPricing;
+    fetchPricing = async function(ids) {
+      _debugAddLog('info', `fetchPricing(${ids.length} ids): ${ids.slice(0, 3).join(', ')}${ids.length > 3 ? '...' : ''}`);
+      try {
+        await _origFetchPricing(ids);
+        const found = ids.filter(id => modelPricingCache[id]?.cost !== '—').length;
+        _debugAddLog('info', `fetchPricing done: ${found}/${ids.length} have pricing`);
+      } catch (err) {
+        _debugAddLog('error', `fetchPricing failed: ${err.message}`);
+      }
+    };
+
+    // Override fetchEstimate to add debug logging
+    const _origFetchEstimate = fetchEstimate;
+    fetchEstimate = async function() {
+      const model = $model.value;
+      _debugAddLog('info', `fetchEstimate for ${model}`);
+      try {
+        await _origFetchEstimate();
+      } catch (err) {
+        _debugAddLog('error', `fetchEstimate failed: ${err.message}`);
+      }
+    };
+
+    // Intercept global fetch errors for debugging
+    const _origFetch = window.fetch;
+    window.fetch = function(...args) {
+      const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || 'unknown';
+      const start = Date.now();
+      return _origFetch.apply(this, args).then(resp => {
+        const ms = Date.now() - start;
+        if (!resp.ok) {
+          _debugAddLog('warn', `HTTP ${resp.status} ${url.split('?')[0]} (${ms}ms)`);
+        } else if (url.startsWith('/api/')) {
+          _debugAddLog('info', `HTTP ${resp.status} ${url.split('?')[0]} (${ms}ms)`);
+        }
+        return resp;
+      }).catch(err => {
+        _debugAddLog('error', `Fetch failed: ${url.split('?')[0]} — ${err.message}`);
+        throw err;
+      });
+    };
+
+    // DOM refs
+    const $debugToggle = document.getElementById('debugToggle');
+    const $debugPanel = document.getElementById('debugPanel');
+    const $debugLog = document.getElementById('debugLog');
+    const $debugPricingCache = document.getElementById('debugPricingCache');
+    const $debugFetching = document.getElementById('debugFetching');
+    const $debugServerInfo = document.getElementById('debugServerInfo');
+    const $debugLastError = document.getElementById('debugLastError');
+
+    $debugToggle.addEventListener('click', () => {
+      const open = $debugPanel.classList.toggle('open');
+      $debugToggle.classList.toggle('active', open);
+      if (open) {
+        _debugRenderLog();
+        _debugRefresh();
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === '?' && !e.target.closest('input,textarea,select')) {
+        e.preventDefault();
+        $debugToggle.click();
+      }
+    });
+
+    document.getElementById('debugRefreshBtn').addEventListener('click', _debugRefresh);
+    document.getElementById('debugClearBtn').addEventListener('click', () => {
+      _debugLog.length = 0;
+      _debugRenderLog();
+    });
+
+    _debugAddLog('info', 'Debug panel initialized');
   </script>
 </body>
 </html>
