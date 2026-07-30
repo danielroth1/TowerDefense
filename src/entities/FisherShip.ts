@@ -38,14 +38,15 @@ export class FisherShip extends Phaser.GameObjects.Container {
   private grid: { type: string }[][] = [];
 
   constructor(scene: Phaser.Scene, fishery: EconomyBuilding, grid: { type: string }[][]) {
-    // Spawn at the water-side of the fishery based on rotation
+    // Spawn at the water-side of the fishery based on rotation.
+    // placeEconomyBuilding sets: 0=water right, 90=water above, 180=water left, 270=water below.
     let spawnCol = fishery.gridCol;
     let spawnRow = fishery.gridRow;
     switch (fishery.rotationDeg) {
       case 0:   spawnCol = fishery.gridCol + 1; break; // water right
       case 180: spawnCol = fishery.gridCol - 1; break; // water left
-      case 90:  spawnRow = fishery.gridRow + 1; break; // water below
-      case 270: spawnRow = fishery.gridRow - 1; break; // water above
+      case 90:  spawnRow = fishery.gridRow - 1; break; // water above
+      case 270: spawnRow = fishery.gridRow + 1; break; // water below
     }
     const cx = (spawnCol + 0.5) * TILE_SIZE;
     const cy = (spawnRow + 0.5) * TILE_SIZE;
@@ -116,8 +117,8 @@ export class FisherShip extends Phaser.GameObjects.Container {
     switch (this.fishery.rotationDeg) {
       case 0:   baseCol = this.fishery.gridCol + 1; break; // water right
       case 180: baseCol = this.fishery.gridCol - 1; break; // water left
-      case 90:  baseRow = this.fishery.gridRow + 1; break; // water below
-      case 270: baseRow = this.fishery.gridRow - 1; break; // water above
+      case 90:  baseRow = this.fishery.gridRow - 1; break; // water above
+      case 270: baseRow = this.fishery.gridRow + 1; break; // water below
     }
 
     // BFS to find water cells, preferring deeper water (further from land)
@@ -205,10 +206,10 @@ export class FisherShip extends Phaser.GameObjects.Container {
           let retCol = this.fishery.gridCol;
           let retRow = this.fishery.gridRow;
           switch (this.fishery.rotationDeg) {
-            case 0:   retCol = this.fishery.gridCol + 1; break;
-            case 180: retCol = this.fishery.gridCol - 1; break;
-            case 90:  retRow = this.fishery.gridRow + 1; break;
-            case 270: retRow = this.fishery.gridRow - 1; break;
+            case 0:   retCol = this.fishery.gridCol + 1; break; // water right
+            case 180: retCol = this.fishery.gridCol - 1; break; // water left
+            case 90:  retRow = this.fishery.gridRow - 1; break; // water above
+            case 270: retRow = this.fishery.gridRow + 1; break; // water below
           }
           this.targetX = (retCol + 0.5) * TILE_SIZE;
           this.targetY = (retRow + 0.5) * TILE_SIZE;

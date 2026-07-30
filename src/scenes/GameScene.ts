@@ -1400,6 +1400,29 @@ export class GameScene extends Phaser.Scene {
     this.sfx.play('tower_place');
     const building = new EconomyBuilding(this, col, row, type);
     this.economyBuildings.push(building);
+
+    const def = ECO_BUILDING_DEFS[type];
+
+    // Detect straddle orientation BEFORE creating ships (FisherShip constructor
+    // reads fishery.rotationDeg for spawn position, fishing spot, and return target).
+    if (def.placement.straddlesWater) {
+      const dirs: Array<[number, number, number]> = [
+        [1, 0, 270],  // water bottom → rotation 270 (water top, land bottom)
+        [-1, 0, 90],  // water top → rotation 90 (land top, water bottom)
+        [0, 0, 0],    // water left → rotation 180 (water left, land right)
+        [0, 1, 180],  // water right → rotation 0 (land left, water right)
+      ];
+
+      for (const [dr, dc, rot] of dirs) {
+        const nr = row + dr, nc = col + dc;
+        if (nr >= 0 && nr < GRID_ROWS && nc >= 0 && nc < GRID_COLS
+            && this.mapData.grid[nr][nc].type === 'ground') {
+          building.rotationDeg = rot;
+          break;
+        }
+      }
+    }
+
     this.economySim.addBuilding(building);
     this.transportSys.setBuildings(this.economyBuildings);
 
@@ -1412,56 +1435,27 @@ export class GameScene extends Phaser.Scene {
       if (this.uiCam) this.uiCam.ignore(ship);
     }
 
-    const def = ECO_BUILDING_DEFS[type];
-
     if (def.placement.straddlesWater) {
-      // Detect orientation from the clicked land cell + adjacent water.
-      // Format: [dr, dc, rotationDeg] where (row+dr, col+dc) is the water cell.
-      // Rotation semantics (EconomyBuilding doc):
-      //   0   = land-left/water-right  → water at col+1
-      //   90  = land-top/water-bottom  → water at row+1
-      //   180 = water-left/land-right  → water at col-1
-      //   270 = water-top/land-bottom  → water at row-1
-      // FisherShip uses the same rotation to determine spawn/return cells.
-      const dirs: Array<[number, number, number]> = [
-        [1, 0, 90],    // water below (row+1) → rot 90  (land-top/water-bottom)
-        [-1, 0, 270],  // water above (row-1) → rot 270 (water-top/land-bottom)
-        [0, -1, 180],  // water left  (col-1) → rot 180 (water-left/land-right)
-        [0, 1, 0],     // water right (col+1) → rot 0   (land-left/water-right)
-      ];
-
-      for (const [dr, dc, rot] of dirs) {
-        const nr = row + dr, nc = col + dc;
-        if (nr >= 0 && nr < GRID_ROWS && nc >= 0 && nc < GRID_COLS
-            && this.mapData.grid[nr][nc].type === 'ground') {
-          building.rotationDeg = rot;
-          break;
-        }
-      }
 
       // Mark land tile as path (occupied)
       this.mapData.grid[row][col].type = 'path';
       this.refreshTileSprite(row, col);
 
       // Reposition container to the correct center for each orientation.
-      // Constructor default (rot 0): center at (col+1, row+0.5) for width=2.
-      // After rotation, the visual span changes, so we adjust the world position.
-      //   rot 0:   spans col→col+1 horizontally → center (col+1, row+0.5) [default]
-      //   rot 180: spans col-1→col horizontally → center (col, row+0.5)
-      //   rot 90:  spans row→row+1 vertically   → center (col+0.5, row+1)
-      //   rot 270: spans row-1→row vertically   → center (col+0.5, row)
+      // The constructor assumes (col, col+1) is the occupied span, but for
+      // 180/90/270 the building extends in a different direction.
       switch (building.rotationDeg) {
-        case 0: // land-left/water-right — default, no reposition needed
+        case 0: // water left, Land right: center of (col, col+1) — default ✓
+          building.setPosition((col - 1.0) * TILE_SIZE, (row - 0.5) * TILE_SIZE);
+          break;
+        case 180: // Water right, land left: center of (col-1, col)
           building.setPosition((col + 1.0) * TILE_SIZE, (row + 0.5) * TILE_SIZE);
           break;
-        case 180: // water-left/land-right — shift left by 1 cell
-          building.setPosition(col * TILE_SIZE, (row + 0.5) * TILE_SIZE);
-          break;
-        case 90: // land-top/water-bottom — vertical span, center at row+1
-          building.setPosition((col + 0.5) * TILE_SIZE, (row + 1.0) * TILE_SIZE);
-          break;
-        case 270: // water-top/land-bottom — vertical span, center at row
+        case 90: // Water top, land below: center of two vertical cells at column
           building.setPosition((col + 0.5) * TILE_SIZE, row * TILE_SIZE);
+          break;
+        case 270: // Water bottom, land top: center of two vertical cells
+          building.setPosition((col + 0.5) * TILE_SIZE, (row + 1.0) * TILE_SIZE);
           break;
       }
 
