@@ -908,9 +908,11 @@ export class GameScene extends Phaser.Scene {
     const upgKey = HOTKEYS.actions.upgradeEvolve0;
     if (upgKey) {
       kb.on('keydown-' + upgKey, () => {
-        if (this.selectedTower?.canEvolve()) {
+        if (this.selectedEcoBuilding) {
+          this.bottomBar.onUpgradeEco?.();
+        } else if (this.selectedTower?.canEvolve()) {
           this.bottomBar.onEvolve?.(0);
-        } else {
+        } else if (this.selectedTower) {
           this.bottomBar.onUpgrade?.();
         }
       });
@@ -920,6 +922,17 @@ export class GameScene extends Phaser.Scene {
       kb.on('keydown-' + evo1Key, () => {
         if (this.selectedTower?.canEvolve()) {
           this.bottomBar.onEvolve?.(1);
+        }
+      });
+    }
+    // Sell selected tower or economy building
+    const sellKey = HOTKEYS.actions.sell;
+    if (sellKey) {
+      kb.on('keydown-' + sellKey, () => {
+        if (this.selectedEcoBuilding) {
+          this.bottomBar.onSellEco?.();
+        } else if (this.selectedTower) {
+          this.bottomBar.onSell?.();
         }
       });
     }
@@ -1409,8 +1422,8 @@ export class GameScene extends Phaser.Scene {
       const dirs: Array<[number, number, number]> = [
         [1, 0, 270],  // water bottom → rotation 270 (water top, land bottom)
         [-1, 0, 90],  // water top → rotation 90 (land top, water bottom)
-        [0, 0, 0],    // water left → rotation 180 (water left, land right)
-        [0, 1, 180],  // water right → rotation 0 (land left, water right)
+        [0, 0, 0],    // water left → rotation 0 (water left, land right)
+        [0, 1, 180],  // water right → rotation 180 (land left, water right)
       ];
 
       for (const [dr, dc, rot] of dirs) {
