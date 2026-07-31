@@ -22,7 +22,7 @@ import { HUD } from '../ui/HUD';
 import { BottomBar } from '../ui/BottomBar';
 import { SoundSystem } from '../systems/SoundSystem';
 import { generateCityDecorations, type DecorationPlacement } from '../systems/CityDecorator';
-import { generateCityRoads, drawCityRoads } from '../systems/CityRoadNetwork';
+import { drawCityRoads, generateCityRoadsIncremental, type RoadNetworkState } from '../systems/CityRoadNetwork';
 import { PerfTest } from '../systems/PerfTest';
 import { EnemyGrid } from '../systems/EnemyGrid';
 import { HPBarPool } from '../systems/HPBarPool';
@@ -117,6 +117,14 @@ export class GameScene extends Phaser.Scene {
   private uiGroup!: Phaser.GameObjects.Group;
   private wallDecorations: Phaser.GameObjects.Image[] = [];
   private cityRoadGraphics: Phaser.GameObjects.Graphics | null = null;
+
+  // Cart pathfinding debug overlay (toggled with V in debug mode)
+  private cartDebugGraphics: Phaser.GameObjects.Graphics | null = null;
+  private cartDebugText: Phaser.GameObjects.Text | null = null;
+
+  /** Persistent road network state for incremental updates.
+   *  Stored so that unchanged road segments retain their noise. */
+  private roadNetworkState: RoadNetworkState | null = null;
 
   // Cells occupied by city decorations — blocks tower placement
   private decorationBlockedCells: Set<string> = new Set();
@@ -547,17 +555,21 @@ export class GameScene extends Phaser.Scene {
 
     // Generate decorative roads between buildings
     if (result.placements.length >= 2) {
-      const roadResult = generateCityRoads(
+      const { result: roadResult, state } = generateCityRoadsIncremental(
         this.mapData.grid,
         result.placements,
         result.blockedCells,
         this.mapData.seed,
+        null, // no previous state — first generation
       );
+      this.roadNetworkState = state;
       if (roadResult.roads.length > 0) {
         const roadG = this.add.graphics().setDepth(0.14);
         const roadRng = createPRNG(this.mapData.seed + 0xC0DE);
         drawCityRoads(roadG, roadResult, roadRng);
         this.cityRoadGraphics = roadG;
+        // Wire road grid to transport system for cart pathfinding
+        this.transportSys.setRoadGrid(state.roadGrid);
       }
     }
   }
@@ -631,7 +643,7 @@ export class GameScene extends Phaser.Scene {
       return result;
     };
 
-    this.hud = new HUD(this);
+    this.hud = new HUD(this, this._debug, this.weatherSystem);
     this.bottomBar = new BottomBar(this, this.economy, this.economySim);
     this.createFloatingAbilities();
 
@@ -883,6 +895,17 @@ export class GameScene extends Phaser.Scene {
         this.placingBarricade = true; this.placingTower = null;
       }
     });
+    // Cart pathfinding debug overlay (debug mode only)
+    if (this._debug) {
+      kb.on('keydown-V', () => {
+        this.transportSys.cartDebugEnabled = !this.transportSys.cartDebugEnabled;
+        this.hud.setCartDebugLabel(this.transportSys.cartDebugEnabled);
+        if (!this.transportSys.cartDebugEnabled) {
+          this.cartDebugGraphics?.clear();
+          if (this.cartDebugText) this.cartDebugText.setVisible(false);
+        }
+      });
+    }
     // Tower hotkeys — configured in src/data/hotkeys.json
     TOWER_TYPES_ORDERED.forEach((towerType) => {
       const hk = HOTKEYS.tower[towerType];
@@ -966,7 +989,7 @@ export class GameScene extends Phaser.Scene {
       if (this.currentBoss === enemy) this.currentBoss = null;
       this.sfx.play(enemy.def.isBoss ? 'boss_die' : 'enemy_die');
       const goldMult = this.comboSystem.multiplier * this.weatherSystem.mods.goldEarnMult;
-      this.economy.earn(Math.round(enemy.reward * goldMult));
+      this.economy.earnFromKills(Math.round(enemy.reward * goldMult));
       this.comboSystem.onKill();
       this.totalKills++;
       this.waveManager.onEnemyDied();
@@ -1058,6 +1081,16 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.events.on('toggle_pause', () => this.togglePause());
+
+    // Cart pathfinding debug toggle (from HUD settings or V hotkey)
+    this.events.on('toggle_cart_debug', () => {
+      this.transportSys.cartDebugEnabled = !this.transportSys.cartDebugEnabled;
+      this.hud.setCartDebugLabel(this.transportSys.cartDebugEnabled);
+      if (!this.transportSys.cartDebugEnabled) {
+        this.cartDebugGraphics?.clear();
+        if (this.cartDebugText) this.cartDebugText.setVisible(false);
+      }
+    });
   }
 
   // ─── Input handlers ──────────────────────────────────────────────────────
@@ -1422,7 +1455,7 @@ export class GameScene extends Phaser.Scene {
       const dirs: Array<[number, number, number]> = [
         [1, 0, 270],  // water bottom → rotation 270 (water top, land bottom)
         [-1, 0, 90],  // water top → rotation 90 (land top, water bottom)
-        [0, 0, 0],    // water left → rotation 0 (water left, land right)
+        [0, -1, 0],   // water left → rotation 0 (water left, land right)
         [0, 1, 180],  // water right → rotation 180 (land left, water right)
       ];
 
@@ -1491,9 +1524,9 @@ export class GameScene extends Phaser.Scene {
     this.regenerateAllRoads();
   }
 
-  /** Destroy existing road graphics and regenerate from all buildings.
-   *  Uses the stored decoPlacements from initial map creation (not re-running
-   *  CityDecorator, which would produce wrong results on the mutated grid). */
+  /** Incrementally update decorative roads when an economy building is
+   *  added or removed. Only changed road segments get new noise —
+   *  unchanged segments are preserved from the previous state. */
   private regenerateAllRoads(): void {
     // Collect economy building positions as DecorationPlacement-compatible objects
     const ecoPlacements: DecorationPlacement[] =
@@ -1513,14 +1546,16 @@ export class GameScene extends Phaser.Scene {
     const allBlocked = new Set(this.decorationBlockedCells);
 
     if (allPlacements.length >= 2) {
-      const roadResult = generateCityRoads(
+      const { result: roadResult, state } = generateCityRoadsIncremental(
         this.mapData.grid,
         allPlacements,
         allBlocked,
         this.mapData.seed,
+        this.roadNetworkState,
       );
+      this.roadNetworkState = state;
       if (roadResult.roads.length > 0) {
-        // Destroy old road graphics
+        // Destroy old road graphics and redraw
         if (this.cityRoadGraphics) {
           this.cityRoadGraphics.destroy();
           this.cityRoadGraphics = null;
@@ -1530,6 +1565,8 @@ export class GameScene extends Phaser.Scene {
         drawCityRoads(roadG, roadResult, roadRng);
         this.cityRoadGraphics = roadG;
         if (this.uiCam) this.uiCam.ignore(roadG);
+        // Wire updated road grid to transport system
+        this.transportSys.setRoadGrid(state.roadGrid);
       }
     }
   }
@@ -1723,6 +1760,146 @@ export class GameScene extends Phaser.Scene {
       this.physics.resume();
     }
     this.hud.setPaused(this.isPaused);
+  }
+
+  // ─── Cart Pathfinding Debug ──────────────────────────────────────────────
+
+  /**
+   * Renders the A* debug overlay when cartDebugEnabled is on.
+   * Shows per-cell cost weights as a colour heatmap plus the chosen path.
+   *
+   * Colour key:
+   *   ■ Bright green  — road cell (cost 0.1)
+   *   ■ Yellow        — enemy path cell (cost 0.5)
+   *   ■ Orange        — grass / buildable (cost 1.0)
+   *   ■ Dark blue     — water / blocked (unwalkable)
+   *   ■ Cyan outline  — cell on the computed A* path
+   *   ■ White dot     — start / end cell
+   *   ■ Dim           — cell not visited by A*
+   */
+  private renderCartDebug(): void {
+    const enabled = this.transportSys.cartDebugEnabled;
+
+    if (!enabled) {
+      if (this.cartDebugGraphics) this.cartDebugGraphics.clear();
+      if (this.cartDebugText) this.cartDebugText.setVisible(false);
+      return;
+    }
+
+    const data = this.transportSys.cartDebugData;
+
+    // Lazy-init graphics
+    if (!this.cartDebugGraphics) {
+      this.cartDebugGraphics = this.add.graphics().setDepth(10);
+      if (this.uiCam) this.uiCam.ignore(this.cartDebugGraphics);
+    }
+    if (!this.cartDebugText) {
+      this.cartDebugText = this.add.text(0, 0, '', {
+        fontSize: '11px', fontFamily: 'monospace', color: '#ffffff',
+        stroke: '#000000', strokeThickness: 2,
+      }).setDepth(11).setScrollFactor(0);
+    }
+    this.cartDebugText.setVisible(true);
+
+    const g = this.cartDebugGraphics;
+    g.clear();
+
+    if (!data) {
+      this.cartDebugText.setText('🛒 A* Debug [V] — waiting for next cart delivery…');
+      return;
+    }
+
+    const TS = TILE_SIZE;
+
+    for (let r = 0; r < GRID_ROWS; r++) {
+      for (let c = 0; c < GRID_COLS; c++) {
+        const idx = r * GRID_COLS + c;
+        const cost = data.costGrid[idx];
+        const cell = data.walkableGrid[idx];
+
+        let fillColor: number;
+        let fillAlpha = 0.45;
+
+        if (cost === 0) {
+          // Not visited by A* — dim
+          fillColor = 0x334466;
+          fillAlpha = 0.10;
+        } else if (data.roadGrid[idx] === 1) {
+          // Road cell (cost 0.1) → bright green
+          fillColor = 0x22cc44;
+        } else if (cell === 2) {
+          // Enemy path cell (cost 0.5) → yellow
+          fillColor = 0xcccc22;
+        } else if (cell === 1) {
+          // Grass / buildable (cost 1.0) → orange
+          fillColor = 0xcc7722;
+        } else {
+          // Blocked (water) → dark blue
+          fillColor = 0x2244aa;
+        }
+
+        const x = c * TS, y = r * TS;
+        g.fillStyle(fillColor, fillAlpha);
+        g.fillRect(x + 1, y + 1, TS - 2, TS - 2);
+
+        if (data.pathCells.has(`${r},${c}`)) {
+          g.lineStyle(2, 0x00ffff, 0.9);
+          g.strokeRect(x + 2, y + 2, TS - 4, TS - 4);
+        }
+
+        const isStart = (r === data.sr && c === data.sc);
+        const isEnd   = (r === data.er && c === data.ec);
+        if (isStart || isEnd) {
+          g.fillStyle(isStart ? 0xffffff : 0xff4444, 0.9);
+          g.fillCircle(x + TS / 2, y + TS / 2, 5);
+        }
+      }
+    }
+
+    // Path polyline
+    if (data.pathCells.size > 0) {
+      g.lineStyle(2, 0x00ffff, 0.8);
+      const pathPts: {x: number, y: number}[] = [];
+      const visited = new Set<string>();
+      let cr = data.er, cc = data.ec;
+      while (!(cr === data.sr && cc === data.sc)) {
+        const key = `${cr},${cc}`;
+        if (visited.has(key)) break;
+        visited.add(key);
+        pathPts.push({ x: cc * TS + TS / 2, y: cr * TS + TS / 2 });
+        let bestR = -1, bestC = -1, bestCost = Infinity;
+        for (const [dr, dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+          const nr = cr + dr, nc = cc + dc;
+          if (nr < 0 || nr >= GRID_ROWS || nc < 0 || nc >= GRID_COLS) continue;
+          const nk = `${nr},${nc}`;
+          if (!data.pathCells.has(nk) || visited.has(nk)) continue;
+          const nc2 = data.costGrid[nr * GRID_COLS + nc];
+          if (nc2 > 0 && nc2 < bestCost) { bestCost = nc2; bestR = nr; bestC = nc; }
+        }
+        if (bestR < 0) break;
+        cr = bestR; cc = bestC;
+      }
+      pathPts.push({ x: data.sc * TS + TS / 2, y: data.sr * TS + TS / 2 });
+      pathPts.reverse();
+
+      if (pathPts.length > 1) {
+        g.lineStyle(2, 0x00ffff, 0.9);
+        g.beginPath();
+        g.moveTo(pathPts[0].x, pathPts[0].y);
+        for (let i = 1; i < pathPts.length; i++) {
+          g.lineTo(pathPts[i].x, pathPts[i].y);
+        }
+        g.strokePath();
+      }
+    }
+
+    // Legend
+    this.cartDebugText.setText([
+      '🛒 A* Debug  [V]',
+      '■ Green=road  ■ Yel=path  ■ Org=grass  ■ Blue=water',
+      '■ Cyan=route  ○ White=start  ○ Red=end',
+      data.hadRoadGrid ? '✓ Road grid active' : '✗ NO road grid',
+    ].join('\n'));
   }
 
   // ─── Minimap ─────────────────────────────────────────────────────────────
@@ -2122,6 +2299,7 @@ export class GameScene extends Phaser.Scene {
     this.economy.update(delta);
     this.economySim.update(delta);
     this.transportSys.update(delta);
+    this.renderCartDebug();
     this.waveManager.update(delta);
     this.abilitySystem.update(delta);
     this.weatherSystem.update(delta);
@@ -2190,10 +2368,9 @@ export class GameScene extends Phaser.Scene {
       this.hero.level,
     );
 
-    this.hud.updatePerfStats(
-      this.enemyGroup.countActive() + this.flyerGroup.countActive(),
-      this.towerGroup.countActive(),
-      this.projectileGroup.countActive(),
+    this.hud.updateGeneralStats(
+      this.economy.incomeFromEconomy,
+      this.economy.incomeFromKills,
     );
 
     this.updateMinimap();

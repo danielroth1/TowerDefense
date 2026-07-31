@@ -228,7 +228,7 @@ export class EconomySimulation {
         const resource = this.marketResources.get(b);
         const baseValue = resource ? RESOURCE_GOLD_VALUES[resource] : def.goldPerUnit;
         const gold = Math.floor(baseValue * b.valueMultiplier);
-        this.economy.earn(gold);
+        this.economy.earnFromEconomy(gold);
         this.emit({
           type: 'delivered',
           buildingType: b.buildingType,

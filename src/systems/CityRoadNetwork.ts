@@ -18,6 +18,9 @@ import { buildWalkabilityGrid, findCartPath } from './CartPathfinder';
  *   6. Smooth all paths with Chaikin subdivision + noise
  *
  * Roads avoid water and building cells but can cross enemy paths.
+ *
+ * Incremental updates: when buildings are added, unchanged road segments
+ * preserve their existing noise so the network doesn't visually shift.
  */
 
 // ─── Public types ───────────────────────────────────────────────────────────
@@ -41,6 +44,20 @@ export interface JunctionNode {
 export interface CityRoadResult {
   roads: CityRoad[];
   junctions: JunctionNode[];
+}
+
+/**
+ * Persistent state for incremental road network updates.
+ * Stored in GameScene and passed to generateCityRoadsIncremental()
+ * so that unchanged road segments retain their existing noise.
+ */
+export interface RoadNetworkState {
+  roads: CityRoad[];
+  /** Per-cell boolean: 1 = road present, 0 = no road. */
+  roadGrid: Uint8Array;
+  /** Cell signatures for each road (sorted "r,c" keys joined by "|").
+   *  Used to match old→new segments by A* path identity. */
+  signatures: string[];
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -82,6 +99,41 @@ class UnionFind {
 // ─── A* pathfinding delegated to CartPathfinder ────────────────────────────
 // findCartPath() from CartPathfinder is used for all A* calls.
 
+// ─── Road grid helper ───────────────────────────────────────────────────────
+
+/**
+ * Rasterize road polylines onto a per-cell boolean grid.
+ * A cell is marked as "road" if any road point falls within
+ * ROAD_HALF_WIDTH * 2 pixels of its center.
+ */
+export function buildRoadGrid(roads: CityRoad[]): Uint8Array {
+  const grid = new Uint8Array(GRID_ROWS * GRID_COLS);
+  const halfTile = TILE_SIZE / 2;
+  const radius = ROAD_HALF_WIDTH * 3; // generous coverage for rendered width
+
+  for (const road of roads) {
+    for (const pt of road.points) {
+      const cr = Math.round((pt.y - halfTile) / TILE_SIZE);
+      const cc = Math.round((pt.x - halfTile) / TILE_SIZE);
+      // Mark the cell and its neighbors (road can span boundaries)
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          const r = cr + dr, c = cc + dc;
+          if (r >= 0 && r < GRID_ROWS && c >= 0 && c < GRID_COLS) {
+            const cx = c * TILE_SIZE + halfTile;
+            const cy = r * TILE_SIZE + halfTile;
+            const dx = pt.x - cx, dy = pt.y - cy;
+            if (dx * dx + dy * dy < radius * radius) {
+              grid[r * GRID_COLS + c] = 1;
+            }
+          }
+        }
+      }
+    }
+  }
+  return grid;
+}
+
 // ─── Smoothing ──────────────────────────────────────────────────────────────
 
 /** Chaikin corner-cutting subdivision (one iteration). */
@@ -117,39 +169,65 @@ function addNoise(points: Vec2[], rng: () => number, amp: number): void {
   }
 }
 
-// ─── Main algorithm ─────────────────────────────────────────────────────────
+// ─── Cell signature helper ──────────────────────────────────────────────────
 
-export function generateCityRoads(
+/** Build a stable string key from the set of grid cells a path covers.
+ *  Used to compare road segments for identity (same A* path → same key). */
+function segmentCellSignature(path: Vec2[]): string {
+  const cells = new Set<string>();
+  const halfTile = TILE_SIZE / 2;
+  for (const pt of path) {
+    const cr = Math.round((pt.y - halfTile) / TILE_SIZE);
+    const cc = Math.round((pt.x - halfTile) / TILE_SIZE);
+    cells.add(`${cr},${cc}`);
+  }
+  return [...cells].sort().join('|');
+}
+
+// ─── Core algorithm (no noise/smoothing) ────────────────────────────────────
+
+interface RawSegment {
+  path: Vec2[];
+  buildingIdx: number;
+  junctionIdx: number;
+  /** Stable cell-set key for matching old→new segments. */
+  signature: string;
+}
+
+interface RawNetwork {
+  segments: RawSegment[];
+  mergedIntersections: Vec2[];
+}
+
+/**
+ * Compute the full road network topology: cluster, A* pathfind,
+ * detect intersections. Returns raw (un-smoothed, un-noised) segments.
+ */
+function computeRoadNetwork(
   grid: GridTile[][],
   placements: DecorationPlacement[],
   blockedCells: Set<string>,
-  seed: number,
-): CityRoadResult {
-  if (placements.length < 2) return { roads: [], junctions: [] };
+): RawNetwork {
+  if (placements.length < 2) return { segments: [], mergedIntersections: [] };
 
-  const rng = createPRNG(seed + 0xC0DE);
-
-  // ── 1. Build walkability grid (shared with CartPathfinder) ────────────
   const walkable = buildWalkabilityGrid(grid);
 
-  // ── 2. Compute building center nodes ───────────────────────────────────
+  // ── Compute building center nodes ─────────────────────────────────
   interface BuildingNode {
-    cx: number; cy: number;      // pixel center
-    row: number; col: number;    // grid cell (nearest walkable perimeter)
+    cx: number; cy: number;
+    row: number; col: number;
     placementIdx: number;
   }
 
   const buildings: BuildingNode[] = placements.map((p, i) => {
     const cx = (p.col + p.w / 2) * TILE_SIZE;
     const cy = (p.row + p.h / 2) * TILE_SIZE;
-    // Find the nearest walkable perimeter cell for A* entry
     const perimeter = findWalkablePerimeter(grid, p, blockedCells);
     return { cx, cy, row: perimeter.r, col: perimeter.c, placementIdx: i };
   });
 
-  // ── 3. Cluster buildings (Union-Find) ──────────────────────────────────
+  // ── Cluster buildings (Union-Find) ────────────────────────────────
   const uf = new UnionFind(buildings.length);
-  // Sort pairs by distance for greedy clustering
   const pairs: { i: number; j: number; d: number }[] = [];
   for (let i = 0; i < buildings.length; i++) {
     for (let j = i + 1; j < buildings.length; j++) {
@@ -164,27 +242,25 @@ export function generateCityRoads(
     uf.union(p.i, p.j);
   }
 
-  // Group buildings by cluster root
-  const clusterMap = new Map<number, number[]>(); // root → building indices
+  const clusterMap = new Map<number, number[]>();
   for (let i = 0; i < buildings.length; i++) {
     const root = uf.find(i);
     if (!clusterMap.has(root)) clusterMap.set(root, []);
     clusterMap.get(root)!.push(i);
   }
 
-  // ── 4. Compute junction per cluster (geometric median on walkable grid) ─
+  // ── Compute junction per cluster ──────────────────────────────────
   interface JunctionInfo {
-    cx: number; cy: number;   // pixel position
-    gridR: number; gridC: number;  // grid cell
+    cx: number; cy: number;
+    gridR: number; gridC: number;
     buildingIndices: number[];
-    connected: boolean;       // whether connected to main network
+    connected: boolean;
   }
 
   const junctions: JunctionInfo[] = [];
 
   for (const [_root, memberIndices] of clusterMap) {
     if (memberIndices.length === 1) {
-      // Single building — no junction needed, mark as unconnected
       const b = buildings[memberIndices[0]];
       junctions.push({
         cx: b.cx, cy: b.cy,
@@ -195,19 +271,12 @@ export function generateCityRoads(
       continue;
     }
 
-    // Compute centroid
     let sumX = 0, sumY = 0;
-    for (const bi of memberIndices) {
-      sumX += buildings[bi].cx;
-      sumY += buildings[bi].cy;
-    }
+    for (const bi of memberIndices) { sumX += buildings[bi].cx; sumY += buildings[bi].cy; }
     const centroidR = Math.round(sumY / memberIndices.length / TILE_SIZE);
     const centroidC = Math.round(sumX / memberIndices.length / TILE_SIZE);
 
-    // Search for the walkable cell near the centroid that minimizes
-    // total A* distance to all cluster buildings.
-    // Use a bounded search radius to keep it fast.
-    const searchRadius = 8; // cells
+    const searchRadius = 8;
     let bestR = centroidR, bestC = centroidC;
     let bestCost = Infinity;
 
@@ -218,7 +287,6 @@ export function generateCityRoads(
         if (walkable[cr * GRID_COLS + cc] === 0) continue;
         if (blockedCells.has(`${cr},${cc}`)) continue;
 
-        // Sum Euclidean distances to all buildings (fast approximation)
         const px = cc * TILE_SIZE + TILE_SIZE / 2;
         const py = cr * TILE_SIZE + TILE_SIZE / 2;
         let totalDist = 0;
@@ -227,63 +295,36 @@ export function generateCityRoads(
           const dy = py - buildings[bi].cy;
           totalDist += Math.sqrt(dx * dx + dy * dy);
         }
-        if (totalDist < bestCost) {
-          bestCost = totalDist;
-          bestR = cr;
-          bestC = cc;
-        }
+        if (totalDist < bestCost) { bestCost = totalDist; bestR = cr; bestC = cc; }
       }
     }
 
     junctions.push({
       cx: bestC * TILE_SIZE + TILE_SIZE / 2,
       cy: bestR * TILE_SIZE + TILE_SIZE / 2,
-      gridR: bestR,
-      gridC: bestC,
+      gridR: bestR, gridC: bestC,
       buildingIndices: memberIndices,
-      connected: true, // multi-building clusters are connected by definition
+      connected: true,
     });
   }
 
-  // ── 5. Connect isolated clusters to nearest connected cluster ──────────
-  // Sort junctions so connected ones come first
+  // ── Connect isolated clusters ─────────────────────────────────────
   junctions.sort((a, b) => (b.connected ? 1 : 0) - (a.connected ? 1 : 0));
-
   for (let i = 0; i < junctions.length; i++) {
     if (junctions[i].connected) continue;
-
-    // Find nearest connected junction
-    let nearestIdx = -1;
-    let nearestDist = Infinity;
+    let nearestIdx = -1, nearestDist = Infinity;
     for (let j = 0; j < junctions.length; j++) {
       if (!junctions[j].connected) continue;
       const dx = junctions[i].cx - junctions[j].cx;
       const dy = junctions[i].cy - junctions[j].cy;
       const d = dx * dx + dy * dy;
-      if (d < nearestDist) {
-        nearestDist = d;
-        nearestIdx = j;
-      }
+      if (d < nearestDist) { nearestDist = d; nearestIdx = j; }
     }
-
-    if (nearestIdx === -1) continue;
-
-    // Mark as connected (the road will be pathfound in the next step)
-    junctions[i].connected = true;
+    if (nearestIdx !== -1) junctions[i].connected = true;
   }
 
-  // ── 6. A* pathfind roads ───────────────────────────────────────────────
-  // Each building gets a road to its junction.
-  // For isolated buildings connected to another junction, pathfind to that junction.
-  // We also track which grid cells are used by multiple roads → emergent intersections.
-
-  interface RoadSegment {
-    path: Vec2[];
-    buildingIdx: number;
-    junctionIdx: number;
-  }
-
-  const allSegments: RoadSegment[] = [];
+  // ── A* pathfind roads ─────────────────────────────────────────────
+  const allSegments: RawSegment[] = [];
 
   for (let ji = 0; ji < junctions.length; ji++) {
     const junc = junctions[ji];
@@ -291,51 +332,48 @@ export function generateCityRoads(
       const b = buildings[bi];
       const path = findCartPath(walkable, blockedCells, b.row, b.col, junc.gridR, junc.gridC);
       if (path && path.length > 0) {
-        // Prepend building center so the road visually extends under the building sprite
         path.unshift({ x: b.cx, y: b.cy });
-        allSegments.push({ path, buildingIdx: bi, junctionIdx: ji });
+        allSegments.push({
+          path,
+          buildingIdx: bi,
+          junctionIdx: ji,
+          signature: segmentCellSignature(path),
+        });
       }
     }
   }
 
-  // Connect isolated junctions to nearest connected junction via A*
   for (let ji = 0; ji < junctions.length; ji++) {
     const junc = junctions[ji];
-    if (junc.buildingIndices.length > 1) continue; // already multi-building
+    if (junc.buildingIndices.length > 1) continue;
 
-    // Find nearest connected junction that's not this one
-    let nearestIdx = -1;
-    let nearestDist = Infinity;
+    let nearestIdx = -1, nearestDist = Infinity;
     for (let jj = 0; jj < junctions.length; jj++) {
       if (jj === ji || !junctions[jj].connected) continue;
       const dx = junc.cx - junctions[jj].cx;
       const dy = junc.cy - junctions[jj].cy;
       const d = dx * dx + dy * dy;
-      if (d < nearestDist) {
-        nearestDist = d;
-        nearestIdx = jj;
-      }
+      if (d < nearestDist) { nearestDist = d; nearestIdx = jj; }
     }
     if (nearestIdx === -1) continue;
 
     const target = junctions[nearestIdx];
     const path = findCartPath(walkable, blockedCells, junc.gridR, junc.gridC, target.gridR, target.gridC);
     if (path && path.length > 0) {
-      // This is a road from isolated junction to the nearest connected junction
-      // Add it as a segment — we'll track it for intersection detection
-      allSegments.push({ path, buildingIdx: -1, junctionIdx: ji });
+      allSegments.push({
+        path,
+        buildingIdx: -1,
+        junctionIdx: ji,
+        signature: segmentCellSignature(path),
+      });
     }
   }
 
-  // ── 7. Detect emergent intersections ───────────────────────────────────
-  // Where two roads from different segments share a grid cell or pass within
-  // 1 tile of each other, mark that as an intersection.
-  const cellUsage = new Map<string, number[]>(); // "r,c" → segment indices
-
+  // ── Detect emergent intersections ─────────────────────────────────
+  const cellUsage = new Map<string, number[]>();
   for (let si = 0; si < allSegments.length; si++) {
-    const seg = allSegments[si];
     const seen = new Set<string>();
-    for (const pt of seg.path) {
+    for (const pt of allSegments[si].path) {
       const cr = Math.round((pt.y - TILE_SIZE / 2) / TILE_SIZE);
       const cc = Math.round((pt.x - TILE_SIZE / 2) / TILE_SIZE);
       const key = `${cr},${cc}`;
@@ -346,48 +384,178 @@ export function generateCityRoads(
     }
   }
 
-  // Find intersection points: cells used by 2+ segments
   const intersectionPoints: Vec2[] = [];
-  for (const [_key, segIndices] of cellUsage) {
-    const unique = new Set(segIndices);
-    if (unique.size >= 2) {
-      // Use the cell center as the intersection point
-      const [r, c] = _key.split(',').map(Number);
-      intersectionPoints.push({
-        x: c * TILE_SIZE + TILE_SIZE / 2,
-        y: r * TILE_SIZE + TILE_SIZE / 2,
-      });
+  for (const [key, segIndices] of cellUsage) {
+    if (new Set(segIndices).size >= 2) {
+      const [r, c] = key.split(',').map(Number);
+      intersectionPoints.push({ x: c * TILE_SIZE + TILE_SIZE / 2, y: r * TILE_SIZE + TILE_SIZE / 2 });
     }
   }
 
-  // Merge nearby intersections (< TILE_SIZE apart)
   const mergedIntersections = mergeNearbyPoints(intersectionPoints, TILE_SIZE);
 
-  // ── 8. Build final road paths ──────────────────────────────────────────
-  // For each segment, insert intersection points as waypoints where the
-  // road passes through them, then smooth the whole path.
+  return { segments: allSegments, mergedIntersections };
+}
+
+// ─── Public API ─────────────────────────────────────────────────────────────
+
+/**
+ * Generate the full city road network (stateless — always from scratch).
+ * Use this for the initial map load.
+ */
+export function generateCityRoads(
+  grid: GridTile[][],
+  placements: DecorationPlacement[],
+  blockedCells: Set<string>,
+  seed: number,
+): CityRoadResult {
+  if (placements.length < 2) return { roads: [], junctions: [] };
+
+  const rng = createPRNG(seed + 0xC0DE);
+  const { segments, mergedIntersections } = computeRoadNetwork(grid, placements, blockedCells);
 
   const roads: CityRoad[] = [];
-
-  for (const seg of allSegments) {
-    // Ensure the road starts from the building edge (not center overlap)
-    // and ends at the junction
+  for (const seg of segments) {
     let points = [...seg.path];
-
-    // Insert intersection waypoints
     points = insertIntersectionWaypoints(points, mergedIntersections);
-
-    // Smooth with Chaikin
     points = smoothPath(points, SMOOTH_ITERATIONS);
-
-    // Add noise (deterministic)
     addNoise(points, rng, NOISE_AMP);
-
     roads.push({ points });
   }
 
-  // Junctions are not rendered — roads merge naturally at shared points.
   return { roads, junctions: [] };
+}
+
+/**
+ * Incremental road network update.
+ *
+ * Computes the full new network, then matches old→new segments by A* path
+ * identity (cell-set signature). Unchanged segments keep their existing
+ * noise — only new or changed segments get fresh noise.
+ *
+ * Returns the rendered result and updated state for the next call.
+ */
+export function generateCityRoadsIncremental(
+  grid: GridTile[][],
+  placements: DecorationPlacement[],
+  blockedCells: Set<string>,
+  seed: number,
+  prevState: RoadNetworkState | null,
+): { result: CityRoadResult; state: RoadNetworkState } {
+  if (placements.length < 2) {
+    const empty: RoadNetworkState = { roads: [], roadGrid: new Uint8Array(GRID_ROWS * GRID_COLS), signatures: [] };
+    return { result: { roads: [], junctions: [] }, state: empty };
+  }
+
+  const rng = createPRNG(seed + 0xC0DE);
+  const { segments, mergedIntersections } = computeRoadNetwork(grid, placements, blockedCells);
+
+  // ── First time (no previous state) → generate all from scratch ────
+  if (!prevState || prevState.roads.length === 0) {
+    const roads: CityRoad[] = [];
+    const signatures: string[] = [];
+    for (const seg of segments) {
+      let points = [...seg.path];
+      points = insertIntersectionWaypoints(points, mergedIntersections);
+      points = smoothPath(points, SMOOTH_ITERATIONS);
+      addNoise(points, rng, NOISE_AMP);
+      roads.push({ points });
+      signatures.push(seg.signature);
+    }
+    const roadGrid = buildRoadGrid(roads);
+    return { result: { roads, junctions: [] }, state: { roads, roadGrid, signatures } };
+  }
+
+  // ── Match old→new by cell-set signature ──────────────────────────
+  // Build a lookup: new signature → new segment index
+  const newSigToIdx = new Map<string, number>();
+  for (let i = 0; i < segments.length; i++) {
+    newSigToIdx.set(segments[i].signature, i);
+  }
+
+  // Track which old roads are preserved and which new segments are covered
+  const preservedOldRoads: CityRoad[] = [];
+  const preservedSignatures: string[] = [];
+  const coveredNewSigs = new Set<string>();
+
+  for (let oi = 0; oi < prevState.roads.length; oi++) {
+    const oldSig = prevState.signatures[oi];
+    if (oldSig && newSigToIdx.has(oldSig)) {
+      // Same A* path → preserve old road (keep its noise)
+      preservedOldRoads.push(prevState.roads[oi]);
+      preservedSignatures.push(oldSig);
+      coveredNewSigs.add(oldSig);
+    }
+    // else: old segment no longer needed → drop it
+  }
+
+  // ── Generate new segments for uncovered signatures ────────────────
+  const newRoads: CityRoad[] = [...preservedOldRoads];
+  const newSignatures: string[] = [...preservedSignatures];
+
+  for (let si = 0; si < segments.length; si++) {
+    if (coveredNewSigs.has(segments[si].signature)) continue;
+
+    // New or changed segment → generate with fresh noise
+    let points = [...segments[si].path];
+    points = insertIntersectionWaypoints(points, mergedIntersections);
+
+    // Blend endpoints: if this new segment connects to a preserved road,
+    // snap its first/last point to the nearest preserved road endpoint.
+    points = blendEndpoints(points, preservedOldRoads);
+
+    points = smoothPath(points, SMOOTH_ITERATIONS);
+    addNoise(points, rng, NOISE_AMP);
+    newRoads.push({ points });
+    newSignatures.push(segments[si].signature);
+  }
+
+  const roadGrid = buildRoadGrid(newRoads);
+  return {
+    result: { roads: newRoads, junctions: [] },
+    state: { roads: newRoads, roadGrid, signatures: newSignatures },
+  };
+}
+
+/** Snap a new segment's endpoints to nearby preserved road endpoints
+ *  so that Chaikin smoothing and noise blend seamlessly at joins. */
+function blendEndpoints(newPoints: Vec2[], preservedRoads: CityRoad[]): Vec2[] {
+  if (preservedRoads.length === 0 || newPoints.length < 2) return newPoints;
+
+  const result = [...newPoints];
+  const BLEND_RADIUS = TILE_SIZE * 1.5;
+  const blendSq = BLEND_RADIUS * BLEND_RADIUS;
+
+  // Find the closest preserved endpoint to newPoints[0]
+  let bestFirst: Vec2 | null = null;
+  let bestFirstDist = blendSq;
+  for (const road of preservedRoads) {
+    if (road.points.length === 0) continue;
+    const ep = road.points[0];
+    const dx = result[0].x - ep.x, dy = result[0].y - ep.y;
+    if (dx * dx + dy * dy < bestFirstDist) {
+      bestFirstDist = dx * dx + dy * dy;
+      bestFirst = ep;
+    }
+  }
+  if (bestFirst) result[0] = { ...bestFirst };
+
+  // Find the closest preserved endpoint to newPoints[last]
+  let bestLast: Vec2 | null = null;
+  let bestLastDist = blendSq;
+  for (const road of preservedRoads) {
+    if (road.points.length === 0) continue;
+    const ep = road.points[road.points.length - 1];
+    const dx = result[result.length - 1].x - ep.x;
+    const dy = result[result.length - 1].y - ep.y;
+    if (dx * dx + dy * dy < bestLastDist) {
+      bestLastDist = dx * dx + dy * dy;
+      bestLast = ep;
+    }
+  }
+  if (bestLast) result[result.length - 1] = { ...bestLast };
+
+  return result;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

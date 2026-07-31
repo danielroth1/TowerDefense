@@ -41,10 +41,10 @@ export class HUD {
   // FPS (bottom-right)
   private fpsTxt: Phaser.GameObjects.Text;
 
-  // Perf stats panel (bottom-left corner, transparent dark background)
-  private perfStatsEnabled = false;
-  private perfPanel: Phaser.GameObjects.Graphics;
-  private perfText: Phaser.GameObjects.Text;
+  // General stats panel (bottom-left corner, transparent dark background)
+  private generalStatsEnabled = false;
+  private genStatsPanel: Phaser.GameObjects.Graphics;
+  private genStatsText: Phaser.GameObjects.Text;
 
   // Settings modal objects
   private _settingsOpen = false;
@@ -60,6 +60,7 @@ export class HUD {
   private _debug: boolean;
   private weatherSystem: WeatherSystem;
   private modalWeatherBtns: Phaser.GameObjects.Text[] = [];
+  private modalCartDebugBtn: Phaser.GameObjects.Text;
 
   // Lives low-health pulse tween
   private livesPulse: Phaser.Tweens.Tween | null = null;
@@ -136,9 +137,9 @@ export class HUD {
       fontSize: '13px', fontFamily: 'monospace', color: '#334455',
     }).setScrollFactor(0).setDepth(D + 1).setOrigin(1, 0.5);
 
-    // ── Perf stats panel (bottom-left, hidden by default) ──────────────────
-    this.perfPanel = scene.add.graphics().setScrollFactor(0).setDepth(D + 1).setVisible(false);
-    this.perfText = scene.add.text(0, 0, '', {
+    // ── General stats panel (bottom-left, hidden by default) ──────────────
+    this.genStatsPanel = scene.add.graphics().setScrollFactor(0).setDepth(D + 1).setVisible(false);
+    this.genStatsText = scene.add.text(0, 0, '', {
       fontSize: '12px', fontFamily: 'monospace', color: '#aabbcc', lineSpacing: 2,
     }).setScrollFactor(0).setDepth(D + 2).setOrigin(0, 1).setVisible(false);
 
@@ -170,11 +171,11 @@ export class HUD {
         this.modalSfxBtn.setColor(on ? '#88cc88' : '#cc8888');
       });
 
-    this.modalPerfBtn = scene.add.text(0, 0, '📊 PERF STATS: OFF', {
+    this.modalPerfBtn = scene.add.text(0, 0, '📊 STATS: OFF', {
       fontSize: '18px', fontFamily: 'monospace', color: '#cc8888',
     }).setScrollFactor(0).setDepth(72).setOrigin(0.5).setVisible(false)
       .setInteractive({ useHandCursor: true })
-      .on('pointerup', () => this.togglePerfStats());
+      .on('pointerup', () => this.toggleGeneralStats());
 
     this.modalPauseBtn = scene.add.text(0, 0, '⏸ PAUSE [P]', {
       fontSize: '20px', fontFamily: 'monospace', color: '#aabbcc',
@@ -204,6 +205,13 @@ export class HUD {
         .on('pointerup', () => this.weatherSystem.forceWeather(st));
       this.modalWeatherBtns.push(btn);
     }
+
+    // Cart pathfinding debug button (debug mode only)
+    this.modalCartDebugBtn = scene.add.text(0, 0, '🛒 CART A*: OFF', {
+      fontSize: '16px', fontFamily: 'monospace', color: '#cc8888',
+    }).setScrollFactor(0).setDepth(72).setOrigin(0.5).setVisible(false)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerup', () => scene.events.emit('toggle_cart_debug'));
 
     // ── Event subscriptions ──────────────────────────────────────────────────
     scene.events.on('gold_changed',   (g: number)  => this.setGold(g));
@@ -235,8 +243,8 @@ export class HUD {
       this.bossContainer,
       this.heroTxt,
       this.fpsTxt,
-      this.perfPanel,
-      this.perfText,
+      this.genStatsPanel,
+      this.genStatsText,
       this.modalBackdrop,
       this.modalPanel,
       this.modalBgmBtn,
@@ -244,6 +252,7 @@ export class HUD {
       this.modalPerfBtn,
       this.modalPauseBtn,
       this.modalCloseBtn,
+      this.modalCartDebugBtn,
       ...this.modalWeatherBtns,
     ];
   }
@@ -339,16 +348,16 @@ export class HUD {
     this.heroTxt.setPosition(10, H - barH - 14);
     this.fpsTxt.setPosition(W - 10, H - barH - 14);
 
-    // Perf stats panel: bottom-left, above hero text
-    const perfW = 190;
-    const perfH = 68;
+    // General stats panel: bottom-left, above hero text
+    const perfW = 220;
+    const perfH = 52;
     const perfX = 8;
     const perfY = H - barH - 14 - 20; // above hero/fps row
-    this.perfPanel.clear();
-    this.perfPanel.fillStyle(0x000000, 0.45);
-    this.perfPanel.fillRoundedRect(perfX, perfY - perfH, perfW, perfH, 6);
-    this.perfText.setPosition(perfX + 8, perfY);
-    this.perfText.setStyle({ fontSize: Math.max(9, Math.round(12 * sc)) + 'px' });
+    this.genStatsPanel.clear();
+    this.genStatsPanel.fillStyle(0x000000, 0.45);
+    this.genStatsPanel.fillRoundedRect(perfX, perfY - perfH, perfW, perfH, 6);
+    this.genStatsText.setPosition(perfX + 8, perfY);
+    this.genStatsText.setStyle({ fontSize: Math.max(9, Math.round(12 * sc)) + 'px' });
 
     // Boss HP bar below badge row
     const bossY  = padT + bh + 8;
@@ -368,7 +377,7 @@ export class HUD {
 
     const panelW = Math.max(220, Math.round(300 * sc));
     const panelH = this._debug
-      ? Math.max(340, Math.round(460 * sc))
+      ? Math.max(360, Math.round(490 * sc))
       : Math.max(240, Math.round(300 * sc));
     const px = W / 2 - panelW / 2;
     const py = H / 2 - panelH / 2;
@@ -393,6 +402,9 @@ export class HUD {
           .setStyle({ fontSize: modalFS3 })
           .setPosition(W / 2, py + panelH * weatherY[i]);
       }
+      this.modalCartDebugBtn
+        .setStyle({ fontSize: modalFS3 })
+        .setPosition(W / 2, py + panelH * 0.73);
     }
     this.modalPauseBtn.setStyle({ fontSize: modalFS }).setPosition(W / 2, py + panelH * (this._debug ? 0.77 : 0.65));
     this.modalCloseBtn.setStyle({ fontSize: Math.max(12, Math.round(18 * sc)) + 'px' })
@@ -446,31 +458,36 @@ export class HUD {
     this._settingsOpen ? this.closeSettings() : this.openSettings();
   }
 
-  // ─── Perf Stats ───────────────────────────────────────────────────────
+  /** Update the cart debug button label (called from GameScene). */
+  setCartDebugLabel(on: boolean): void {
+    this.modalCartDebugBtn.setText(on ? '🛒 CART A*: ON' : '🛒 CART A*: OFF');
+    this.modalCartDebugBtn.setColor(on ? '#88cc88' : '#cc8888');
+  }
 
-  /** Enable perf stats display (called by PerfTest / GameScene). */
+  // ─── General Stats ────────────────────────────────────────────────────
+
+  /** Enable general stats display (called by PerfTest / GameScene). */
   enablePerfStats() {
-    this.perfStatsEnabled = true;
-    this.modalPerfBtn.setText('📊 PERF STATS: ON');
+    this.generalStatsEnabled = true;
+    this.modalPerfBtn.setText('📊 STATS: ON');
     this.modalPerfBtn.setColor('#88cc88');
   }
 
-  private togglePerfStats() {
-    this.perfStatsEnabled = !this.perfStatsEnabled;
-    this.modalPerfBtn.setText(this.perfStatsEnabled ? '📊 PERF STATS: ON' : '📊 PERF STATS: OFF');
-    this.modalPerfBtn.setColor(this.perfStatsEnabled ? '#88cc88' : '#cc8888');
+  private toggleGeneralStats() {
+    this.generalStatsEnabled = !this.generalStatsEnabled;
+    this.modalPerfBtn.setText(this.generalStatsEnabled ? '📊 STATS: ON' : '📊 STATS: OFF');
+    this.modalPerfBtn.setColor(this.generalStatsEnabled ? '#88cc88' : '#cc8888');
   }
 
-  /** Update the perf stats display. Call every frame. */
-  updatePerfStats(enemies: number, towers: number, projectiles: number) {
-    const visible = this.perfStatsEnabled;
-    this.perfPanel.setVisible(visible);
-    this.perfText.setVisible(visible);
+  /** Update the general stats display. Call every frame. */
+  updateGeneralStats(incomeEco: number, incomeKills: number) {
+    const visible = this.generalStatsEnabled;
+    this.genStatsPanel.setVisible(visible);
+    this.genStatsText.setVisible(visible);
     if (!visible) return;
 
-    const fps = Math.round(this.scene.game.loop.actualFps);
-    this.perfText.setText(
-      `Enemies:     ${enemies}\nTowers:       ${towers}\nProjectiles:  ${projectiles}\nFPS:          ${fps}`,
+    this.genStatsText.setText(
+      `Income (Eco):    ${incomeEco}\nIncome (Kills):  ${incomeKills}`,
     );
   }
 
@@ -485,6 +502,7 @@ export class HUD {
     this.modalCloseBtn.setVisible(true);
     if (this._debug) {
       for (const btn of this.modalWeatherBtns) btn.setVisible(true);
+      this.modalCartDebugBtn.setVisible(true);
     }
   }
 
@@ -498,5 +516,6 @@ export class HUD {
     this.modalPauseBtn.setVisible(false);
     this.modalCloseBtn.setVisible(false);
     for (const btn of this.modalWeatherBtns) btn.setVisible(false);
+    this.modalCartDebugBtn.setVisible(false);
   }
 }

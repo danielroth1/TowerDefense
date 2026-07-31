@@ -2,7 +2,8 @@ import Phaser from 'phaser';
 import type { EconomyBuilding } from '../entities/EconomyBuilding';
 import type { EconomySimulation, EconomyEvent, DeliveryType } from './EconomySimulation';
 import type { EconomyResource } from '../data/economy';
-import { buildWalkabilityGrid, findCartPath, type Vec2 } from './CartPathfinder';
+import { buildWalkabilityGrid, findCartPath, type Vec2, type CartDebugData } from './CartPathfinder';
+import { GRID_COLS, GRID_ROWS } from '../utils/constants';
 import type { GridTile } from './MapGenerator';
 
 /*
@@ -62,6 +63,23 @@ export class TransportSystem {
   private deliveries: PendingDelivery[] = [];
   private walkable: Uint8Array | null = null;
 
+  /** Road grid from CityRoadNetwork — carts prefer road cells when available. */
+  private roadGrid: Uint8Array | null = null;
+
+  // ── Debug visualisation ──────────────────────────────────────────────────
+
+  /** Toggled by hotkey (debug mode only). When true, the last A* invocation's
+   *  cost grid and path are available for rendering in GameScene. */
+  cartDebugEnabled = false;
+
+  /** The most recent A* debug data. Reset on each requestDelivery() call. */
+  cartDebugData: CartDebugData | null = null;
+
+  /** Pre-allocated debug buffers (reused each call to avoid GC). */
+  private _debugCostGrid = new Float32Array(GRID_ROWS * GRID_COLS);
+  private _debugWalkGrid = new Uint8Array(GRID_ROWS * GRID_COLS);
+  private _debugRoadGrid = new Uint8Array(GRID_ROWS * GRID_COLS);
+
   constructor(scene: Phaser.Scene, sim: EconomySimulation) {
     this.scene = scene;
     this.economySim = sim;
@@ -87,6 +105,11 @@ export class TransportSystem {
   /** No-op — kept for backward compatibility. */
   setBuildings(_buildings: EconomyBuilding[]): void {}
 
+  /** Set the road grid so carts can prefer road cells in A*. */
+  setRoadGrid(grid: Uint8Array | null): void {
+    this.roadGrid = grid;
+  }
+
   // ─── Delivery dispatch ───────────────────────────────────────────────────
 
   requestDelivery(
@@ -97,12 +120,23 @@ export class TransportSystem {
   ): boolean {
     if (!this.walkable) return false;
 
+    // Always use the road grid when available — A* with road cost 0.1
+    // will naturally route from any starting position to the nearest
+    // road and then follow the road network to the destination.
+    const debugOut: CartDebugData | undefined = this.cartDebugEnabled
+      ? { costGrid: this._debugCostGrid, walkableGrid: this._debugWalkGrid,
+          roadGrid: this._debugRoadGrid,
+          pathCells: new Set(), sr: 0, sc: 0, er: 0, ec: 0, hadRoadGrid: false }
+      : undefined;
     const path = findCartPath(
       this.walkable,
       new Set(),
       from.gridRow, from.gridCol,
       to.gridRow, to.gridCol,
+      this.roadGrid ?? undefined,
+      debugOut,
     );
+    if (debugOut) this.cartDebugData = debugOut;
     if (!path || path.length < 2) return false;
 
     const smoothed = smoothCartPath(path);

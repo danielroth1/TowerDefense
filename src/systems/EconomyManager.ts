@@ -1,7 +1,6 @@
 import Phaser from 'phaser';
 import {
   STARTING_GOLD, STARTING_LIVES,
-  PASSIVE_INCOME_INTERVAL, PASSIVE_INCOME_AMOUNT,
 } from '../utils/constants';
 
 export class EconomyManager {
@@ -10,7 +9,11 @@ export class EconomyManager {
   lives: number;
   totalEarned: number = 0;
   totalSpent: number = 0;
-  private passiveTimer: number = 0;
+
+  /** Income earned from economy buildings (farms, markets, etc.). */
+  incomeFromEconomy: number = 0;
+  /** Income earned from killing monsters. */
+  incomeFromKills: number = 0;
 
   constructor(scene: Phaser.Scene, startingGold?: number) {
     this.scene = scene;
@@ -22,6 +25,18 @@ export class EconomyManager {
     this.gold += amount;
     this.totalEarned += amount;
     this.scene.events.emit('gold_changed', this.gold);
+  }
+
+  /** Earn gold from economy buildings. */
+  earnFromEconomy(amount: number) {
+    this.incomeFromEconomy += amount;
+    this.earn(amount);
+  }
+
+  /** Earn gold from killing monsters. */
+  earnFromKills(amount: number) {
+    this.incomeFromKills += amount;
+    this.earn(amount);
   }
 
   spend(amount: number): boolean {
@@ -42,11 +57,6 @@ export class EconomyManager {
     if (this.lives <= 0) this.scene.events.emit('game_over');
   }
 
-  update(delta: number) {
-    this.passiveTimer += delta;
-    if (this.passiveTimer >= PASSIVE_INCOME_INTERVAL) {
-      this.passiveTimer -= PASSIVE_INCOME_INTERVAL;
-      this.earn(PASSIVE_INCOME_AMOUNT);
-    }
-  }
+  /** No-op: passive time-based income removed. */
+  update(_delta: number) {}
 }

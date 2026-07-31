@@ -16,6 +16,26 @@ import type { GridTile } from './MapGenerator';
 
 export interface Vec2 { x: number; y: number; }
 
+/** Debug data produced by a single A* invocation — used to visualise cost
+ *  weights and the chosen path so you can see why carts pick certain routes. */
+export interface CartDebugData {
+  /** Per-cell best-g cost (Float32Array, indexed by r*COLS+c).
+   *  0 = never visited by A*. */
+  costGrid: Float32Array;
+  /** Per-cell walkability: 0=blocked, 1=grass, 2=path (same as walkable input). */
+  walkableGrid: Uint8Array;
+  /** Per-cell flag: 1 = this cell is on the road network (roadGrid). */
+  roadGrid: Uint8Array;
+  /** Set of "r,c" strings for cells on the final computed path. */
+  pathCells: Set<string>;
+  /** Start cell (row, col). */
+  sr: number; sc: number;
+  /** End cell (row, col). */
+  er: number; ec: number;
+  /** Whether the road grid was provided to this A* invocation. */
+  hadRoadGrid: boolean;
+}
+
 // ─── Walkability grid ───────────────────────────────────────────────────────
 
 /**
@@ -54,12 +74,18 @@ interface AStarNode {
  * @param blocked   Set of "r,c" strings for cells blocked by building footprints
  * @param sr, sc    Start row/col
  * @param er, ec    End row/col
+ * @param roadGrid  Optional per-cell boolean: 1=road. When provided,
+ *                  road cells get cost 0.1 (heavily preferred over grass at 1.0).
+ * @param outDebug  Optional — if provided, populated with per-cell costs, road
+ *                  flags, and path cells for debug visualisation.
  */
 export function findCartPath(
   walkable: Uint8Array,
   blocked: Set<string>,
   sr: number, sc: number,
   er: number, ec: number,
+  roadGrid?: Uint8Array,
+  outDebug?: CartDebugData,
 ): Vec2[] | null {
   const COLS = GRID_COLS, ROWS = GRID_ROWS;
   const key = (r: number, c: number) => r * COLS + c;
@@ -81,6 +107,13 @@ export function findCartPath(
 
   const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 
+  // Track the best goal path found so far.  Because zero-cost edges (road,
+  // path tiles) make the Manhattan heuristic non-admissible (it can over-
+  // estimate), the first goal popped from the open list is not guaranteed to
+  // be optimal.  We continue searching until the open list is exhausted so
+  // that zero-cost corridors are fully explored.
+  let bestGoalNode: AStarNode | null = null;
+
   while (open.length > 0) {
     // Find node with lowest f
     let bestIdx = 0;
@@ -89,30 +122,25 @@ export function findCartPath(
     }
     const cur = open.splice(bestIdx, 1)[0];
 
-    if (cur.r === er && cur.c === ec) {
-      // Reconstruct path as pixel-center positions
-      const path: Vec2[] = [];
-      let node: AStarNode | null = cur;
-      while (node) {
-        path.push({
-          x: node.c * TILE_SIZE + TILE_SIZE / 2,
-          y: node.r * TILE_SIZE + TILE_SIZE / 2,
-        });
-        node = node.parent;
-      }
-      path.reverse();
-      return path;
-    }
-
+    // Skip nodes already expanded — but only if we haven't found a better
+    // path to them since they were closed (see re-open logic below).
     const ck = key(cur.r, cur.c);
     if (closed.has(ck)) continue;
     closed.add(ck);
+
+    if (cur.r === er && cur.c === ec) {
+      // Save this goal path (keep the best-g one) but continue searching:
+      // a zero-cost corridor may still produce a cheaper route.
+      if (!bestGoalNode || cur.g < bestGoalNode.g) {
+        bestGoalNode = cur;
+      }
+      continue;
+    }
 
     for (const [dr, dc] of dirs) {
       const nr = cur.r + dr, nc = cur.c + dc;
       if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) continue;
       const nk = key(nr, nc);
-      if (closed.has(nk)) continue;
 
       const cell = walkable[nk];
       if (cell === 0) continue;
@@ -120,14 +148,82 @@ export function findCartPath(
       // Skip cells blocked by buildings (unless it's the destination)
       if (blocked.has(`${nr},${nc}`) && !(nr === er && nc === ec)) continue;
 
-      const moveCost = cell === 2 ? 0.5 : 1.0;
+      let moveCost: number;
+      if (roadGrid && roadGrid[nk] === 1) {
+        moveCost = 0.1; // heavily prefer road cells
+      } else {
+        moveCost = cell === 2 ? 0.5 : 1.0;
+      }
       const ng = cur.g + moveCost;
       const prevG = bestG.get(nk);
       if (prevG !== undefined && ng >= prevG) continue;
-      bestG.set(nk, ng);
 
+      // If this neighbour was previously expanded via a costlier path,
+      // remove it from closed so it will be re-expanded with this
+      // cheaper g — this is what lets zero-cost road corridors
+      // "retroactively" improve paths through cells that grass-based
+      // exploration already visited.
+      if (closed.has(nk)) {
+        closed.delete(nk);
+      }
+
+      bestG.set(nk, ng);
       const nf = ng + heuristic(nr, nc);
       open.push({ r: nr, c: nc, g: ng, f: nf, parent: cur });
+    }
+  }
+
+  // ── Reconstruct best goal path (or null) ──────────────────────────────
+  const pathCells = new Set<string>();
+
+  if (bestGoalNode) {
+    const path: Vec2[] = [];
+    let node: AStarNode | null = bestGoalNode;
+    while (node) {
+      pathCells.add(`${node.r},${node.c}`);
+      path.push({
+        x: node.c * TILE_SIZE + TILE_SIZE / 2,
+        y: node.r * TILE_SIZE + TILE_SIZE / 2,
+      });
+      node = node.parent;
+    }
+    path.reverse();
+
+    if (outDebug) {
+      outDebug.sr = sr; outDebug.sc = sc;
+      outDebug.er = er; outDebug.ec = ec;
+      outDebug.hadRoadGrid = roadGrid != null;
+      outDebug.pathCells = pathCells;
+      outDebug.walkableGrid.set(walkable);
+      if (roadGrid) {
+        outDebug.roadGrid.set(roadGrid);
+      } else {
+        outDebug.roadGrid.fill(0);
+      }
+      outDebug.costGrid.fill(0);
+      for (const [k, g] of bestG) {
+        outDebug.costGrid[k] = g;
+      }
+    }
+
+    return path;
+  }
+
+  // Populate debug even when no path found (shows explored area)
+  if (outDebug) {
+    outDebug.sr = sr; outDebug.sc = sc;
+    outDebug.er = er; outDebug.ec = ec;
+    outDebug.hadRoadGrid = roadGrid != null;
+    outDebug.pathCells = pathCells;
+    outDebug.walkableGrid.set(walkable);
+    if (roadGrid) {
+      outDebug.roadGrid.set(roadGrid);
+    } else {
+      outDebug.roadGrid.fill(0);
+    }
+    outDebug.costGrid.fill(0);
+    for (const [k, g] of bestG) {
+      outDebug.costGrid[k] = g;
     }
   }
 
