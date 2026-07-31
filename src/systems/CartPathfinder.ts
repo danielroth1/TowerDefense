@@ -122,6 +122,11 @@ export function findCartPath(
     }
     const cur = open.splice(bestIdx, 1)[0];
 
+    // Once we have a goal path, stop if the best remaining open node
+    // can't possibly beat it (all edge costs are >= 0, so g never
+    // decreases along a path, and f = g + h >= g).
+    if (bestGoalNode && cur.f >= bestGoalNode.g) break;
+
     // Skip nodes already expanded — but only if we haven't found a better
     // path to them since they were closed (see re-open logic below).
     const ck = key(cur.r, cur.c);
@@ -152,7 +157,7 @@ export function findCartPath(
       if (roadGrid && roadGrid[nk] === 1) {
         moveCost = 0.1; // heavily prefer road cells
       } else {
-        moveCost = cell === 2 ? 0.5 : 1.0;
+        moveCost = cell === 2 ? 0.25 : 1.0;
       }
       const ng = cur.g + moveCost;
       const prevG = bestG.get(nk);
@@ -168,7 +173,7 @@ export function findCartPath(
       }
 
       bestG.set(nk, ng);
-      const nf = ng + heuristic(nr, nc);
+      const nf = ng + heuristic(nr, nc) * 0.1;
       open.push({ r: nr, c: nc, g: ng, f: nf, parent: cur });
     }
   }
