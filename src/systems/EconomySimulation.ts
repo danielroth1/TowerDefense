@@ -244,45 +244,118 @@ export class EconomySimulation {
   // ─── Consumption / cart dispatch ────────────────────────────────────────
 
   /**
-   * For each producer with inventory, find a valid target from the config.
-   * Target types are tried in priority order (array order in config).
-   * Within each type, the closest building with free capacity is chosen.
+   * Two-pass global closest-first delivery assignment.
+   *
+   * Pass 1 — All produced goods decide their next destination. For each target
+   *          type, every (producer, target) pair is sorted by distance so the
+   *          globally closest producer always claims limited capacity first.
+   * Pass 2 — After Pass 1 reservations are made, some producing buildings may
+   *          now have free room (e.g. a mill dispatched flour → inventory slot
+   *          freed → can receive more wheat). Retry any remaining inventory.
    */
   private processConsumption(): void {
     if (!this.transportSys) return;
 
-    for (const producer of this.buildings) {
-      if (producer.inventory <= 0) continue;
+    // Pass 1: Global closest-first assignment
+    this.assignDeliveriesClosestFirst();
 
-      const resource = getProduces(producer.buildingType);
-      if (!resource) continue;
+    // Pass 2: Retry remaining inventory — some targets may have received
+    // reservations in Pass 1, and some producing buildings dispatched goods
+    // freeing capacity that wasn't available before.
+    this.assignDeliveriesClosestFirst();
+  }
 
+  /**
+   * Global closest-first delivery assignment.
+   *
+   * For each target type (in config priority order), builds all valid
+   * (producer, target) pairs, sorts by distance ascending, and greedily
+   * dispatches the closest pairs first.  This guarantees that when multiple
+   * producers compete for limited capacity at the same target type, the
+   * closest producer always wins — regardless of iteration order.
+   */
+  private assignDeliveriesClosestFirst(): void {
+    if (!this.transportSys) return;
+
+    // Collect producers that have inventory and a valid resource
+    const producers = this.buildings.filter(b => {
+      if (b.inventory <= 0) return false;
+      const resource = getProduces(b.buildingType);
+      if (!resource) return false;
       const targetTypes = DELIVERY_TARGETS[resource];
-      if (!targetTypes || targetTypes.length === 0) continue;
+      return targetTypes && targetTypes.length > 0;
+    });
+    if (producers.length === 0) return;
 
-      // Try target types in priority order (array order = priority).
-      // Within each type, pick the closest building with free capacity.
-      for (const targetType of targetTypes) {
-        const candidates = this.buildings
-          .filter(b => b.buildingType === targetType)
-          .filter(b => this.hasFreeCapacity(b, resource))
-          .sort((a, b) => this.distSq(producer, a) - this.distSq(producer, b));
+    // Determine which target types are relevant and their priority order.
+    // Priority = index in the DELIVERY_TARGETS array (lower = higher priority).
+    // If a target type appears for multiple resources, use the best priority.
+    const targetTypePriority = new Map<EconomyBuildingType, number>();
+    for (const producer of producers) {
+      const resource = getProduces(producer.buildingType)!;
+      const targetTypes = DELIVERY_TARGETS[resource];
+      if (!targetTypes) continue;
+      for (let i = 0; i < targetTypes.length; i++) {
+        const existing = targetTypePriority.get(targetTypes[i]);
+        if (existing === undefined || i < existing) {
+          targetTypePriority.set(targetTypes[i], i);
+        }
+      }
+    }
 
-        if (candidates.length === 0) continue; // No capacity in this type, try next
+    // Process target types in priority order (highest → lowest)
+    const sortedTargetTypes = [...targetTypePriority.entries()]
+      .sort((a, b) => a[1] - b[1])
+      .map(([type]) => type);
 
-        const target = candidates[0];
+    // Track remaining inventory per producer so we don't double-assign
+    const remaining = new Map<EconomyBuilding, number>();
+    for (const p of producers) remaining.set(p, p.inventory);
+
+    for (const targetType of sortedTargetTypes) {
+      // Eligible producers that can deliver to this target type
+      const eligible = producers.filter(p => {
+        if ((remaining.get(p) ?? 0) <= 0) return false;
+        const resource = getProduces(p.buildingType)!;
+        return (DELIVERY_TARGETS[resource] ?? []).includes(targetType);
+      });
+      if (eligible.length === 0) continue;
+
+      // Targets of this type
+      const targets = this.buildings.filter(b => b.buildingType === targetType);
+      if (targets.length === 0) continue;
+
+      // Build all valid (producer, target) pairs, sorted by distance
+      interface Pair { producer: EconomyBuilding; target: EconomyBuilding; resource: EconomyResource; dist: number }
+      const pairs: Pair[] = [];
+      for (const producer of eligible) {
+        const resource = getProduces(producer.buildingType)!;
+        for (const target of targets) {
+          if (this.hasFreeCapacity(target, resource)) {
+            pairs.push({ producer, target, resource, dist: this.distSq(producer, target) });
+          }
+        }
+      }
+
+      // Sort closest-first — this is the key: closest producer always wins
+      pairs.sort((a, b) => a.dist - b.dist);
+
+      for (const { producer, target, resource } of pairs) {
+        const inv = remaining.get(producer) ?? 0;
+        if (inv <= 0) continue;
+        if (!this.hasFreeCapacity(target, resource)) continue;
+
         const deliveryType = this.getDeliveryType(target.buildingType);
-
         this.reserveCapacity(target, deliveryType);
 
-        const accepted = this.transportSys.requestDelivery(producer, target, resource, deliveryType);
+        const accepted = this.transportSys!.requestDelivery(producer, target, resource, deliveryType);
         if (accepted) {
+          remaining.set(producer, inv - 1);
           producer.inventory--;
           producer.redraw();
         } else {
           this.releaseReservation(target, deliveryType);
         }
-        break; // Dispatched to this type, move to next producer
       }
     }
   }
@@ -299,11 +372,20 @@ export class EconomySimulation {
 
   /**
    * Warehouses actively dispatch carts when they have inventory.
+   * Uses global closest-first assignment: when multiple warehouses compete
+   * for the same target, the closest warehouse always gets priority.
    * Tries consumer buildings first (from DELIVERY_TARGETS), then markets.
    * Dispatch interval scales with warehouse level (higher = faster).
    */
   private dispatchWarehouses(delta: number): void {
     if (!this.transportSys) return;
+
+    // ── Tick timers and collect ready warehouses ───────────────────────
+    interface ReadyWarehouse {
+      warehouse: EconomyBuilding;
+      resource: EconomyResource;
+    }
+    const ready: ReadyWarehouse[] = [];
 
     for (const warehouse of this.buildings) {
       if (!ECO_BUILDING_DEFS[warehouse.buildingType].isStorage) continue;
@@ -318,43 +400,62 @@ export class EconomySimulation {
         continue;
       }
 
+      // Warehouse is ready to dispatch
       this.warehouseTimers.set(warehouse, newTimer - interval);
-
       const resource = this.warehouseResources.get(warehouse) ?? 'goods';
+      ready.push({ warehouse, resource });
+    }
 
-      // Build priority-ordered target list: consumers first, then markets
-      const deliveryTargets = DELIVERY_TARGETS[resource];
-      const targetTypes = deliveryTargets
-        ? [...deliveryTargets.filter(t => t !== 'warehouse'), ...WAREHOUSE_OUTBOUND_TARGETS]
-        : [...WAREHOUSE_OUTBOUND_TARGETS];
+    if (ready.length === 0) return;
 
-      // Try each target type in priority order, closest-first within each type
-      let target: EconomyBuilding | undefined;
-      let targetDeliveryType: DeliveryType = 'market';
-      for (const targetType of targetTypes) {
-        const candidates = this.buildings
-          .filter(b => b.buildingType === targetType)
-          .filter(b => this.hasFreeCapacity(b, resource))
-          .sort((a, b) => this.distSq(warehouse, a) - this.distSq(warehouse, b));
+    // ── Build combined target type priority list ───────────────────────
+    // Use the first ready warehouse's resource to determine target types
+    // (all warehouses store the same resource type in practice)
+    const deliveryTargets = DELIVERY_TARGETS[ready[0].resource];
+    const targetTypes = deliveryTargets
+      ? [...deliveryTargets.filter(t => t !== 'warehouse'), ...WAREHOUSE_OUTBOUND_TARGETS]
+      : [...WAREHOUSE_OUTBOUND_TARGETS];
 
-        if (candidates.length > 0) {
-          target = candidates[0];
-          targetDeliveryType = this.getDeliveryType(targetType);
-          break;
+    // ── Track remaining inventory ─────────────────────────────────────
+    const remaining = new Map<EconomyBuilding, number>();
+    for (const r of ready) remaining.set(r.warehouse, r.warehouse.inventory);
+
+    // ── Global closest-first per target type ──────────────────────────
+    for (const targetType of targetTypes) {
+      const targets = this.buildings.filter(b => b.buildingType === targetType);
+      if (targets.length === 0) continue;
+
+      // Build all valid (warehouse, target) pairs for this target type
+      interface Pair { warehouse: EconomyBuilding; target: EconomyBuilding; resource: EconomyResource; dist: number }
+      const pairs: Pair[] = [];
+      for (const r of ready) {
+        if ((remaining.get(r.warehouse) ?? 0) <= 0) continue;
+        for (const target of targets) {
+          if (this.hasFreeCapacity(target, r.resource)) {
+            pairs.push({ warehouse: r.warehouse, target, resource: r.resource, dist: this.distSq(r.warehouse, target) });
+          }
         }
       }
 
-      if (!target) continue;
+      // Sort closest-first — closest warehouse always wins the slot
+      pairs.sort((a, b) => a.dist - b.dist);
 
-      // Reserve capacity
-      this.reserveCapacity(target, targetDeliveryType);
+      for (const { warehouse, target, resource } of pairs) {
+        const inv = remaining.get(warehouse) ?? 0;
+        if (inv <= 0) continue;
+        if (!this.hasFreeCapacity(target, resource)) continue;
 
-      const accepted = this.transportSys.requestDelivery(warehouse, target, resource, targetDeliveryType);
-      if (accepted) {
-        warehouse.inventory--;
-        warehouse.redraw();
-      } else {
-        this.releaseReservation(target, targetDeliveryType);
+        const deliveryType = this.getDeliveryType(target.buildingType);
+        this.reserveCapacity(target, deliveryType);
+
+        const accepted = this.transportSys!.requestDelivery(warehouse, target, resource, deliveryType);
+        if (accepted) {
+          remaining.set(warehouse, inv - 1);
+          warehouse.inventory--;
+          warehouse.redraw();
+        } else {
+          this.releaseReservation(target, deliveryType);
+        }
       }
     }
   }
