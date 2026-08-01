@@ -20,6 +20,7 @@ import { WeatherSystem } from '../systems/WeatherSystem';
 import { ComboSystem } from '../systems/ComboSystem';
 import { HUD } from '../ui/HUD';
 import { BottomBar } from '../ui/BottomBar';
+import { Tooltip } from '../ui/Tooltip';
 import { SoundSystem } from '../systems/SoundSystem';
 import { generateCityDecorations, type DecorationPlacement } from '../systems/CityDecorator';
 import { drawCityRoads, generateCityRoadsIncremental, type RoadNetworkState } from '../systems/CityRoadNetwork';
@@ -111,6 +112,7 @@ export class GameScene extends Phaser.Scene {
   // UI
   private hud!: HUD;
   private bottomBar!: BottomBar;
+  private tooltip!: Tooltip;
   private sfx: SoundSystem = SoundSystem.instance;
 
   // Dual-camera system
@@ -678,6 +680,12 @@ export class GameScene extends Phaser.Scene {
 
     this.hud = new HUD(this, this._debug, this.weatherSystem);
     this.bottomBar = new BottomBar(this, this.economy, this.economySim);
+
+    // Hover tooltips for build/upgrade/ability buttons (desktop only)
+    this.tooltip = new Tooltip(this, 80);
+    this.tooltip.register(this.uiGroup);
+    this.bottomBar.setTooltip(this.tooltip);
+
     this.createFloatingAbilities();
 
     // Register all UI objects with the UI group for camera ignoring
@@ -2383,8 +2391,22 @@ export class GameScene extends Phaser.Scene {
 
       const hit = this.add.rectangle(cx, cy, this._abilityBtnSize, this._abilityBtnSize, 0, 0)
         .setScrollFactor(0).setInteractive({ useHandCursor: true }).setDepth(D + 4);
-      hit.on('pointerover', () => { if (!isTouch()) drawBtn(true,  this.abilitySystem.pendingCast === def.type); });
-      hit.on('pointerout',  () => { if (!isTouch()) drawBtn(false, this.abilitySystem.pendingCast === def.type); });
+      hit.on('pointerover', (pointer: Phaser.Input.Pointer) => {
+        if (!isTouch()) {
+          drawBtn(true,  this.abilitySystem.pendingCast === def.type);
+          this.tooltip.show(pointer.x, pointer.y, def.label, [
+            def.description,
+            `💰 ${def.cost}g  ⏱ ${Math.round(def.cooldown / 1000)}s  📏 ${def.radius}px` +
+              (def.damage ? `  ⚔ ${def.damage}` : ''),
+          ]);
+        }
+      });
+      hit.on('pointerout',  () => {
+        if (!isTouch()) {
+          drawBtn(false, this.abilitySystem.pendingCast === def.type);
+          this.tooltip.hide();
+        }
+      });
       hit.on('pointerup',   () => this.abilitySystem.selectAbility(def.type));
 
       this.abilityFloating.set(def.type, { bg, icon, cdOvl, cdTxt, cost, hit });

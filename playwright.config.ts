@@ -24,7 +24,7 @@ export default defineConfig({
   projects: [
     {
       name: 'desktop',
-      testMatch: /(desktop|audio)\.spec\.ts/,
+      testMatch: /(desktop|audio|tooltip)\.spec\.ts/,
       use: { viewport: { width: 1280, height: 800 } },
     },
     {

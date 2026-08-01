@@ -9,6 +9,7 @@ import type { EconomyBuilding } from '../entities/EconomyBuilding';
 import { drawElevatedButton } from '../utils/ButtonStyles';
 import { HOTKEYS } from '../data/hotkeys';
 import { isTouch, getSafeAreaInsets } from '../utils/Device';
+import { Tooltip } from './Tooltip';
 
 const TLEFT = 0; // 12;  // left margin for tower button area
 
@@ -112,6 +113,11 @@ export class BottomBar {
   onUpgradeEco: (() => void) | null = null;
   onSendWave:   (() => void) | null = null;
 
+  // Hover tooltip (desktop only)
+  private tooltip: Tooltip | null = null;
+
+  setTooltip(t: Tooltip) { this.tooltip = t; }
+
   constructor(scene: Phaser.Scene, economy: EconomyManager, ecoSim: EconomySimulation) {
     this.scene   = scene;
     this.economy = economy;
@@ -199,8 +205,9 @@ export class BottomBar {
 
       const hit = scene.add.rectangle(-999, 0, 100, 80, 0, 0)
         .setScrollFactor(0).setInteractive({ useHandCursor: true }).setDepth(D + 3);
-      hit.on('pointerover', () => {
+      hit.on('pointerover', (pointer: Phaser.Input.Pointer) => {
         if (!this.isTowerVisible(i)) return;
+        this.showItemTooltip(pointer, item);
         const currentCost = isTower
           ? (def as any).baseCost
           : escalatedCost(def as any, this.ecoSim.countOfType(item.type as EconomyBuildingType));
@@ -208,6 +215,7 @@ export class BottomBar {
       });
       hit.on('pointerout', () => {
         if (!this.isTowerVisible(i)) return;
+        this.tooltip?.hide();
         const currentCost = isTower
           ? (def as any).baseCost
           : escalatedCost(def as any, this.ecoSim.countOfType(item.type as EconomyBuildingType));
@@ -530,6 +538,7 @@ export class BottomBar {
   }
 
   showBuildMode() {
+    this.tooltip?.hide();
     this.currentUpgradeTower = null;
     this.currentEcoBuilding = null;
     this._buildVisible = true;
@@ -546,6 +555,7 @@ export class BottomBar {
   }
 
   showUpgradeMode(tower: Tower) {
+    this.tooltip?.hide();
     this.currentUpgradeTower = tower;
     this.currentEcoBuilding = null;
     this._buildVisible = false;
@@ -561,6 +571,7 @@ export class BottomBar {
   }
 
   showEconomyMode(building: EconomyBuilding) {
+    this.tooltip?.hide();
     this.currentEcoBuilding = building;
     this.currentUpgradeTower = null;
     this._buildVisible = false;
@@ -750,8 +761,14 @@ export class BottomBar {
         const hit = this.scene.add.rectangle(cx, CY, w - 8, h - 8, 0, 0)
           .setScrollFactor(0).setInteractive({ useHandCursor: true }).setDepth(50);
         this.scene.cameras.main.ignore(hit);
-        hit.on('pointerover', () => this.drawUBtn(bg4, cx, CY, w - 4, h - 4, act.color, true, can));
-        hit.on('pointerout',  () => this.drawUBtn(bg4, cx, CY, w - 4, h - 4, act.color, false, can));
+        hit.on('pointerover', (pointer: Phaser.Input.Pointer) => {
+          this.showActionTooltip(pointer, act);
+          this.drawUBtn(bg4, cx, CY, w - 4, h - 4, act.color, true, can);
+        });
+        hit.on('pointerout',  () => {
+          this.tooltip?.hide();
+          this.drawUBtn(bg4, cx, CY, w - 4, h - 4, act.color, false, can);
+        });
         hit.on('pointerup',   () => act.cb());
         this.upgBtnList.push({ bg: bg4, txt, hit });
       }
@@ -928,12 +945,69 @@ export class BottomBar {
         const hit = this.scene.add.rectangle(cx, CY, w - 8, h - 8, 0, 0)
           .setScrollFactor(0).setInteractive({ useHandCursor: true }).setDepth(50);
         this.scene.cameras.main.ignore(hit);
-        hit.on('pointerover', () => this.drawUBtn(bg4, cx, CY, w - 4, h - 4, act.color, true, can));
-        hit.on('pointerout',  () => this.drawUBtn(bg4, cx, CY, w - 4, h - 4, act.color, false, can));
+        hit.on('pointerover', (pointer: Phaser.Input.Pointer) => {
+          this.showActionTooltip(pointer, act);
+          this.drawUBtn(bg4, cx, CY, w - 4, h - 4, act.color, true, can);
+        });
+        hit.on('pointerout',  () => {
+          this.tooltip?.hide();
+          this.drawUBtn(bg4, cx, CY, w - 4, h - 4, act.color, false, can);
+        });
         hit.on('pointerup',   () => act.cb());
         this.upgBtnList.push({ bg: bg4, txt, hit });
       }
     });
+  }
+
+  // ─── Tooltip helpers (desktop hover info) ───────────────────────────────
+
+  private showItemTooltip(pointer: Phaser.Input.Pointer, item: BuildItem) {
+    if (this._touch || !this.tooltip) return;
+    if (item.kind === 'tower') {
+      const def = TOWER_DEFS[item.type as TowerType];
+      const s = def.baseStats;
+      const lines = [
+        def.description,
+        `⚔ ${s.damage}  🎯 ${s.range}px  ⏱ ${(1000 / s.fireRate).toFixed(1)}/s`,
+        `💰 ${def.baseCost}g  ${def.targetsFlying ? '✈ targets flyers' : 'ground targets'}`,
+      ];
+      if (def.effectType) {
+        const fx = def.effectType === 'slow'
+          ? `❄ slows ${Math.round(def.effectValue * 100)}% for ${(def.effectDuration / 1000).toFixed(1)}s`
+          : def.effectType === 'stun'
+          ? `⚡ stuns for ${(def.effectDuration / 1000).toFixed(1)}s`
+          : def.effectType === 'poison'
+          ? `☠ ${def.effectValue} poison/s for ${(def.effectDuration / 1000).toFixed(1)}s`
+          : def.effectType === 'chain'
+          ? `⚡ chains to ${def.effectValue} targets`
+          : def.effectType;
+        lines.push(fx);
+      }
+      if (def.splashRadius > 0) lines.push(`💥 splash ${def.splashRadius}px`);
+      this.tooltip.show(pointer.x, pointer.y, def.label, lines);
+    } else {
+      const def = ECO_BUILDING_DEFS[item.type as EconomyBuildingType];
+      const cost = escalatedCost(def, this.ecoSim.countOfType(item.type as EconomyBuildingType));
+      const lines: string[] = [def.description, `💰 ${cost}g`];
+      if (def.produces && def.baseCycleTime > 0) {
+        lines.push(`⏱ cycle ${(def.baseCycleTime / 1000).toFixed(1)}s`);
+      }
+      if (def.isStorage) lines.push('📦 stores goods for bulk delivery');
+      this.tooltip.show(pointer.x, pointer.y, def.label, lines);
+    }
+  }
+
+  private showActionTooltip(pointer: Phaser.Input.Pointer, act: {
+    label: string; cost: number; previewStats?: string; statsDiff?: string; hotkey?: string;
+  }) {
+    if (this._touch || !this.tooltip) return;
+    const lines: string[] = [];
+    if (act.statsDiff) lines.push(act.statsDiff);
+    if (act.previewStats) lines.push(act.previewStats);
+    if (act.cost > 0) lines.push(`💰 ${act.cost}g`);
+    if (act.hotkey) lines.push(`[${act.hotkey}]`);
+    if (lines.length === 0) return;
+    this.tooltip.show(pointer.x, pointer.y, act.label, lines);
   }
 
   private drawTowerBtn(g: Phaser.GameObjects.Graphics, cx: number, cy: number,
