@@ -872,8 +872,9 @@ export class GameScene extends Phaser.Scene {
         this.dragActive = false;
         this.dragMoved = false;
         this.pinchActive = true;
-        const p0 = this.input.manager.pointers[0];
-        const p1 = this.input.manager.pointers[1];
+        const activePtrs = this.input.manager.pointers.filter(pt => pt.isDown);
+        const p0 = activePtrs[0];
+        const p1 = activePtrs[1];
         this.pinchStartDist = Phaser.Math.Distance.Between(p0.x, p0.y, p1.x, p1.y);
         this.pinchStartZoom = this.cameras.main.zoom;
         this.lastPinchMidX = (p0.x + p1.x) / 2;
@@ -927,17 +928,28 @@ export class GameScene extends Phaser.Scene {
           const p0 = activePtrs[0];
           const p1 = activePtrs[1];
           const newDist = Phaser.Math.Distance.Between(p0.x, p0.y, p1.x, p1.y);
-          if (this.pinchStartDist > 0) {
+
+          // Re-baseline if fingers started at (nearly) the same point (emulator / small screens)
+          if (this.pinchStartDist < 5 && newDist >= 5) {
+            this.pinchStartDist = newDist;
+            this.pinchStartZoom = cam.zoom;
+            this.lastPinchMidX = (p0.x + p1.x) / 2;
+            this.lastPinchMidY = (p0.y + p1.y) / 2;
+          }
+
+          if (this.pinchStartDist >= 5) {
             const newZoom = Phaser.Math.Clamp(
               this.pinchStartZoom * (newDist / this.pinchStartDist),
               CAMERA_MIN_ZOOM,
               CAMERA_MAX_ZOOM,
             );
+            const midX = (p0.x + p1.x) / 2;
+            const midY = (p0.y + p1.y) / 2;
+
             if (newZoom !== cam.zoom) {
               const oldZoom = cam.zoom;
-              // Zoom toward the midpoint between the two pointers
-              const midX = (p0.x + p1.x) / 2;
-              const midY = (p0.y + p1.y) / 2;
+              // Same zoom-toward-cursor formula as mouse wheel,
+              // using the pinch midpoint as the "cursor" position
               const toCenterX = midX - cam.width / 2;
               const toCenterY = midY - cam.height / 2;
               const scaleDiff = (1 / oldZoom) - (1 / newZoom);
@@ -945,13 +957,16 @@ export class GameScene extends Phaser.Scene {
               cam.scrollY += toCenterY * scaleDiff;
               cam.setZoom(newZoom);
             }
-            // Also pan if the midpoint moved (Google Maps style)
-            const midDX = (p0.x + p1.x) / 2 - this.lastPinchMidX;
-            const midDY = (p0.y + p1.y) / 2 - this.lastPinchMidY;
-            cam.scrollX -= midDX / cam.zoom;
-            cam.scrollY -= midDY / cam.zoom;
-            this.lastPinchMidX = (p0.x + p1.x) / 2;
-            this.lastPinchMidY = (p0.y + p1.y) / 2;
+
+            // Pan by midpoint movement (always, even when zoom didn't change)
+            const midDX = midX - this.lastPinchMidX;
+            const midDY = midY - this.lastPinchMidY;
+            if (midDX !== 0 || midDY !== 0) {
+              cam.scrollX -= midDX / cam.zoom;
+              cam.scrollY -= midDY / cam.zoom;
+            }
+            this.lastPinchMidX = midX;
+            this.lastPinchMidY = midY;
           }
         }
         this.updateHoverTile(p);

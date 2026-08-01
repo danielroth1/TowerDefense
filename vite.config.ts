@@ -10,5 +10,10 @@ export default defineConfig({
     fs: {
       allow: ['.'],
     },
+    // Allow external connections for debugging
+    host: true,
+  },
+  build: {
+    sourcemap: true,
   },
 });
