@@ -142,6 +142,17 @@ export class GameScene extends Phaser.Scene {
   private selectedTower: Tower | null = null;
   private selectedEcoBuilding: EconomyBuilding | null = null;
 
+  // Touch gesture state
+  private pinchActive: boolean = false;
+  private dragActive: boolean = false;
+  private dragStartX: number = 0;
+  private dragStartY: number = 0;
+  private dragMoved: boolean = false;
+  private pinchStartDist: number = 0;
+  private pinchStartZoom: number = 1;
+  private lastPinchMidX: number = 0;
+  private lastPinchMidY: number = 0;
+
   // Stats
   private totalKills: number = 0;
   private barricadeCount: number = 0;
@@ -849,6 +860,42 @@ export class GameScene extends Phaser.Scene {
   }
 
   private setupInput() {
+    const DRAG_THRESHOLD = 8; // px — must move this far before it counts as a drag
+
+    // ── Touch gesture detection ──────────────────────────────────────────
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      // Count active pointers
+      const active = this.input.manager.pointers.filter(pt => pt.isDown).length;
+
+      if (active >= 2) {
+        // Pinch start: cancel any in-progress drag and begin pinch
+        this.dragActive = false;
+        this.dragMoved = false;
+        this.pinchActive = true;
+        const p0 = this.input.manager.pointers[0];
+        const p1 = this.input.manager.pointers[1];
+        this.pinchStartDist = Phaser.Math.Distance.Between(p0.x, p0.y, p1.x, p1.y);
+        this.pinchStartZoom = this.cameras.main.zoom;
+        this.lastPinchMidX = (p0.x + p1.x) / 2;
+        this.lastPinchMidY = (p0.y + p1.y) / 2;
+      } else if (active === 1) {
+        // Potential drag start — only in game area (not bottom bar, not settings)
+        if (p.y >= this.scale.height - this._barH) return;
+        if (this.hud.isSettingsOpen) return;
+        // Don't start drag on minimap (it has its own pointer handlers)
+        const mmRight  = this.minimapX + this.minimapW;
+        const mmBottom = this.minimapY + this.minimapH;
+        if (p.x >= this.minimapX && p.x <= mmRight && p.y >= this.minimapY && p.y <= mmBottom) return;
+        // Don't start drag on ability buttons
+        if (this.isClickOnAbilityButton(p)) return;
+
+        this.dragActive = true;
+        this.dragMoved = false;
+        this.dragStartX = p.x;
+        this.dragStartY = p.y;
+      }
+    });
+
     // Mouse wheel zoom – zoom toward cursor position
     this.input.on('wheel', (pointer: Phaser.Input.Pointer, _go: unknown, _dx: number, dy: number) => {
       const cam = this.cameras.main;
@@ -869,16 +916,88 @@ export class GameScene extends Phaser.Scene {
       cam.setZoom(newZoom);
     });
 
-    // Camera drag (middle mouse)
+    // Camera drag (middle mouse) + touch drag + pinch zoom
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
-      if (p.middleButtonDown()) {
-        this.cameras.main.scrollX -= p.velocity.x / this.cameras.main.zoom;
-        this.cameras.main.scrollY -= p.velocity.y / this.cameras.main.zoom;
+      const cam = this.cameras.main;
+
+      // ── Pinch zoom (2+ pointers) ────────────────────────────────────
+      if (this.pinchActive) {
+        const activePtrs = this.input.manager.pointers.filter(pt => pt.isDown);
+        if (activePtrs.length >= 2) {
+          const p0 = activePtrs[0];
+          const p1 = activePtrs[1];
+          const newDist = Phaser.Math.Distance.Between(p0.x, p0.y, p1.x, p1.y);
+          if (this.pinchStartDist > 0) {
+            const newZoom = Phaser.Math.Clamp(
+              this.pinchStartZoom * (newDist / this.pinchStartDist),
+              CAMERA_MIN_ZOOM,
+              CAMERA_MAX_ZOOM,
+            );
+            if (newZoom !== cam.zoom) {
+              const oldZoom = cam.zoom;
+              // Zoom toward the midpoint between the two pointers
+              const midX = (p0.x + p1.x) / 2;
+              const midY = (p0.y + p1.y) / 2;
+              const toCenterX = midX - cam.width / 2;
+              const toCenterY = midY - cam.height / 2;
+              const scaleDiff = (1 / oldZoom) - (1 / newZoom);
+              cam.scrollX += toCenterX * scaleDiff;
+              cam.scrollY += toCenterY * scaleDiff;
+              cam.setZoom(newZoom);
+            }
+            // Also pan if the midpoint moved (Google Maps style)
+            const midDX = (p0.x + p1.x) / 2 - this.lastPinchMidX;
+            const midDY = (p0.y + p1.y) / 2 - this.lastPinchMidY;
+            cam.scrollX -= midDX / cam.zoom;
+            cam.scrollY -= midDY / cam.zoom;
+            this.lastPinchMidX = (p0.x + p1.x) / 2;
+            this.lastPinchMidY = (p0.y + p1.y) / 2;
+          }
+        }
+        this.updateHoverTile(p);
+        return;
       }
+
+      // ── Middle-mouse drag (desktop) ──────────────────────────────────
+      if (p.middleButtonDown()) {
+        cam.scrollX -= p.velocity.x / cam.zoom;
+        cam.scrollY -= p.velocity.y / cam.zoom;
+      }
+
+      // ── One-finger touch drag ────────────────────────────────────────
+      // Only apply drag when exactly 1 pointer is down (not during pinch)
+      if (this.dragActive && !this.pinchActive && p.isDown &&
+          this.input.manager.pointers.filter(pt => pt.isDown).length < 2) {
+        const dx = p.x - this.dragStartX;
+        const dy = p.y - this.dragStartY;
+        if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) {
+          this.dragMoved = true;
+        }
+        if (this.dragMoved) {
+          // Delta-based panning: finger stays attached to the same world point
+          // (Google Maps style — 1:1 screen-to-world tracking)
+          cam.scrollX -= (p.x - p.prevPosition.x) / cam.zoom;
+          cam.scrollY -= (p.y - p.prevPosition.y) / cam.zoom;
+        }
+      }
+
       this.updateHoverTile(p);
     });
 
-    this.input.on('pointerup',   (p: Phaser.Input.Pointer) => this.onPointerUp(p));
+    this.input.on('pointerup', (p: Phaser.Input.Pointer) => this.onPointerUp(p));
+
+    // ── Clean up touch gesture state on any pointer release ─────────────
+    this.input.on('pointerup', () => {
+      const active = this.input.manager.pointers.filter(pt => pt.isDown).length;
+      if (active < 2) {
+        // Only reset pinch if fewer than 2 pointers remain down
+        this.pinchActive = false;
+      }
+      if (active === 0) {
+        this.dragActive = false;
+        // dragMoved is consumed in onPointerUp, so don't reset here
+      }
+    });
 
     // Keyboard shortcuts
     const kb = this.input.keyboard!;
@@ -1095,6 +1214,13 @@ export class GameScene extends Phaser.Scene {
 
   // ─── Input handlers ──────────────────────────────────────────────────────
   private onPointerUp(p: Phaser.Input.Pointer) {
+    // If this was a touch drag (not a tap), consume and reset
+    if (this.dragMoved) {
+      this.dragMoved = false;
+      this.dragActive = false;
+      return;
+    }
+
     if (p.rightButtonReleased()) {
       this.cancelPlacing();
       this.deselectTower();

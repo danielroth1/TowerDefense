@@ -45,6 +45,9 @@ const config: Phaser.Types.Core.GameConfig = {
   scale: {
     mode: Phaser.Scale.RESIZE,
   },
+  input: {
+    activePointers: 3,
+  },
 };
 
 const game = new Phaser.Game(config);

@@ -22,6 +22,9 @@ export class HUD {
   private goldTxt:     Phaser.GameObjects.Text;
   private timerBg:     Phaser.GameObjects.Graphics;
   private timerTxt:    Phaser.GameObjects.Text;
+  private fullscreenBg:  Phaser.GameObjects.Graphics;
+  private fullscreenTxt: Phaser.GameObjects.Text;
+  private fullscreenHit: Phaser.GameObjects.Rectangle;
   private settingsBg:  Phaser.GameObjects.Graphics;
   private settingsTxt: Phaser.GameObjects.Text;
   private settingsHit: Phaser.GameObjects.Rectangle;
@@ -100,6 +103,22 @@ export class HUD {
     this.timerTxt = scene.add.text(0, 0, '⏱ 0:00', {
       fontSize: '17px', fontFamily: 'monospace', color: '#8899aa',
     }).setScrollFactor(0).setDepth(D + 1).setOrigin(0.5);
+
+    // ── Fullscreen badge ─────────────────────────────────────────────────────
+    this.fullscreenBg  = scene.add.graphics().setScrollFactor(0).setDepth(D);
+    this.fullscreenTxt = scene.add.text(0, 0, '⛶', {
+      fontSize: '18px', fontFamily: 'monospace', color: '#aabbcc',
+    }).setScrollFactor(0).setDepth(D + 1).setOrigin(0.5);
+
+    this.fullscreenHit = scene.add.rectangle(0, 0, 48, 36, 0, 0)
+      .setScrollFactor(0).setDepth(D + 2).setInteractive({ useHandCursor: true })
+      .on('pointerup', () => this.toggleFullscreen())
+      .on('pointerover', () => { this.fullscreenTxt.setColor('#ffffff'); })
+      .on('pointerout',  () => { this.fullscreenTxt.setColor('#aabbcc'); });
+
+    // Listen for browser fullscreen changes to update the icon
+    document.addEventListener('fullscreenchange', () => this.updateFullscreenIcon());
+    document.addEventListener('webkitfullscreenchange', () => this.updateFullscreenIcon());
 
     // ── Settings badge ───────────────────────────────────────────────────────
     this.settingsBg  = scene.add.graphics().setScrollFactor(0).setDepth(D);
@@ -238,6 +257,7 @@ export class HUD {
       this.livesBg, this.livesTxt,
       this.goldBg,  this.goldTxt,
       this.timerBg, this.timerTxt,
+      this.fullscreenBg, this.fullscreenTxt, this.fullscreenHit,
       this.settingsBg, this.settingsTxt, this.settingsHit,
       this.countdownTxt,
       this.bossContainer,
@@ -307,6 +327,7 @@ export class HUD {
     const goldW    = Math.max(80, Math.round(120 * sc));
     const timerW   = Math.max(72, Math.round(100 * sc));
     const settingsW= Math.max(34, Math.round(48  * sc));
+    const fullscreenW= Math.max(34, Math.round(48  * sc));
     const fontSz   = Math.max(11, Math.round(17  * sc));
     const smFontSz = Math.max(9,  Math.round(14  * sc));
 
@@ -314,6 +335,7 @@ export class HUD {
     this.livesTxt.setStyle({ fontSize: fontSz + 'px' });
     this.goldTxt.setStyle({ fontSize: fontSz + 'px' });
     this.timerTxt.setStyle({ fontSize: fontSz + 'px' });
+    this.fullscreenTxt.setStyle({ fontSize: Math.max(12, Math.round(18 * sc)) + 'px' });
     this.settingsTxt.setStyle({ fontSize: Math.max(12, Math.round(18 * sc)) + 'px' });
     this.countdownTxt.setStyle({ fontSize: smFontSz + 'px' });
     this.heroTxt.setStyle({ fontSize: Math.max(10, Math.round(15 * sc)) + 'px' });
@@ -321,12 +343,13 @@ export class HUD {
 
     const CY = padT + bh / 2;
 
-    // Badge centres, right to left
+    // Badge centres, right to left:  Lives | Gold | Timer | Settings | Fullscreen
     const right = W - padR;
-    const sx = right - settingsW / 2;
-    const tx = sx  - settingsW / 2 - gap - timerW / 2;
-    const gx = tx  - timerW  / 2 - gap - goldW  / 2;
-    const lx = gx  - goldW   / 2 - gap - livesW / 2;
+    const fx = right - fullscreenW / 2;
+    const sx = fx   - fullscreenW / 2 - gap - settingsW / 2;
+    const tx = sx   - settingsW  / 2 - gap - timerW   / 2;
+    const gx = tx   - timerW     / 2 - gap - goldW    / 2;
+    const lx = gx   - goldW      / 2 - gap - livesW   / 2;
 
     drawPillBadge(this.livesBg, lx, CY, livesW, bh);
     this.livesTxt.setPosition(lx, CY);
@@ -340,6 +363,10 @@ export class HUD {
     drawPillBadge(this.settingsBg, sx, CY, settingsW, bh);
     this.settingsTxt.setPosition(sx, CY);
     this.settingsHit.setPosition(sx, CY).setSize(settingsW, bh);
+
+    drawPillBadge(this.fullscreenBg, fx, CY, fullscreenW, bh);
+    this.fullscreenTxt.setPosition(fx, CY);
+    this.fullscreenHit.setPosition(fx, CY).setSize(fullscreenW, bh);
 
     // Countdown at top-centre
     this.countdownTxt.setPosition(W / 2, padT + bh + 8);
@@ -517,5 +544,32 @@ export class HUD {
     this.modalCloseBtn.setVisible(false);
     for (const btn of this.modalWeatherBtns) btn.setVisible(false);
     this.modalCartDebugBtn.setVisible(false);
+  }
+
+  // ─── Fullscreen ───────────────────────────────────────────────────────
+
+  private toggleFullscreen() {
+    const doc = document as any;
+    const isFullscreen = !!(document.fullscreenElement || doc.webkitFullscreenElement);
+    if (!isFullscreen) {
+      const el = document.documentElement;
+      if (el.requestFullscreen) {
+        el.requestFullscreen().catch(() => {});
+      } else if ((el as any).webkitRequestFullscreen) {
+        (el as any).webkitRequestFullscreen();
+      }
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      } else if (doc.webkitExitFullscreen) {
+        doc.webkitExitFullscreen();
+      }
+    }
+  }
+
+  private updateFullscreenIcon() {
+    const doc = document as any;
+    const isFullscreen = !!(document.fullscreenElement || doc.webkitFullscreenElement);
+    this.fullscreenTxt.setText(isFullscreen ? '🗖' : '⛶');
   }
 }
