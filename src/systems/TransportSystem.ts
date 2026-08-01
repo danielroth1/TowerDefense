@@ -201,10 +201,17 @@ export class TransportSystem {
     }
 
     for (const delivery of toComplete) {
-      this.economySim.completeDelivery(delivery.to, delivery.resource, delivery.deliveryType);
-      delivery.sprite.destroy();
-      const idx = this.deliveries.indexOf(delivery);
-      if (idx >= 0) this.deliveries.splice(idx, 1);
+      try {
+        this.economySim.completeDelivery(delivery.to, delivery.resource, delivery.deliveryType);
+      } catch (err) {
+        // Never let a delivery to a removed/destroyed building break the
+        // update loop — just log and discard the cart below.
+        console.warn('[Transport] Delivery to unavailable building discarded', err);
+      } finally {
+        delivery.sprite.destroy();
+        const idx = this.deliveries.indexOf(delivery);
+        if (idx >= 0) this.deliveries.splice(idx, 1);
+      }
     }
   }
 

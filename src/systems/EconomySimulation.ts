@@ -509,6 +509,11 @@ export class EconomySimulation {
     resource: EconomyResource,
     deliveryType: DeliveryType,
   ): void {
+    // The destination building may have been sold/removed while the cart was
+    // in transit. Bail out without touching its (possibly destroyed) state —
+    // the caller will simply discard the cart.
+    if (this.buildings.indexOf(receiver) < 0) return;
+
     if (deliveryType === 'warehouse') {
       receiver.reservedInventory = Math.max(0, receiver.reservedInventory - 1);
       receiver.inventory++;
