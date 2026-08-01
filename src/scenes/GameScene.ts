@@ -265,8 +265,12 @@ export class GameScene extends Phaser.Scene {
     this.registerEvents();
     this.initResizeHandler();
 
-    // Sound init on first interaction — disable BGM by default in debug mode
-    this.sfx.init({ musicEnabled: false });
+    // Audio is unlocked on the PLAY gesture in MenuScene. This is a safety
+    // net: (re)create/resume the AudioContext on the first in-game gesture —
+    // creating it outside a user gesture logs a warning and stays suspended
+    // on iOS. BGM is off by default in debug mode.
+    if (this._debug) this.sfx.musicEnabled = false;
+    this.input.once('pointerdown', () => this.sfx.init());
 
     // Perf test: fill every buildable tile with a random tower + spawn 200 enemies
     if (this._perfTest) {

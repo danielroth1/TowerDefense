@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { COLORS } from '../utils/constants';
 import { hashSeed } from '../utils/helpers';
+import { SoundSystem } from '../systems/SoundSystem';
 
 export class MenuScene extends Phaser.Scene {
   private seedInput: HTMLInputElement | null = null;
@@ -187,6 +188,9 @@ export class MenuScene extends Phaser.Scene {
     const raw = this.seedInput?.value.trim() || String(Math.floor(Math.random() * 999999));
     const seed = hashSeed(raw || String(Date.now()));
     const debug = this.debugInput?.checked ?? false;
+    // Unlock WebAudio inside this user gesture (PLAY tap) — creating the
+    // AudioContext outside a gesture is blocked/suspended on mobile.
+    SoundSystem.instance.init({ musicEnabled: !debug });
     this.cleanupInput();
     this.scene.start('GameScene', { seed, seedStr: raw, debug });
   }
@@ -194,6 +198,8 @@ export class MenuScene extends Phaser.Scene {
   private startGamePerfTest() {
     const raw = this.seedInput?.value.trim() || String(Math.floor(Math.random() * 999999));
     const seed = hashSeed(raw || String(Date.now()));
+    // Perf test runs in debug mode — no BGM.
+    SoundSystem.instance.init({ musicEnabled: false });
     this.cleanupInput();
     this.scene.start('GameScene', { seed, seedStr: raw, perfTest: true });
   }
