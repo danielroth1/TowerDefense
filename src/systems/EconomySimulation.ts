@@ -62,8 +62,8 @@ export class EconomySimulation {
   /** Tracks what resource type each warehouse is storing (by building reference). */
   private warehouseResources = new WeakMap<EconomyBuilding, EconomyResource>();
 
-  /** Tracks what resource type each market is holding (by building reference). */
-  private marketResources = new WeakMap<EconomyBuilding, EconomyResource>();
+  /** FIFO queue of resource types held by each market (one entry per inventory unit). */
+  private marketResources = new WeakMap<EconomyBuilding, EconomyResource[]>();
 
   /** Fisher ships per fishery building (upgraded fisheries get 2 ships). */
   private fisherShips = new Map<EconomyBuilding, FisherShip[]>();
@@ -110,6 +110,7 @@ export class EconomySimulation {
     const ships = this.fisherShips.get(building);
     if (ships) { ships.forEach(s => s.destroy()); this.fisherShips.delete(building); }
     this.warehouseTimers.delete(building);
+    this.marketResources.delete(building);
     building.destroy();
   }
 
@@ -225,7 +226,7 @@ export class EconomySimulation {
         b.redraw();
 
         const def = ECO_BUILDING_DEFS[b.buildingType];
-        const resource = this.marketResources.get(b);
+        const resource = this.marketResources.get(b)?.shift();
         const baseValue = resource ? RESOURCE_GOLD_VALUES[resource] : def.goldPerUnit;
         const gold = Math.floor(baseValue * b.valueMultiplier);
         this.economy.earnFromEconomy(gold);
@@ -521,7 +522,9 @@ export class EconomySimulation {
     } else if (deliveryType === 'market') {
       receiver.reservedInventory = Math.max(0, receiver.reservedInventory - 1);
       receiver.inventory++;
-      this.marketResources.set(receiver, resource);
+      const queue = this.marketResources.get(receiver) ?? [];
+      queue.push(resource);
+      this.marketResources.set(receiver, queue);
     } else {
       // consumer
       receiver.reservedInput = Math.max(0, receiver.reservedInput - 1);

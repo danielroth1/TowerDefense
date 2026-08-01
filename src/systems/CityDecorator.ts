@@ -18,8 +18,8 @@ import { createPRNG } from '../utils/helpers';
 // ─── Frequency parameters ───────────────────────────────────────────────────
 
 export const CITY_PARAMS = {
-  /** Probability a candidate 2×2 grass area becomes a market. */
-  marketRarity: 0.12,
+  /** Exact number of markets to place (will place fewer if not enough candidates). */
+  marketCount: 2,
   /** Probability a candidate grass+water edge becomes a harbor. */
   harborRarity: 0.35,
   /** Chance to surround a market with houses (0-1). */
@@ -78,7 +78,7 @@ const CITY_GROUPS: DecorationGroupDef[] = [
     label: 'Market Square',
     w: 1, h: 1,
     textureKey: 'eco_market',
-    rarity: CITY_PARAMS.marketRarity,
+    rarity: 1.0,
   },
   // ── Solo building groups (1×1) ────────────────────────────────────────
   {
@@ -176,7 +176,7 @@ export function generateCityDecorations(
 
   for (const group of CITY_GROUPS) {
     if (group.id === 'market') {
-      placeMarkets(group, grid, used, rng, placements, markUsed);
+      placeMarkets(group, grid, used, rng, placements, markUsed, CITY_PARAMS.marketCount);
     }
   }
 
@@ -224,6 +224,7 @@ function placeMarkets(
   rng: () => number,
   placements: DecorationPlacement[],
   markUsed: (r: number, c: number) => void,
+  desiredCount: number,
 ) {
   const gw = group.w, gh = group.h;
   const candidates: { row: number; col: number }[] = [];
@@ -242,12 +243,11 @@ function placeMarkets(
     }
   }
 
-  const maxPlace = Math.max(1, Math.floor(candidates.length * 0.25));
-  for (let i = 0; i < maxPlace; i++) {
-    if (candidates.length === 0) break;
-    const idx = Math.floor(rng() * candidates.length);
-    const { row, col } = candidates.splice(idx, 1)[0];
-    if (rng() > group.rarity) continue;
+  // Shuffle candidates and pick exactly desiredCount (or all if fewer exist)
+  const shuffled = [...candidates].sort(() => rng() - 0.5);
+  const placeCount = Math.min(desiredCount, shuffled.length);
+  for (let i = 0; i < placeCount; i++) {
+    const { row, col } = shuffled[i];
 
     placements.push({ row, col, w: gw, h: gh, textureKey: group.textureKey, depth: DEPTH_BUILDING, isEcoMarket: true });
     for (let dr = 0; dr < gh; dr++) {
