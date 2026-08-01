@@ -38,6 +38,7 @@ import type { TowerType } from '../data/towers';
 import { TOWER_DEFS, TOWER_TYPES_ORDERED } from '../data/towers';
 import { ABILITY_DEFS, type AbilityType } from '../data/abilities';
 import { HOTKEYS } from '../data/hotkeys';
+import { isTouch, getSafeAreaInsets } from '../utils/Device';
 
 /** Unique background fill per ability (themed visuals, Phase 6). */
 const ABILITY_FILL: Record<AbilityType, number> = {
@@ -183,8 +184,17 @@ export class GameScene extends Phaser.Scene {
   // Ability button sizing (updated on resize)
   private _abilityBtnSize = 62;
   private _abilityGap     = 8;
+  private _abilityRow     = false; // horizontal row fallback on short screens
   private readonly _abilityStartX = 12;
   private readonly _abilityStartY = 8;
+
+  // Touch-only zoom buttons (bottom-right, above the bar)
+  private zoomInBg!:   Phaser.GameObjects.Graphics;
+  private zoomInTxt!:  Phaser.GameObjects.Text;
+  private zoomInHit!:  Phaser.GameObjects.Rectangle;
+  private zoomOutBg!:  Phaser.GameObjects.Graphics;
+  private zoomOutTxt!: Phaser.GameObjects.Text;
+  private zoomOutHit!: Phaser.GameObjects.Rectangle;
 
   // Floating ability buttons
   private abilityFloating: Map<AbilityType, {
@@ -271,6 +281,14 @@ export class GameScene extends Phaser.Scene {
     // on iOS. BGM is off by default in debug mode.
     if (this._debug) this.sfx.musicEnabled = false;
     this.input.once('pointerdown', () => this.sfx.init());
+
+    // Auto-pause when the app is backgrounded / hidden (mobile)
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && !this.isPaused) this.togglePause();
+    });
+    window.addEventListener('blur', () => {
+      if (isTouch() && !this.isPaused) this.togglePause();
+    });
 
     // Perf test: fill every buildable tile with a random tower + spawn 200 enemies
     if (this._perfTest) {
@@ -678,6 +696,9 @@ export class GameScene extends Phaser.Scene {
       this.uiGroup.add(abtn.hit);
     }
 
+    // Touch-only zoom controls (+/−)
+    this.createZoomButtons();
+
     // Weather system screen-fixed FX also render on the UI camera
     this.weatherSystem.setUIGroup(this.uiGroup);
 
@@ -797,8 +818,13 @@ export class GameScene extends Phaser.Scene {
 
     // ── Main camera: renders the game world in the viewport between UI bars ──
     this.cameras.main.setBounds(0, 0, W, H);
-    this.cameras.main.setZoom(1.75);
-    this.cameras.main.setViewport(0, 0, this.scale.width, this.scale.height - this.bottomBar.barHeight);
+    // Default zoom adapts to screen size: phones start zoomed out so a
+    // reasonable area is visible; desktop keeps the previous ~1.75× view.
+    const vpW = this.scale.width;
+    const vpH = this.scale.height - this.bottomBar.barHeight;
+    const fitZoom = Math.min(vpW / W, vpH / H);
+    this.cameras.main.setZoom(Phaser.Math.Clamp(fitZoom * 3.5, 0.7, 1.75));
+    this.cameras.main.setViewport(0, 0, vpW, vpH);
     // Main camera ignores UI objects
     this.cameras.main.ignore(this.uiGroup);
 
@@ -896,6 +922,8 @@ export class GameScene extends Phaser.Scene {
         if (p.x >= this.minimapX && p.x <= mmRight && p.y >= this.minimapY && p.y <= mmBottom) return;
         // Don't start drag on ability buttons
         if (this.isClickOnAbilityButton(p)) return;
+        // Don't start drag on zoom buttons
+        if (this.isClickOnZoomButton(p)) return;
 
         this.dragActive = true;
         this.dragMoved = false;
@@ -1262,6 +1290,9 @@ export class GameScene extends Phaser.Scene {
     // Block clicks when settings modal is open
     if (this.hud.isSettingsOpen) return;
 
+    // Zoom buttons have their own handlers
+    if (this.isClickOnZoomButton(p)) return;
+
     // Block clicks on the floating wave button (above the bar)
     if (this.bottomBar.isInWaveArea(p.x, p.y)) return;
 
@@ -1280,8 +1311,8 @@ export class GameScene extends Phaser.Scene {
     // ── HERO SELECTION: highest priority ──────────────────────────────────
     if (!this.placingTower && !this.placingBarricade && !this.placingEconomy) {
       const heroBounds = this.hero.getBounds();
-      // Expand bounds slightly for easier clicking
-      const pad = 10;
+      // Expand bounds slightly for easier tapping (bigger on touch)
+      const pad = isTouch() ? 18 : 10;
       if (wx >= heroBounds.left - pad && wx <= heroBounds.right + pad &&
           wy >= heroBounds.top  - pad && wy <= heroBounds.bottom + pad) {
         // Toggle hero selection.  Clicking the hero a second time deselects it.
@@ -2089,6 +2120,9 @@ export class GameScene extends Phaser.Scene {
 
       // Ability buttons
       this.relayoutAbilities(H, this._barH);
+
+      // Touch zoom buttons
+      this.relayoutZoomButtons();
     };
 
     this.scale.on('resize', (size: Phaser.Structs.Size) => {
@@ -2130,20 +2164,20 @@ export class GameScene extends Phaser.Scene {
    */
   private relayoutAbilities(H: number, barH: number) {
     if (this.abilityFloating.size === 0) return;  // not yet created
-    const vpH = H - barH;
+    const safe = getSafeAreaInsets();
+    const vpH = H - barH - safe.bottom;
     const btns = Math.max(46, Math.min(70, Math.round(vpH * 0.108)));
     const gap  = Math.max(5, Math.round(btns * 0.13));
     this._abilityBtnSize = btns;
     this._abilityGap     = gap;
 
-    const startX = this._abilityStartX;
-    const startY = this._abilityStartY;
+    // On very short screens (landscape phones) fall back to a horizontal row
+    this._abilityRow = ABILITY_DEFS.length * (btns + gap) - gap > vpH - 8;
 
     ABILITY_DEFS.forEach((def, i) => {
       const btn = this.abilityFloating.get(def.type);
       if (!btn) return;
-      const cx = startX + btns / 2;
-      const cy = startY + i * (btns + gap) + btns / 2;
+      const { cx, cy } = this.abilityPos(i);
       const fillColor   = ABILITY_FILL[def.type]  ?? 0x1a2a3a;
       const borderColor = ABILITY_BORDER[def.type] ?? def.color;
 
@@ -2163,6 +2197,81 @@ export class GameScene extends Phaser.Scene {
       const iconSize = Math.round(btns * 0.72);
       btn.icon.setPosition(cx, cy).setDisplaySize(iconSize, iconSize);
     });
+  }
+
+  // ─── Touch-only zoom buttons ───────────────────────────────────────────
+
+  private createZoomButtons() {
+    if (!isTouch()) return;
+    const D = 64;
+    const size = 44;
+
+    const mkBtn = (label: string) => {
+      const bg  = this.add.graphics().setScrollFactor(0).setDepth(D);
+      const txt = this.add.text(0, 0, label, {
+        fontSize: '28px', fontFamily: 'monospace', color: '#eef0f4', align: 'center',
+      }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 1);
+      const hit = this.add.rectangle(0, 0, size, size, 0, 0)
+        .setScrollFactor(0).setInteractive({ useHandCursor: true }).setDepth(D + 2);
+      return { bg, txt, hit };
+    };
+
+    const inBtn  = mkBtn('+');
+    const outBtn = mkBtn('−');
+    this.zoomInBg = inBtn.bg;   this.zoomInTxt = inBtn.txt;   this.zoomInHit = inBtn.hit;
+    this.zoomOutBg = outBtn.bg; this.zoomOutTxt = outBtn.txt; this.zoomOutHit = outBtn.hit;
+
+    this.zoomInHit.on('pointerup',  () => this.zoomCameraBy( 0.5));
+    this.zoomOutHit.on('pointerup', () => this.zoomCameraBy(-0.5));
+
+    for (const o of [
+      this.zoomInBg, this.zoomInTxt, this.zoomInHit,
+      this.zoomOutBg, this.zoomOutTxt, this.zoomOutHit,
+    ]) {
+      this.uiGroup.add(o);
+    }
+
+    this.relayoutZoomButtons();
+  }
+
+  private relayoutZoomButtons() {
+    if (!this.zoomInBg) return;
+    const size = 44;
+    const gap  = 8;
+    const W = this.scale.width;
+    const H = this.scale.height;
+    const cyOut = H - this._barH - 96;   // just above the floating wave button
+    const cyIn  = cyOut - size - gap;
+    const cx = W - size / 2 - 10;
+
+    const draw = (bg: Phaser.GameObjects.Graphics, cx: number, cy: number) => {
+      bg.clear();
+      bg.fillStyle(0x0d1117, 0.92);
+      bg.fillRoundedRect(cx - size / 2, cy - size / 2, size, size, 8);
+      bg.lineStyle(1, 0x4488cc, 0.8);
+      bg.strokeRoundedRect(cx - size / 2, cy - size / 2, size, size, 8);
+    };
+    draw(this.zoomInBg, cx, cyIn);
+    draw(this.zoomOutBg, cx, cyOut);
+    this.zoomInTxt.setPosition(cx, cyIn);
+    this.zoomOutTxt.setPosition(cx, cyOut);
+    this.zoomInHit.setPosition(cx, cyIn).setSize(size, size);
+    this.zoomOutHit.setPosition(cx, cyOut).setSize(size, size);
+  }
+
+  private zoomCameraBy(delta: number) {
+    const cam = this.cameras.main;
+    const newZoom = Phaser.Math.Clamp(cam.zoom + delta, CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM);
+    if (newZoom === cam.zoom) return;
+    // Zoom toward the centre of the game viewport
+    const cx = this.scale.width / 2;
+    const cy = (this.scale.height - this._barH) / 2;
+    const toCenterX = cx - cam.width / 2;
+    const toCenterY = cy - cam.height / 2;
+    const scaleDiff = (1 / cam.zoom) - (1 / newZoom);
+    cam.scrollX += toCenterX * scaleDiff;
+    cam.scrollY += toCenterY * scaleDiff;
+    cam.setZoom(newZoom);
   }
 
   private createMinimap() {
@@ -2223,13 +2332,25 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ─── Floating Ability Buttons (top-left) ─────────────────────────────
+
+  /** Screen position of ability button i, honouring row/column layout. */
+  private abilityPos(i: number): { cx: number; cy: number } {
+    const btns = this._abilityBtnSize;
+    const gap  = this._abilityGap;
+    const startX = this._abilityStartX;
+    const startY = this._abilityStartY + getSafeAreaInsets().top;
+    if (this._abilityRow) {
+      return { cx: startX + i * (btns + gap) + btns / 2, cy: startY + btns / 2 };
+    }
+    return { cx: startX + btns / 2, cy: startY + i * (btns + gap) + btns / 2 };
+  }
+
   private createFloatingAbilities() {
     const D = 60;
 
     ABILITY_DEFS.forEach((def, i) => {
       // Initial positions — will be corrected by relayoutAbilities() immediately after
-      const cx = this._abilityStartX + this._abilityBtnSize / 2;
-      const cy = this._abilityStartY + i * (this._abilityBtnSize + this._abilityGap) + this._abilityBtnSize / 2;
+      const { cx, cy } = this.abilityPos(i);
 
       const bg    = this.add.graphics().setScrollFactor(0).setDepth(D);
       const icon  = this.add.image(cx, cy, `ability_${def.type}`)
@@ -2245,9 +2366,7 @@ export class GameScene extends Phaser.Scene {
       // Hover/click handlers read from instance fields so resize doesn't break them
       const drawBtn = (_hover: boolean, selected: boolean) => {
         const btns = this._abilityBtnSize;
-        const gap  = this._abilityGap;
-        const bcx  = this._abilityStartX + btns / 2;
-        const bcy  = this._abilityStartY + i * (btns + gap) + btns / 2;
+        const { cx: bcx, cy: bcy } = this.abilityPos(i);
         const fill = ABILITY_FILL[def.type] ?? 0x1a2a3a;
         const bdr  = ABILITY_BORDER[def.type] ?? def.color;
         const useFill = selected ? 0x2a4a6a : fill;
@@ -2264,8 +2383,8 @@ export class GameScene extends Phaser.Scene {
 
       const hit = this.add.rectangle(cx, cy, this._abilityBtnSize, this._abilityBtnSize, 0, 0)
         .setScrollFactor(0).setInteractive({ useHandCursor: true }).setDepth(D + 4);
-      hit.on('pointerover', () => drawBtn(true,  this.abilitySystem.pendingCast === def.type));
-      hit.on('pointerout',  () => drawBtn(false, this.abilitySystem.pendingCast === def.type));
+      hit.on('pointerover', () => { if (!isTouch()) drawBtn(true,  this.abilitySystem.pendingCast === def.type); });
+      hit.on('pointerout',  () => { if (!isTouch()) drawBtn(false, this.abilitySystem.pendingCast === def.type); });
       hit.on('pointerup',   () => this.abilitySystem.selectAbility(def.type));
 
       this.abilityFloating.set(def.type, { bg, icon, cdOvl, cdTxt, cost, hit });
@@ -2289,9 +2408,7 @@ export class GameScene extends Phaser.Scene {
         const btn = this.abilityFloating.get(def.type);
         if (!btn) return;
         const btns = this._abilityBtnSize;
-        const gap  = this._abilityGap;
-        const bcx  = this._abilityStartX + btns / 2;
-        const bcy  = this._abilityStartY + i * (btns + gap) + btns / 2;
+        const { cx: bcx, cy: bcy } = this.abilityPos(i);
         const isSelected  = def.type === type;
         const fillColor   = ABILITY_FILL[def.type]  ?? 0x1a2a3a;
         const borderColor = ABILITY_BORDER[def.type] ?? def.color;
@@ -2309,31 +2426,31 @@ export class GameScene extends Phaser.Scene {
 
   /** Check whether a pointer event landed on a floating ability button. */
   private isClickOnAbilityButton(p: Phaser.Input.Pointer): boolean {
-    const btns  = this._abilityBtnSize;
-    const gap   = this._abilityGap;
-    const startX = this._abilityStartX;
-    const startY = this._abilityStartY;
-    if (p.x < startX || p.x > startX + btns) return false;
+    const btns = this._abilityBtnSize;
     for (let i = 0; i < ABILITY_DEFS.length; i++) {
-      const top = startY + i * (btns + gap);
-      if (p.y >= top && p.y <= top + btns) return true;
+      const { cx, cy } = this.abilityPos(i);
+      if (p.x >= cx - btns / 2 && p.x <= cx + btns / 2 &&
+          p.y >= cy - btns / 2 && p.y <= cy + btns / 2) return true;
     }
     return false;
+  }
+
+  /** Check whether a pointer event landed on a touch zoom button. */
+  private isClickOnZoomButton(p: Phaser.Input.Pointer): boolean {
+    if (!this.zoomInHit) return false;
+    return this.zoomInHit.getBounds().contains(p.x, p.y)
+        || this.zoomOutHit.getBounds().contains(p.x, p.y);
   }
 
   // ─── Floating Ability Update ───────────────────────────────────────────
 
   private updateFloatingAbilities() {
-    const btns  = this._abilityBtnSize;
-    const gap   = this._abilityGap;
-    const startX = this._abilityStartX;
-    const startY = this._abilityStartY;
+    const btns = this._abilityBtnSize;
 
     ABILITY_DEFS.forEach((def, i) => {
       const btn = this.abilityFloating.get(def.type);
       if (!btn) return;
-      const cx = startX + btns / 2;
-      const cy = startY + i * (btns + gap) + btns / 2;
+      const { cx, cy } = this.abilityPos(i);
 
       const cd = this.abilitySystem.getCooldown(def.type);
       btn.cdOvl.clear();

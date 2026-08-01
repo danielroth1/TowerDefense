@@ -8,6 +8,7 @@ import type { Tower } from '../entities/Tower';
 import type { EconomyBuilding } from '../entities/EconomyBuilding';
 import { drawElevatedButton } from '../utils/ButtonStyles';
 import { HOTKEYS } from '../data/hotkeys';
+import { isTouch, getSafeAreaInsets } from '../utils/Device';
 
 const TLEFT = 0; // 12;  // left margin for tower button area
 
@@ -92,6 +93,15 @@ export class BottomBar {
   private _visibleTowers = 6;
   private _scrollOffset  = 0;
 
+  // Touch drag-to-scroll state
+  private _buildVisible = true;
+  private _dragActive  = false;
+  private _dragStartX  = 0;
+  private _dragOffset0 = 0;
+  private _dragMoved   = false;
+  private _touch       = isTouch();
+  private _safeBottom  = 0;
+
   // Callbacks
   onPlaceTower: ((type: TowerType) => void) | null = null;
   onPlaceEconomy: ((type: EconomyBuildingType) => void) | null = null;
@@ -121,6 +131,30 @@ export class BottomBar {
     this.scrollNextHit = scene.add.rectangle(-999, 0, 28, 80, 0, 0)
       .setScrollFactor(0).setDepth(D + 4).setInteractive({ useHandCursor: true }).setVisible(false)
       .on('pointerup', () => this.scrollTowers(+this._visibleTowers));
+
+    // ── Touch drag-to-scroll on the build bar ─────────────────────────────
+    scene.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      if (!this._buildVisible || this._ARROW_W <= 0) return;
+      if (p.y < this._BAR_Y || p.y > this._BAR_Y + this._BAR_H) return;
+      if (this.isInWaveArea(p.x, p.y)) return;
+      this._dragActive = true;
+      this._dragStartX = p.x;
+      this._dragOffset0 = this._scrollOffset;
+      this._dragMoved = false;
+    });
+    scene.input.on('pointermove', (p: Phaser.Input.Pointer) => {
+      if (!this._dragActive || !p.isDown) return;
+      const dx = p.x - this._dragStartX;
+      if (Math.abs(dx) > 12) this._dragMoved = true;
+      const max = BUILD_ITEMS.length - this._visibleTowers;
+      this._scrollOffset = Phaser.Math.Clamp(
+        this._dragOffset0 - Math.round(dx / (this._TBW + this._TGAP)),
+        0, max,
+      );
+      this.repositionBuildButtons();
+      this.updateScrollArrows();
+    });
+    scene.input.on('pointerup', () => { this._dragActive = false; });
 
     // ── Build section ────────────────────────────────────────────────────────
     BUILD_ITEMS.forEach((item, i) => {
@@ -180,6 +214,8 @@ export class BottomBar {
         this.drawTowerBtn(bg2, this.towerScreenX(i), this._TOWER_CY, this._TBW, this._TBH, color, false, false, this.economy.canAfford(currentCost));
       });
       hit.on('pointerup', () => {
+        // A swipe/drag on the bar must not trigger a build tap
+        if (this._dragMoved) { this._dragMoved = false; return; }
         const currentCost = isTower
           ? (def as any).baseCost
           : escalatedCost(def as any, this.ecoSim.countOfType(item.type as EconomyBuildingType));
@@ -214,7 +250,7 @@ export class BottomBar {
     this.waveLine1 = scene.add.text(0, 0, 'WAVE 0 / 50', {
       fontSize: '11px', fontFamily: 'monospace', color: '#8899aa', align: 'center',
     }).setOrigin(0.5).setScrollFactor(0).setDepth(WD + 1);
-    const waveHk = `[${HOTKEYS.actions.sendWave || 'SPACE'}]`;
+    const waveHk = this._touch ? '' : `[${HOTKEYS.actions.sendWave || 'SPACE'}]`;
     this.waveLabel = scene.add.text(0, 0, `▶ SEND\n${waveHk}`, {
       fontSize: '15px', fontFamily: 'monospace', color: '#44ff88', align: 'center', lineSpacing: 4,
     }).setOrigin(0.5).setScrollFactor(0).setDepth(WD + 1);
@@ -222,7 +258,11 @@ export class BottomBar {
       .setScrollFactor(0).setInteractive({ useHandCursor: true }).setDepth(WD + 2);
     this.waveHit.on('pointerover', () => this.drawWaveBtn(true));
     this.waveHit.on('pointerout',  () => this.drawWaveBtn(false));
-    this.waveHit.on('pointerup',   () => this.onSendWave?.());
+    this.waveHit.on('pointerup',   () => {
+      // A swipe that ends over the wave button must not send the wave
+      if (this._dragMoved) { this._dragMoved = false; return; }
+      this.onSendWave?.();
+    });
 
     this.drawWaveBtn(false);
 
@@ -291,7 +331,8 @@ export class BottomBar {
       this.drawTowerBtn(this.buildBgs[i], cx, cy, this._TBW, this._TBH, color, false, false, can);
       this.buildIcons[i].setPosition(cx, cy - this._TBH * 0.15).setDisplaySize(iconSize, iconSize);
       this.buildNames[i].setPosition(cx, cy + this._TBH * 0.17).setStyle({ fontSize: nameFSPx + 'px' });
-      this.hotkeyLabels[i].setPosition(cx, cy + this._TBH * 0.31).setStyle({ fontSize: hkFSPx + 'px' });
+      this.hotkeyLabels[i].setPosition(cx, cy + this._TBH * 0.31).setStyle({ fontSize: hkFSPx + 'px' })
+        .setVisible(!this._touch);
       this.buildCosts[i].setPosition(cx, cy + this._TBH * 0.44).setStyle({ fontSize: costFSPx + 'px' });
       this.buildCosts[i].setColor(can ? '#ffd700' : '#885533');
       this.buildHits[i].setPosition(cx, cy).setSize(this._TBW - 4, this._TBH - 4);
@@ -385,10 +426,14 @@ export class BottomBar {
     const towerAreaW = sw - 2 * TLEFT;
     const arrowW = 30;
 
+    this._safeBottom = getSafeAreaInsets().bottom;
+
     // ── 0. Start with ideal bar height from screen pct ───────────────────
+    // Touch devices get a slimmer bar so the map stays visible in portrait.
+    const pct = this._touch ? 0.20 : BottomBar.BAR_HEIGHT_PCT;
     let barH = Math.max(
       BottomBar.MIN_BAR_H,
-      Math.min(BottomBar.MAX_BAR_H, Math.round(sh * BottomBar.BAR_HEIGHT_PCT))
+      Math.min(BottomBar.MAX_BAR_H, Math.round(sh * pct))
     );
 
     // ── 1. Buttons fill bar edge-to-edge (no vertical margins) ───────────
@@ -403,7 +448,7 @@ export class BottomBar {
     }
 
     this._BAR_H = barH;
-    this._BAR_Y = sh - this._BAR_H;
+    this._BAR_Y = sh - this._safeBottom - this._BAR_H;
     this._TOWER_CY = this._BAR_Y + Math.round(this._BAR_H * 0.5);
 
     // ── 2. Button dimensions (no vertical pad) ───────────────────────────
@@ -473,12 +518,12 @@ export class BottomBar {
       this.waveHit.input!.enabled = false;
       this.stopWavePulse();
     } else if (countdown > 0) {
-      const waveHkLabel = `[${HOTKEYS.actions.sendWave || 'SPACE'}]`;
+      const waveHkLabel = this._touch ? '' : `[${HOTKEYS.actions.sendWave || 'SPACE'}]`;
       this.waveLabel.setText(Math.ceil(countdown / 1000) + 's\n' + waveHkLabel).setColor('#aabbcc');
       this.waveHit.input!.enabled = true;
       this.stopWavePulse();
     } else {
-      this.waveLabel.setText('▶ SEND\n' + `[${HOTKEYS.actions.sendWave || 'SPACE'}]`).setColor('#44ff88');
+      this.waveLabel.setText('▶ SEND\n' + (this._touch ? '' : `[${HOTKEYS.actions.sendWave || 'SPACE'}]`)).setColor('#44ff88');
       this.waveHit.input!.enabled = true;
       this.startWavePulse();
     }
@@ -487,6 +532,7 @@ export class BottomBar {
   showBuildMode() {
     this.currentUpgradeTower = null;
     this.currentEcoBuilding = null;
+    this._buildVisible = true;
     this.setBuildVisible(true);
     this.setBuildInputEnabled(true);
     this.upgRoot.setVisible(false);
@@ -502,6 +548,7 @@ export class BottomBar {
   showUpgradeMode(tower: Tower) {
     this.currentUpgradeTower = tower;
     this.currentEcoBuilding = null;
+    this._buildVisible = false;
     this.setBuildVisible(false);
     this.setBuildInputEnabled(false);
     this.scrollPrevBg.setVisible(false);
@@ -516,6 +563,7 @@ export class BottomBar {
   showEconomyMode(building: EconomyBuilding) {
     this.currentEcoBuilding = building;
     this.currentUpgradeTower = null;
+    this._buildVisible = false;
     this.setBuildVisible(false);
     this.setBuildInputEnabled(false);
     this.scrollPrevBg.setVisible(false);
@@ -687,8 +735,10 @@ export class BottomBar {
         }).setOrigin(0.5));
       }
 
-      const line = [act.label.startsWith('💰') ? '' : `${act.cost}g`, act.hotkey ? `[${act.hotkey}]` : '']
-        .filter(Boolean).join(' ');
+      const line = [
+        act.label.startsWith('💰') ? '' : `${act.cost}g`,
+        !this._touch && act.hotkey ? `[${act.hotkey}]` : '',
+      ].filter(Boolean).join(' ');
       if (line) {
         this.upgRoot.add(this.scene.add.text(cx, CY + h * 0.42, line, {
           fontSize: Math.max(9, actFSPx - 1) + 'px', fontFamily: 'monospace',
@@ -863,8 +913,10 @@ export class BottomBar {
         }).setOrigin(0.5));
       }
 
-      const line = [act.label.startsWith('💰') ? '' : `${act.cost}g`, act.hotkey ? `[${act.hotkey}]` : '']
-        .filter(Boolean).join(' ');
+      const line = [
+        act.label.startsWith('💰') ? '' : `${act.cost}g`,
+        !this._touch && act.hotkey ? `[${act.hotkey}]` : '',
+      ].filter(Boolean).join(' ');
       if (line) {
         this.upgRoot.add(this.scene.add.text(cx, CY + h * 0.42, line, {
           fontSize: Math.max(9, actFSPx - 1) + 'px', fontFamily: 'monospace',

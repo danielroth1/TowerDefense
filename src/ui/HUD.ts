@@ -6,6 +6,7 @@ import type { WeatherState } from '../systems/WeatherSystem';
 import type { WeatherSystem } from '../systems/WeatherSystem';
 import { SoundSystem } from '../systems/SoundSystem';
 import { drawPillBadge } from '../utils/ButtonStyles';
+import { isTouch, isIOS, getSafeAreaInsets } from '../utils/Device';
 
 // ─── Responsive badge widths are computed per relayout; these are maximums ──
 const PAD_T = 12;
@@ -74,6 +75,9 @@ export class HUD {
   // Cached layout
   private _W = 0;
   private _sc = 1.0;  // responsive scale factor vs 1366×768 reference
+  private _padT = 12; // top padding incl. safe-area, refreshed in relayout()
+  private _bh = 36;   // badge height, refreshed in relayout()
+  private _touch = isTouch();
 
   constructor(scene: Phaser.Scene, debug: boolean, weatherSystem: WeatherSystem) {
     this.scene = scene;
@@ -113,8 +117,8 @@ export class HUD {
     this.fullscreenHit = scene.add.rectangle(0, 0, 48, 36, 0, 0)
       .setScrollFactor(0).setDepth(D + 2).setInteractive({ useHandCursor: true })
       .on('pointerup', () => this.toggleFullscreen())
-      .on('pointerover', () => { this.fullscreenTxt.setColor('#ffffff'); })
-      .on('pointerout',  () => { this.fullscreenTxt.setColor('#aabbcc'); });
+      .on('pointerover', () => { if (!this._touch) this.fullscreenTxt.setColor('#ffffff'); })
+      .on('pointerout',  () => { if (!this._touch) this.fullscreenTxt.setColor('#aabbcc'); });
 
     // Listen for browser fullscreen changes to update the icon
     document.addEventListener('fullscreenchange', () => this.updateFullscreenIcon());
@@ -129,8 +133,8 @@ export class HUD {
     this.settingsHit = scene.add.rectangle(0, 0, 48, 36, 0, 0)
       .setScrollFactor(0).setDepth(D + 2).setInteractive({ useHandCursor: true })
       .on('pointerup', () => this.toggleSettings())
-      .on('pointerover', () => { this.settingsTxt.setColor('#ffffff'); })
-      .on('pointerout',  () => { this.settingsTxt.setColor('#aabbcc'); });
+      .on('pointerover', () => { if (!this._touch) this.settingsTxt.setColor('#ffffff'); })
+      .on('pointerout',  () => { if (!this._touch) this.settingsTxt.setColor('#aabbcc'); });
 
     // ── Wave countdown (top-centre) ──────────────────────────────────────────
     this.countdownTxt = scene.add.text(0, 0, '', {
@@ -196,7 +200,8 @@ export class HUD {
       .setInteractive({ useHandCursor: true })
       .on('pointerup', () => this.toggleGeneralStats());
 
-    this.modalPauseBtn = scene.add.text(0, 0, '⏸ PAUSE [P]', {
+    const pauseLabel = this._touch ? '⏸ PAUSE' : '⏸ PAUSE [P]';
+    this.modalPauseBtn = scene.add.text(0, 0, pauseLabel, {
       fontSize: '20px', fontFamily: 'monospace', color: '#aabbcc',
     }).setScrollFactor(0).setDepth(72).setOrigin(0.5).setVisible(false)
       .setInteractive({ useHandCursor: true })
@@ -282,7 +287,8 @@ export class HUD {
   }
 
   setPaused(paused: boolean) {
-    this.modalPauseBtn.setText(paused ? '▶ RESUME [P]' : '⏸ PAUSE [P]');
+    const hk = this._touch ? '' : ' [P]';
+    this.modalPauseBtn.setText((paused ? '▶ RESUME' : '⏸ PAUSE') + hk);
     this.modalPauseBtn.setColor(paused ? '#ff8844' : '#aabbcc');
   }
 
@@ -303,7 +309,7 @@ export class HUD {
 
     // Wave countdown beneath combo badge
     this.countdownTxt.setText(
-      countdown > 0 ? '▶ ' + Math.ceil(countdown / 1000) + 's  [SPACE]' : '',
+      countdown > 0 ? '▶ ' + Math.ceil(countdown / 1000) + 's' + (this._touch ? '' : '  [SPACE]') : '',
     );
 
     this.updateHeroStatus(heroHp, heroMaxHp, heroLevel);
@@ -314,22 +320,32 @@ export class HUD {
 
   private relayout(W: number, H: number, barH: number) {
     this._W = W;
-    // Scale factor relative to a 1366×768 reference window
-    this._sc = Math.max(0.5, Math.min(1.0, Math.min(W / 1366, H / 768)));
+    const safe = getSafeAreaInsets();
+
+    // ── Responsive scale ────────────────────────────────────────────────
+    // Reference is a 1366×768 desktop window. Touch devices get a higher
+    // floor + density boost so text stays readable on high-DPR phones.
+    const base = Math.min(W / 1366, H / 768);
+    this._sc = this._touch
+      ? Math.max(0.7, Math.min(1.0, base * 1.35))
+      : Math.max(0.5, Math.min(1.0, base));
     const sc = this._sc;
 
-    // Responsive sizes
-    const bh       = Math.max(26, Math.round(36 * sc));   // badge height
-    const padT     = Math.max(6,  Math.round(PAD_T * sc));
-    const padR     = Math.max(6,  Math.round(PAD_R * sc));
-    const gap      = Math.max(4,  Math.round(8 * sc));
-    const livesW   = Math.max(58, Math.round(82  * sc));
-    const goldW    = Math.max(80, Math.round(120 * sc));
-    const timerW   = Math.max(72, Math.round(100 * sc));
-    const settingsW= Math.max(34, Math.round(48  * sc));
-    const fullscreenW= Math.max(34, Math.round(48  * sc));
-    const fontSz   = Math.max(11, Math.round(17  * sc));
-    const smFontSz = Math.max(9,  Math.round(14  * sc));
+    // Responsive sizes (touch enforces ~44px minimum touch targets)
+    const bh       = Math.max(this._touch ? 40 : 26, Math.round(36 * sc));   // badge height
+    this._padT     = safe.top    + Math.max(this._touch ? 10 : 6,  Math.round(PAD_T * sc));
+    this._bh       = bh;
+    const padT     = this._padT;
+    const padR     = safe.right  + Math.max(this._touch ? 10 : 6,  Math.round(PAD_R * sc));
+    const padL     = safe.left   + Math.max(this._touch ? 10 : 6,  Math.round(PAD_T * sc));
+    const gap      = Math.max(this._touch ? 6 : 4,  Math.round(8 * sc));
+    const livesW   = Math.max(this._touch ? 64 : 58, Math.round(82  * sc));
+    const goldW    = Math.max(this._touch ? 88 : 80, Math.round(120 * sc));
+    const timerW   = Math.max(this._touch ? 76 : 72, Math.round(100 * sc));
+    const settingsW= Math.max(this._touch ? 44 : 34, Math.round(48  * sc));
+    const fullscreenW = Math.max(this._touch ? 44 : 34, Math.round(48  * sc));
+    const fontSz   = Math.max(this._touch ? 13 : 11, Math.round(17  * sc));
+    const smFontSz = Math.max(this._touch ? 11 : 9,  Math.round(14  * sc));
 
     // Update text styles
     this.livesTxt.setStyle({ fontSize: fontSz + 'px' });
@@ -338,18 +354,39 @@ export class HUD {
     this.fullscreenTxt.setStyle({ fontSize: Math.max(12, Math.round(18 * sc)) + 'px' });
     this.settingsTxt.setStyle({ fontSize: Math.max(12, Math.round(18 * sc)) + 'px' });
     this.countdownTxt.setStyle({ fontSize: smFontSz + 'px' });
-    this.heroTxt.setStyle({ fontSize: Math.max(10, Math.round(15 * sc)) + 'px' });
-    this.fpsTxt.setStyle({ fontSize: Math.max(9,  Math.round(13 * sc)) + 'px' });
+    this.heroTxt.setStyle({ fontSize: Math.max(this._touch ? 12 : 10, Math.round(15 * sc)) + 'px' });
+    this.fpsTxt.setStyle({ fontSize: Math.max(this._touch ? 11 : 9,  Math.round(13 * sc)) + 'px' });
 
     const CY = padT + bh / 2;
 
-    // Badge centres, right to left:  Lives | Gold | Timer | Settings | Fullscreen
-    const right = W - padR;
-    const fx = right - fullscreenW / 2;
-    const sx = fx   - fullscreenW / 2 - gap - settingsW / 2;
-    const tx = sx   - settingsW  / 2 - gap - timerW   / 2;
-    const gx = tx   - timerW     / 2 - gap - goldW    / 2;
-    const lx = gx   - goldW      / 2 - gap - livesW   / 2;
+    // ── Top-right floating badges ───────────────────────────────────────
+    // Fullscreen is hidden where unsupported (iOS) or on touch w/o support
+    const fsSupported = this.fullscreenSupported();
+    this.fullscreenBg.setVisible(fsSupported);
+    this.fullscreenTxt.setVisible(fsSupported);
+    this.fullscreenHit.setVisible(fsSupported);
+
+    // Right-to-left: Fullscreen | Settings | Timer | Gold | Lives
+    const widths: number[] = [
+      fsSupported ? fullscreenW : 0, settingsW, timerW, goldW, livesW,
+    ];
+    const shown: boolean[] = [fsSupported, true, true, true, true];
+
+    // Drop the timer badge on very narrow screens (phones) if it would
+    // push the lives badge past the left edge.
+    const count = widths.filter(w => w > 0).length;
+    const totalW = widths.reduce((a, b) => a + b, 0) + Math.max(0, count - 1) * gap;
+    if (totalW > W - padR - padL) shown[2] = false;
+
+    let cursor = W - padR;
+    const centers: number[] = [];
+    for (let i = 0; i < widths.length; i++) {
+      if (!shown[i] || widths[i] === 0) { centers.push(0); continue; }
+      cursor -= widths[i] / 2;
+      centers.push(cursor);
+      cursor -= widths[i] / 2 + gap;
+    }
+    const [fx, sx, tx, gx, lx] = centers;
 
     drawPillBadge(this.livesBg, lx, CY, livesW, bh);
     this.livesTxt.setPosition(lx, CY);
@@ -357,34 +394,43 @@ export class HUD {
     drawPillBadge(this.goldBg, gx, CY, goldW, bh);
     this.goldTxt.setPosition(gx, CY);
 
-    drawPillBadge(this.timerBg, tx, CY, timerW, bh);
-    this.timerTxt.setPosition(tx, CY);
+    if (shown[2]) {
+      this.timerBg.setVisible(true);
+      this.timerTxt.setVisible(true);
+      drawPillBadge(this.timerBg, tx, CY, timerW, bh);
+      this.timerTxt.setPosition(tx, CY);
+    } else {
+      this.timerBg.setVisible(false);
+      this.timerTxt.setVisible(false);
+    }
 
     drawPillBadge(this.settingsBg, sx, CY, settingsW, bh);
     this.settingsTxt.setPosition(sx, CY);
     this.settingsHit.setPosition(sx, CY).setSize(settingsW, bh);
 
-    drawPillBadge(this.fullscreenBg, fx, CY, fullscreenW, bh);
-    this.fullscreenTxt.setPosition(fx, CY);
-    this.fullscreenHit.setPosition(fx, CY).setSize(fullscreenW, bh);
+    if (fsSupported) {
+      drawPillBadge(this.fullscreenBg, fx, CY, fullscreenW, bh);
+      this.fullscreenTxt.setPosition(fx, CY);
+      this.fullscreenHit.setPosition(fx, CY).setSize(fullscreenW, bh);
+    }
 
     // Countdown at top-centre
     this.countdownTxt.setPosition(W / 2, padT + bh + 8);
 
-    // Hero / FPS just above bottom bar
-    this.heroTxt.setPosition(10, H - barH - 14);
-    this.fpsTxt.setPosition(W - 10, H - barH - 14);
+    // Hero / FPS just above bottom bar (respect safe-area insets)
+    this.heroTxt.setPosition(padL, H - barH - safe.bottom - 14);
+    this.fpsTxt.setPosition(W - padR, H - barH - safe.bottom - 14);
 
     // General stats panel: bottom-left, above hero text
     const perfW = 220;
     const perfH = 52;
-    const perfX = 8;
-    const perfY = H - barH - 14 - 20; // above hero/fps row
+    const perfX = padL;
+    const perfY = H - barH - safe.bottom - 14 - 20; // above hero/fps row
     this.genStatsPanel.clear();
     this.genStatsPanel.fillStyle(0x000000, 0.45);
     this.genStatsPanel.fillRoundedRect(perfX, perfY - perfH, perfW, perfH, 6);
     this.genStatsText.setPosition(perfX + 8, perfY);
-    this.genStatsText.setStyle({ fontSize: Math.max(9, Math.round(12 * sc)) + 'px' });
+    this.genStatsText.setStyle({ fontSize: Math.max(this._touch ? 11 : 9, Math.round(12 * sc)) + 'px' });
 
     // Boss HP bar below badge row
     const bossY  = padT + bh + 8;
@@ -462,7 +508,7 @@ export class HUD {
     const frac  = Math.max(0, hp / maxHp);
     const sc    = this._sc;
     const W     = this._W;
-    const bossY = Math.max(6, Math.round(12 * sc)) + Math.max(26, Math.round(36 * sc)) + 8;
+    const bossY = this._padT + this._bh + 8;
     const bossW = Math.min(W - 32, Math.round(720 * sc));
     const barH2 = Math.max(14, Math.round(22 * sc));
     const barColor = frac > 0.6 ? 0x44cc00 : frac > 0.3 ? 0xffaa00 : 0xff2200;
@@ -547,6 +593,13 @@ export class HUD {
   }
 
   // ─── Fullscreen ───────────────────────────────────────────────────────
+
+  /** Fullscreen is only useful on platforms that support it (not iOS). */
+  private fullscreenSupported(): boolean {
+    if (isIOS() || typeof document === 'undefined') return false;
+    const el = document.documentElement as any;
+    return !!(el && (el.requestFullscreen || el.webkitRequestFullscreen));
+  }
 
   private toggleFullscreen() {
     const doc = document as any;
