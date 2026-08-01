@@ -28,3 +28,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Custom
+TODO.txt
+
+# Playwright
+test-results
+playwright-report
+blob-report
