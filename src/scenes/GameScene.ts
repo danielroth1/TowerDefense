@@ -687,6 +687,9 @@ export class GameScene extends Phaser.Scene {
       this.placingEconomy = type;
       this.placingTower = null;
       this.placingBarricade = false;
+      // Deselect hero when entering economy-building placement mode
+      this.heroSelected = false;
+      this.hero.setSelected(false);
     };
 
     this.bottomBar.onUpgrade = () => {
@@ -964,6 +967,9 @@ export class GameScene extends Phaser.Scene {
             if (midDX !== 0 || midDY !== 0) {
               cam.scrollX -= midDX / cam.zoom;
               cam.scrollY -= midDY / cam.zoom;
+              // Mark as moved so that when fingers lift, clicks won't trigger
+              // game actions (hero move, select, etc.) — especially on phone
+              this.dragMoved = true;
             }
             this.lastPinchMidX = midX;
             this.lastPinchMidY = midY;
@@ -1005,7 +1011,11 @@ export class GameScene extends Phaser.Scene {
     this.input.on('pointerup', () => {
       const active = this.input.manager.pointers.filter(pt => pt.isDown).length;
       if (active < 2) {
-        // Only reset pinch if fewer than 2 pointers remain down
+        // Pinch is ending — block the remaining finger-lift(s) from
+        // triggering game actions (hero move, select, etc.)
+        if (this.pinchActive) {
+          this.dragMoved = true;
+        }
         this.pinchActive = false;
       }
       if (active === 0) {
@@ -1229,8 +1239,10 @@ export class GameScene extends Phaser.Scene {
 
   // ─── Input handlers ──────────────────────────────────────────────────────
   private onPointerUp(p: Phaser.Input.Pointer) {
-    // If this was a touch drag (not a tap), consume and reset
-    if (this.dragMoved) {
+    // If a pinch gesture is (or was just) active, suppress ALL game actions.
+    // On mobile a pinch may zoom without panning, so dragMoved alone is not
+    // enough — pinchActive is still true when the first finger lifts.
+    if (this.pinchActive || this.dragMoved) {
       this.dragMoved = false;
       this.dragActive = false;
       return;
@@ -1248,6 +1260,12 @@ export class GameScene extends Phaser.Scene {
 
     // Block clicks on the floating wave button (above the bar)
     if (this.bottomBar.isInWaveArea(p.x, p.y)) return;
+
+    // Block clicks on the minimap — it has its own click/drag handlers for
+    // camera panning; game actions (ability cast, hero move, etc.) must not fire
+    const mmRight  = this.minimapX + this.minimapW;
+    const mmBottom = this.minimapY + this.minimapH;
+    if (p.x >= this.minimapX && p.x <= mmRight && p.y >= this.minimapY && p.y <= mmBottom) return;
 
     const wx = p.worldX;
     const wy = p.worldY;
@@ -1358,6 +1376,9 @@ export class GameScene extends Phaser.Scene {
       const cost = escalatedCost(def, count);
       if (!this.economy.spend(cost)) return;
       this.placeEconomyBuilding(this.placingEconomy, col, row);
+      // Deselect hero when placing an economy building
+      this.heroSelected = false;
+      this.hero.setSelected(false);
       if (!this.input.keyboard?.addKey('SHIFT').isDown) {
         this.placingEconomy = null;
       }
@@ -2247,6 +2268,19 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.events.on('ability_selected', (type: AbilityType | null) => {
+      // When selecting an ability, deselect hero and tower so the next
+      // click/tap casts the ability instead of moving the hero
+      if (type !== null) {
+        if (this.heroSelected) {
+          this.heroSelected = false;
+          this.hero.setSelected(false);
+        }
+        if (this.selectedTower) {
+          this.selectedTower.showRange(false);
+          this.selectedTower = null;
+          this.bottomBar.showBuildMode();
+        }
+      }
       ABILITY_DEFS.forEach((def, i) => {
         const btn = this.abilityFloating.get(def.type);
         if (!btn) return;
