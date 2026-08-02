@@ -40,15 +40,19 @@ export class EnemyGrid {
     return row * this.cellCols + col;
   }
 
-  /** Cell ranges that overlap a circle of radius `r` centered at (cx, cy). */
-  private *cellRange(cx: number, cy: number, r: number): Generator<number> {
+  /**
+   * Call `cb` for every cell index that overlaps a circle of radius `r`
+   * centered at (cx, cy). Uses a plain callback (not a generator) to avoid
+   * generator state-machine overhead — ~2-3× faster in hot paths.
+   */
+  private forEachCellInRange(cx: number, cy: number, r: number, cb: (cellIdx: number) => void): void {
     const minCol = Math.max(0, Math.floor((cx - r) / this.cellSize));
     const maxCol = Math.min(this.cellCols - 1, Math.floor((cx + r) / this.cellSize));
     const minRow = Math.max(0, Math.floor((cy - r) / this.cellSize));
     const maxRow = Math.min(this.cellRows - 1, Math.floor((cy + r) / this.cellSize));
     for (let row = minRow; row <= maxRow; row++) {
       for (let col = minCol; col <= maxCol; col++) {
-        yield row * this.cellCols + col;
+        cb(row * this.cellCols + col);
       }
     }
   }
@@ -91,7 +95,7 @@ export class EnemyGrid {
     let bestProgress = -1;
     const rangeSq = range * range;
 
-    for (const cellIdx of this.cellRange(cx, cy, range)) {
+    this.forEachCellInRange(cx, cy, range, cellIdx => {
       const bucket = this.buckets[cellIdx];
       for (const e of bucket) {
         if (!e.active || e.hp <= 0) continue;
@@ -102,7 +106,7 @@ export class EnemyGrid {
           bestProgress = e.pathProgress;
         }
       }
-    }
+    });
     return best;
   }
 
@@ -114,7 +118,7 @@ export class EnemyGrid {
     this._result.length = 0;
     const rangeSq = range * range;
 
-    for (const cellIdx of this.cellRange(cx, cy, range)) {
+    this.forEachCellInRange(cx, cy, range, cellIdx => {
       const bucket = this.buckets[cellIdx];
       for (const e of bucket) {
         if (!e.active || e.hp <= 0) continue;
@@ -124,7 +128,7 @@ export class EnemyGrid {
           cb(e);
         }
       }
-    }
+    });
   }
 
   /**
@@ -142,18 +146,21 @@ export class EnemyGrid {
    */
   find(cx: number, cy: number, range: number, predicate: (e: Enemy) => boolean): Enemy | null {
     const rangeSq = range * range;
-    for (const cellIdx of this.cellRange(cx, cy, range)) {
+    let result: Enemy | null = null;
+    this.forEachCellInRange(cx, cy, range, cellIdx => {
+      if (result) return; // short-circuit once found
       const bucket = this.buckets[cellIdx];
       for (const e of bucket) {
         if (!e.active || e.hp <= 0) continue;
         const dx = e.x - cx;
         const dy = e.y - cy;
         if (dx * dx + dy * dy <= rangeSq && predicate(e)) {
-          return e;
+          result = e;
+          return;
         }
       }
-    }
-    return null;
+    });
+    return result;
   }
 
   /**

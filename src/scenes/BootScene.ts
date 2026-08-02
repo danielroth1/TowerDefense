@@ -1710,6 +1710,19 @@ export class BootScene extends Phaser.Scene {
   private generateUITextures() {
     const g = this.add.graphics();
 
+    // 1×1 white pixel — used by HPBarPool and other scaled-sprite rendering
+    // (avoids earcut triangulation cost of Graphics.fillRect)
+    g.fillStyle(0xffffff, 1);
+    g.fillRect(0, 0, 1, 1);
+    g.generateTexture('pixel_white', 1, 1);
+
+    // Filled circle for VFX (explosions, sword slash impact, etc.)
+    // Using a sprite with this texture avoids earcut triangulation of fillCircle.
+    g.clear();
+    g.fillStyle(0xffffff, 1);
+    g.fillCircle(32, 32, 30);
+    g.generateTexture('vfx_circle', 64, 64);
+
     // Panel bg
     g.clear();
     g.fillStyle(COLORS.PANEL_BG, 0.95);

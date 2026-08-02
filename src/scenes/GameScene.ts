@@ -167,10 +167,14 @@ export class GameScene extends Phaser.Scene {
   /** Cached boss enemy reference (avoids full scan each frame). */
   private currentBoss: Enemy | null = null;
 
-  // Reusable VFX graphics object pool
-  private vfxPool: Phaser.GameObjects.Graphics[] = [];
-  private vfxPoolIndex: number = 0;
-  private readonly VFX_POOL_SIZE = 16;
+  // Reusable VFX sprite pool — zero earcut triangulation cost
+  private vfxSpritePool: Phaser.GameObjects.Image[] = [];
+  private vfxSpriteIndex: number = 0;
+  private static readonly VFX_SPRITE_POOL_SIZE = 24;
+
+  // Healer aura throttling — process every 5th frame to reduce per-frame cost
+  private healerFrameCount: number = 0;
+  private static readonly HEALER_AURA_INTERVAL = 5;
 
   // Pause
   private isPaused: boolean = false;
@@ -202,7 +206,7 @@ export class GameScene extends Phaser.Scene {
   private abilityFloating: Map<AbilityType, {
     bg: Phaser.GameObjects.Graphics;
     icon: Phaser.GameObjects.Image;
-    cdOvl: Phaser.GameObjects.Graphics;
+    cdOvl: Phaser.GameObjects.Image;
     cdTxt: Phaser.GameObjects.Text;
     cost: Phaser.GameObjects.Text;
     hit: Phaser.GameObjects.Rectangle;
@@ -259,15 +263,15 @@ export class GameScene extends Phaser.Scene {
     this.enemyGrid = new EnemyGrid();
     this.createUI();
     this.setupCamera();
-    // Pooled HP bar renderer (replaces 2 Graphics per enemy with 2 shared)
+    // Pooled HP bar renderer (2 shared Graphics, draws all bars in one pass)
     this.hpBarPool = new HPBarPool(this);
-    // VFX graphics pool (after setupCamera so uiCam is available)
-    this.vfxPool = [];
-    this.vfxPoolIndex = 0;
-    for (let i = 0; i < this.VFX_POOL_SIZE; i++) {
-      const g = this.add.graphics().setVisible(false);
-      if (this.uiCam) this.uiCam.ignore(g);
-      this.vfxPool.push(g);
+    // Sprite-based VFX pool — uses pre-generated textures, zero earcut cost
+    this.vfxSpritePool = [];
+    this.vfxSpriteIndex = 0;
+    for (let i = 0; i < GameScene.VFX_SPRITE_POOL_SIZE; i++) {
+      const s = this.add.image(0, 0, 'pixel_white').setVisible(false).setDepth(10);
+      if (this.uiCam) this.uiCam.ignore(s);
+      this.vfxSpritePool.push(s);
     }
     // Ignore HP bar pool graphics on UI camera
     if (this.uiCam) {
@@ -1219,16 +1223,11 @@ export class GameScene extends Phaser.Scene {
         const target: Enemy = best;
         this.hero.playAttack();
         target.takeDamage(this.hero.attackDamage);
-        // Sword slash FX (pooled graphics)
-        const g = this.vfxGraphics().setDepth(10);
-        g.lineStyle(3, 0xffdd44, 1);
-        g.lineBetween(this.hero.x, this.hero.y, target.x, target.y);
-        g.fillStyle(0xffffaa, 0.6);
-        g.fillCircle(target.x, target.y, 12);
-        this.tweens.add({ targets: g, alpha: 0, duration: 180, onComplete: () => {
-          g.clear();
-          g.setVisible(false);
-        } });
+        // Sword slash FX — sprite-based, zero earcut cost
+        const slash = this.vfxLine(this.hero.x, this.hero.y, target.x, target.y, 0xffdd44, 3, 1, 10);
+        const impact = this.vfxCircle(target.x, target.y, 12, 0xffffaa, 0.6, 10);
+        this.tweens.add({ targets: [slash, impact], alpha: 0, duration: 180,
+          onComplete: () => { slash.setVisible(false); impact.setVisible(false); } });
         const em = this.vfxParticles(target.x, target.y, 'particle_spark', {
           speed: { min: 30, max: 80 }, lifespan: 250, scale: { start: 0.7, end: 0 },
           quantity: 6, emitting: false,
@@ -1920,15 +1919,9 @@ export class GameScene extends Phaser.Scene {
     const next = this.enemyGrid.find(from.x, from.y, 120, e => e !== from && e.active);
     if (!next) return;
 
-    // Draw arc using pooled graphics
-    const g = this.vfxGraphics().setDepth(8);
-    g.clear();
-    g.lineStyle(2, 0xffff00, 0.9);
-    g.lineBetween(from.x, from.y, next.x, next.y);
-    this.tweens.add({ targets: g, alpha: 0, duration: 300, onComplete: () => {
-      g.clear();
-      g.setVisible(false);
-    } });
+    // Draw arc using pooled sprite (zero earcut cost)
+    const s = this.vfxLine(from.x, from.y, next.x, next.y, 0xffff00, 2, 0.9, 8);
+    this.tweens.add({ targets: s, alpha: 0, duration: 300, onComplete: () => s.setVisible(false) });
 
     next.takeDamage(Math.round(damage));
     next.applyStun(300, now);
@@ -1937,13 +1930,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnExplosion(x: number, y: number, r: number, color: number) {
-    const g = this.vfxGraphics().setDepth(7);
-    g.fillStyle(color, 0.5);
-    g.fillCircle(x, y, r * 0.6);
-    this.tweens.add({ targets: g, alpha: 0, scaleX: 1.5, scaleY: 1.5, duration: 300, onComplete: () => {
-      g.clear();
-      g.setVisible(false);
-    } });
+    const s = this.vfxCircle(x, y, r * 0.6, color, 0.5, 7);
+    this.tweens.add({ targets: s, alpha: 0, scaleX: 1.5, scaleY: 1.5, duration: 300,
+      onComplete: () => s.setVisible(false) });
 
     const em = this.vfxParticles(x, y, 'particle_exp', {
       speed: { min: 60, max: 200 },
@@ -2363,7 +2352,8 @@ export class GameScene extends Phaser.Scene {
       const bg    = this.add.graphics().setScrollFactor(0).setDepth(D);
       const icon  = this.add.image(cx, cy, `ability_${def.type}`)
         .setScrollFactor(0).setDepth(D + 1);
-      const cdOvl = this.add.graphics().setScrollFactor(0).setDepth(D + 2);
+      const cdOvl = this.add.image(cx, cy, 'pixel_white')
+        .setScrollFactor(0).setDepth(D + 2).setVisible(false).setOrigin(0.5, 0);
       const cdTxt = this.add.text(cx, cy, '', {
         fontSize: '20px', fontFamily: 'monospace', color: '#ffffff', align: 'center',
       }).setOrigin(0.5).setScrollFactor(0).setDepth(D + 3);
@@ -2475,13 +2465,17 @@ export class GameScene extends Phaser.Scene {
       const { cx, cy } = this.abilityPos(i);
 
       const cd = this.abilitySystem.getCooldown(def.type);
-      btn.cdOvl.clear();
       if (cd.remaining > 0) {
         const frac = cd.remaining / cd.total;
-        btn.cdOvl.fillStyle(0x000000, 0.65 * frac);
-        btn.cdOvl.fillRoundedRect(cx - btns / 2 + 2, cy - btns / 2 + 2, btns - 4, (btns - 4) * frac, 4);
+        const overlayH = (btns - 4) * frac;
+        btn.cdOvl.setPosition(cx - btns / 2 + 2, cy + btns / 2 - 2 - overlayH);
+        btn.cdOvl.setDisplaySize(btns - 4, overlayH);
+        btn.cdOvl.setTint(0x000000);
+        btn.cdOvl.setAlpha(0.65);
+        btn.cdOvl.setVisible(true);
         btn.cdTxt.setText(`${Math.ceil(cd.remaining / 1000)}s`);
       } else {
+        btn.cdOvl.setVisible(false);
         btn.cdTxt.setText('');
       }
     });
@@ -2592,14 +2586,47 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  // ─── Wrappers for transient VFX — uses object pool ─────────────────────
-  private vfxGraphics(): Phaser.GameObjects.Graphics {
-    // Cycle through the pool
-    const g = this.vfxPool[this.vfxPoolIndex];
-    this.vfxPoolIndex = (this.vfxPoolIndex + 1) % this.VFX_POOL_SIZE;
-    g.clear();
-    g.setAlpha(1).setScale(1).setVisible(true);
-    return g;
+  // ─── Wrappers for transient VFX — uses sprite pool (zero earcut cost) ──
+
+  /** Get a sprite from the VFX pool, reset to defaults. */
+  private vfxSprite(): Phaser.GameObjects.Image {
+    const s = this.vfxSpritePool[this.vfxSpriteIndex];
+    this.vfxSpriteIndex = (this.vfxSpriteIndex + 1) % GameScene.VFX_SPRITE_POOL_SIZE;
+    s.setAlpha(1).setScale(1).setVisible(true).setTint(0xffffff).setOrigin(0.5);
+    return s;
+  }
+
+  /** Draw a line from (x1,y1) to (x2,y2) using a stretched+rotated sprite. */
+  private vfxLine(x1: number, y1: number, x2: number, y2: number,
+    color: number, width: number, alpha: number, depth: number,
+  ): Phaser.GameObjects.Image {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const s = this.vfxSprite();
+    s.setPosition((x1 + x2) / 2, (y1 + y2) / 2);
+    s.setTexture('pixel_white');
+    s.setDisplaySize(len, width);
+    s.setRotation(Math.atan2(dy, dx));
+    s.setTint(color);
+    s.setAlpha(alpha);
+    s.setDepth(depth);
+    s.setOrigin(0.5);
+    return s;
+  }
+
+  /** Draw a filled circle at (x,y) using a pre-generated circle texture. */
+  private vfxCircle(x: number, y: number, radius: number,
+    color: number, alpha: number, depth: number,
+  ): Phaser.GameObjects.Image {
+    const s = this.vfxSprite();
+    s.setPosition(x, y);
+    s.setTexture('vfx_circle');
+    s.setDisplaySize(radius * 2, radius * 2);
+    s.setTint(color);
+    s.setAlpha(alpha);
+    s.setDepth(depth);
+    return s;
   }
 
   private vfxParticles(x: number, y: number, texture: string,
@@ -2641,7 +2668,15 @@ export class GameScene extends Phaser.Scene {
     // Update towers
     this.towerGroup.getChildren().forEach(t => (t as Tower).preUpdate(time, delta));
     this.processAuraTowers();
-    this.processHealerAura(delta, allGround, allFliers);
+
+    // Healer aura — throttled to every 5th frame (HP regen is continuous, so
+    // skipping frames still gives the same effective heal rate by scaling delta).
+    this.healerFrameCount++;
+    if (this.healerFrameCount >= GameScene.HEALER_AURA_INTERVAL) {
+      this.healerFrameCount = 0;
+      this.processHealerAura(delta * GameScene.HEALER_AURA_INTERVAL, allGround, allFliers);
+    }
+
     this.updateBossBar(allGround, allFliers);
     this.bottomBar.update();
     this.bottomBar.setWaveInfo(
