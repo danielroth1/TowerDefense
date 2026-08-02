@@ -93,6 +93,13 @@ Verify it started by checking `list_pages` → the page title shows `PERF-STARTE
    Profiler). Record 10–30s during peak load.
 4. Save the profile for later analysis if needed.
 
+> **Firefox Profiler captures:** save as `.json` and analyze with
+> `node scripts/analyze-firefox-profile.mjs <file> [topN]`. Caveats: Firefox
+> records Ion-compiled JS as **raw code addresses** unless JIT symbolication
+> is enabled, so the hot game function may appear only as `0x…` addresses
+> (use the Chrome MCP method to get named JS). `threadCPUDelta` is in **µs**.
+> See `docs/perf/firefox-profile-analysis-2026-08-02.md` for a worked example.
+
 ---
 
 ## 3. Analyzing a Trace

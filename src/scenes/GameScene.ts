@@ -23,7 +23,7 @@ import { BottomBar } from '../ui/BottomBar';
 import { Tooltip } from '../ui/Tooltip';
 import { SoundSystem } from '../systems/SoundSystem';
 import { generateCityDecorations, type DecorationPlacement } from '../systems/CityDecorator';
-import { drawCityRoads, generateCityRoadsIncremental, type RoadNetworkState } from '../systems/CityRoadNetwork';
+import { drawCityRoads, generateCityRoadsIncremental, type CityRoadResult, type RoadNetworkState } from '../systems/CityRoadNetwork';
 import { PerfTest } from '../systems/PerfTest';
 import type { PerfSettings } from '../data/PerfSettings';
 import { EnemyGrid } from '../systems/EnemyGrid';
@@ -121,7 +121,7 @@ export class GameScene extends Phaser.Scene {
   private uiCam!: Phaser.Cameras.Scene2D.Camera;
   private uiGroup!: Phaser.GameObjects.Group;
   private wallDecorations: Phaser.GameObjects.Image[] = [];
-  private cityRoadGraphics: Phaser.GameObjects.Graphics | null = null;
+  private cityRoadGraphics: Phaser.GameObjects.Image | null = null;
 
   // Cart pathfinding debug overlay (toggled with V in debug mode)
   private cartDebugGraphics: Phaser.GameObjects.Graphics | null = null;
@@ -658,14 +658,37 @@ export class GameScene extends Phaser.Scene {
       );
       this.roadNetworkState = state;
       if (roadResult.roads.length > 0) {
-        const roadG = this.add.graphics().setDepth(0.14);
-        const roadRng = createPRNG(this.mapData.seed + 0xC0DE);
-        drawCityRoads(roadG, roadResult, roadRng);
-        this.cityRoadGraphics = roadG;
+        this.cityRoadGraphics = this.createCityRoads(roadResult);
         // Wire road grid to transport system for cart pathfinding
         this.transportSys.setRoadGrid(state.roadGrid);
       }
     }
+  }
+
+  /**
+   * Bake the decorative city roads into a single texture and return an Image.
+   *
+   * The roads were previously drawn into a live Graphics object whose ~48 KB
+   * command buffer Phaser re-triangulates with earcut on every render frame —
+   * the #1 per-frame hotspot (it scales with eco-building / road count).
+   * Baking them once turns that into a single textured quad.
+   */
+  private createCityRoads(roadResult: CityRoadResult): Phaser.GameObjects.Image {
+    const key = 'city_roads';
+    // Remove any previous bake so a rebuild regenerates the texture cleanly.
+    if (this.textures.exists(key)) this.textures.remove(key);
+
+    const roadG = this.add.graphics().setDepth(0.14);
+    const roadRng = createPRNG(this.mapData.seed + 0xC0DE);
+    drawCityRoads(roadG, roadResult, roadRng);
+    const mapW = (this.mapData.cols ?? GRID_COLS) * TILE_SIZE;
+    const mapH = (this.mapData.rows ?? GRID_ROWS) * TILE_SIZE;
+    roadG.generateTexture(key, mapW, mapH);
+    roadG.destroy();
+
+    const img = this.add.image(0, 0, key).setOrigin(0, 0).setDepth(0.14);
+    if (this.uiCam) this.uiCam.ignore(img);
+    return img;
   }
 
   private createGroups() {
@@ -1893,16 +1916,12 @@ export class GameScene extends Phaser.Scene {
       );
       this.roadNetworkState = state;
       if (roadResult.roads.length > 0) {
-        // Destroy old road graphics and redraw
+        // Destroy old road image and re-bake the texture
         if (this.cityRoadGraphics) {
           this.cityRoadGraphics.destroy();
           this.cityRoadGraphics = null;
         }
-        const roadG = this.add.graphics().setDepth(0.14);
-        const roadRng = createPRNG(this.mapData.seed + 0xC0DE);
-        drawCityRoads(roadG, roadResult, roadRng);
-        this.cityRoadGraphics = roadG;
-        if (this.uiCam) this.uiCam.ignore(roadG);
+        this.cityRoadGraphics = this.createCityRoads(roadResult);
         // Wire updated road grid to transport system
         this.transportSys.setRoadGrid(state.roadGrid);
       }
