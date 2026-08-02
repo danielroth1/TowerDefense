@@ -161,17 +161,30 @@ const C  = TS / 2;                 // 96 (centre)
  *                            the tile edge.  Must be ≤ C (24) for arm rects
  *                            to stay within the tile.
  */
-export function generateTransitionTextures(
+/**
+ * Yield to the browser so boot-time texture generation stays responsive.
+ * MessageChannel (not setTimeout) so hidden/backgrounded tabs aren't throttled.
+ */
+const yieldFrame = (): Promise<void> => new Promise(resolve => {
+  const ch = new MessageChannel();
+  ch.port1.onmessage = () => resolve();
+  ch.port2.postMessage(null);
+});
+
+export async function generateTransitionTextures(
   scene: Phaser.Scene,
   terrainId: string,
   sourceTextureKey?: string,
   halfWidth: number = C,  // centre → full tile coverage at gen resolution
-): void {
+): Promise<void> {
   const noise = getTransitionNoise();
 
   for (let mask = 0; mask < 16; mask++) {
     const key = transitionTileKey(terrainId, mask);
     if (scene.textures.exists(key)) continue;
+
+    // Yield before each mask so no single SDF pass blocks the main thread.
+    await yieldFrame();
 
     const ct = scene.textures.createCanvas(key, TS, TS);
     if (!ct) continue;
@@ -385,11 +398,11 @@ function connectedEdgeNoiseWeight(px: number, py: number, mask: number): number 
  * @param terrainId        — terrain identifier ('grass', 'sand', 'water')
  * @param waterTextureKey  — key of the water texture to fill outside areas
  */
-export function generateTransitionAlphaMasks(
+export async function generateTransitionAlphaMasks(
   scene: Phaser.Scene,
   terrainId: string,
   waterTextureKey: string,
-): void {
+): Promise<void> {
   const noise = getTransitionNoise();
   const waterTex = scene.textures.get(waterTextureKey);
   if (!waterTex) return;
@@ -399,6 +412,9 @@ export function generateTransitionAlphaMasks(
   for (let mask = 0; mask < 16; mask++) {
     const key = `tile_trans_alpha_${terrainId}_${mask}`;
     if (scene.textures.exists(key)) continue;
+
+    // Yield before each mask so no single SDF pass blocks the main thread.
+    await yieldFrame();
 
     const ct = scene.textures.createCanvas(key, TS, TS);
     if (!ct) continue;

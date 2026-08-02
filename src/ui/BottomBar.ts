@@ -94,6 +94,14 @@ export class BottomBar {
   private _visibleTowers = 6;
   private _scrollOffset  = 0;
 
+  /**
+   * Last known affordability state per BUILD_ITEMS index. refreshBuildAffordability()
+   * is called every frame from update(); caching the state lets us skip the
+   * expensive rounded-rect Graphics redraw (earcut triangulation) when nothing
+   * changed. Values only flip when gold or eco costs change.
+   */
+  private _affordableCache: boolean[] = [];
+
   // Touch drag-to-scroll state
   private _buildVisible = true;
   private _dragActive  = false;
@@ -336,6 +344,7 @@ export class BottomBar {
         ? (def as any).baseCost
         : escalatedCost(def as any, this.ecoSim.countOfType(item.type as EconomyBuildingType));
       const can = this.economy.canAfford(cost);
+      this._affordableCache[i] = can;
       this.drawTowerBtn(this.buildBgs[i], cx, cy, this._TBW, this._TBH, color, false, false, can);
       this.buildIcons[i].setPosition(cx, cy - this._TBH * 0.15).setDisplaySize(iconSize, iconSize);
       this.buildNames[i].setPosition(cx, cy + this._TBH * 0.17).setStyle({ fontSize: nameFSPx + 'px' });
@@ -598,6 +607,12 @@ export class BottomBar {
         ? (def as any).baseCost
         : escalatedCost(def as any, this.ecoSim.countOfType(item.type as EconomyBuildingType));
       const can = this.economy.canAfford(cost);
+
+      // Called every frame from update() — skip unchanged buttons so we don't
+      // re-triangulate rounded-rect Graphics (earcut) dozens of times per frame.
+      if (this._affordableCache[i] === can) return;
+      this._affordableCache[i] = can;
+
       this.buildCosts[i].setColor(can ? '#ffd700' : '#885533');
       this.drawTowerBtn(this.buildBgs[i], this.towerScreenX(i), this._TOWER_CY, this._TBW, this._TBH, color, false, false, can);
     });

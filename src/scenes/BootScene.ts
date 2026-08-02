@@ -12,6 +12,9 @@ export class BootScene extends Phaser.Scene {
   /** Terrain keys that have a complete Wang tile set (16 tiles 0-15). */
   private wangTerrainKeys = new Set<string>();
 
+  /** Small loading indicator shown while the async boot pipeline runs. */
+  private loadingText: Phaser.GameObjects.Text | null = null;
+
   constructor() { super('BootScene'); }
 
   preload() {
@@ -115,6 +118,7 @@ export class BootScene extends Phaser.Scene {
   }
 
   create() {
+    // Cheap, dependency-light setup stays synchronous so textures exist ASAP.
     this.fillMissingTileTextures();
     this.generateUITileTextures();
     this.generateAbilityIcons();
@@ -122,29 +126,85 @@ export class BootScene extends Phaser.Scene {
     // Detect which terrain keys have complete Wang tile sets (all 16 loaded)
     this.detectWangTileSets();
 
-    this.generateMipmapsForAITiles();
-    this.downscaleSpriteIcons();
-    this.generateBlobTextures();
-    // If an AI path tile was loaded, generate masked blob textures from it
-    if (this.textures.exists('tile_path')) {
-      generateBlobTexturesFromSource(this, 'tile_path', 'tile_path_blob');
-      generatePathOverlayTexturesFromSource(this, 'tile_path', 'tile_path_blob');
+    // The heavy texture generation (mipmaps, blob tiles, transitions, sprites)
+    // is deferred to an async pipeline that yields to the browser between
+    // steps, so boot no longer blocks the main thread in one ~1.5s task.
+    // MenuScene starts once generation completes (the kickBoot timer keeps
+    // the loader/scene systems ticking in the meantime).
+    this.loadingText = this.add.text(12, 12, 'LOADING…', {
+      fontSize: '14px', fontFamily: 'monospace', color: '#8899aa',
+    }).setScrollFactor(0).setDepth(1000);
+    this.runBootPipeline();
+  }
+
+  /**
+   * Yield to the browser so the main thread can paint/respond between steps.
+   * Uses a MessageChannel instead of setTimeout so boot progress is NOT
+   * throttled when the tab is hidden/backgrounded (Chrome throttles chained
+   * timers to ~1/min for hidden tabs, which would stall the async boot).
+   */
+  private yieldFrame(): Promise<void> {
+    return new Promise(resolve => {
+      const ch = new MessageChannel();
+      ch.port1.onmessage = () => resolve();
+      ch.port2.postMessage(null);
+    });
+  }
+
+  private setLoading(msg: string) {
+    if (this.loadingText) this.loadingText.setText(msg);
+  }
+
+  /**
+   * Run the boot-time texture generation as a sequence of awaited steps.
+   * Order matches the old synchronous create() so every consumer still sees
+   * the same final textures. Always starts MenuScene, even if a step fails
+   * (GameScene has procedural fallbacks for anything missing).
+   */
+  private async runBootPipeline(): Promise<void> {
+    try {
+      this.setLoading('Preparing textures…');
+      await this.generateMipmapsForAITiles();
+      await this.downscaleSpriteIcons();
+
+      this.setLoading('Generating terrain…');
+      this.generateBlobTextures();
+      // If an AI path tile was loaded, generate masked blob textures from it
+      if (this.textures.exists('tile_path')) {
+        generateBlobTexturesFromSource(this, 'tile_path', 'tile_path_blob');
+        generatePathOverlayTexturesFromSource(this, 'tile_path', 'tile_path_blob');
+      }
+      await this.generateTerrainTransitionTextures();
+      await this.yieldFrame();
+
+      this.setLoading('Generating sprites…');
+      this.generateTowerTextures();
+      await this.yieldFrame();
+      this.generateEnemySheets();
+      await this.yieldFrame();
+      this.generateHeroSheet();
+      await this.yieldFrame();
+      this.generateProjectileTextures();
+      await this.yieldFrame();
+      this.generateParticleTextures();
+      await this.yieldFrame();
+      this.generateCityDecorTextures();
+      await this.yieldFrame();
+      this.generateEconomyTextures();
+      await this.yieldFrame();
+      this.generateUITextures();
+      await this.yieldFrame();
+      this.registerAnimations();
+    } catch (err) {
+      console.error('[Boot] texture generation error:', err);
     }
-    this.generateTerrainTransitionTextures();
-    this.generateTowerTextures();
-    this.generateEnemySheets();
-    this.generateHeroSheet();
-    this.generateProjectileTextures();
-    this.generateParticleTextures();
-    this.generateCityDecorTextures();
-    this.generateEconomyTextures();
-    this.generateUITextures();
-    this.registerAnimations();
 
     // Share AI tile keys + Wang tile availability so GameScene can use them
     this.game.registry.set('aiTiles', [...this.aiLoadedTiles]);
     this.game.registry.set('wangTerrainKeys', [...this.wangTerrainKeys]);
 
+    this.loadingText?.destroy();
+    this.loadingText = null;
     this.scene.start('MenuScene');
   }
 
@@ -189,7 +249,7 @@ export class BootScene extends Phaser.Scene {
    * The actual tile rendering uses the pre-generated 48×48 Wang tiles from
    * disk (when available), so the AI texture doesn't need to be at TILE_SIZE.
    */
-  private generateMipmapsForAITiles(): void {
+  private async generateMipmapsForAITiles(): Promise<void> {
     const DOWNSAMPLE_SIZE = 256;
 
     /**
@@ -221,6 +281,10 @@ export class BootScene extends Phaser.Scene {
       const source = texture.source[0];
       const img = source?.image as HTMLImageElement | undefined;
       if (!img) continue;
+
+      // Yield BEFORE each tile (including the first) so each one is its own
+      // task and no single ~500ms blocking chunk remains during boot.
+      await this.yieldFrame();
 
       // Always use DOWNSAMPLE_SIZE — even if Wang tiles exist.  The AI
       // texture is used as a source for transition texture generation and
@@ -315,7 +379,7 @@ export class BootScene extends Phaser.Scene {
    * at ~33–50px benefit from a much smaller source to avoid the blur that
    * comes from extreme WebGL downscaling.
    */
-  private downscaleSpriteIcons(): void {
+  private async downscaleSpriteIcons(): Promise<void> {
     // Per-key target sizes (max dimension).  Ability icons & tower sprites
     // display at ~33–50px so 96px is 2–3× headroom.  Larger decorations
     // (dense city cluster, harbor panorama) need more resolution to stay
@@ -350,6 +414,9 @@ export class BootScene extends Phaser.Scene {
       const TARGET = targetForKey(key);
       const maxDim = Math.max(img.width, img.height);
       if (maxDim <= TARGET) continue; // already small enough
+
+      // Yield before downscaling each icon so boot stays responsive.
+      await this.yieldFrame();
 
       // Multi-step halving for maximum quality, same approach as terrain mipmaps
       let src: TexImageSource = img;
@@ -652,25 +719,25 @@ export class BootScene extends Phaser.Scene {
   }
 
   // ─── Terrain transition tiles ─────────────────────────────────────────────
-  private generateTerrainTransitionTextures() {
+  private async generateTerrainTransitionTextures(): Promise<void> {
     // Always generate transition textures. If an AI grass texture was loaded,
     // pass its key as the source so it gets baked into the transition polygons.
     const grassSource = this.textures.exists('tile_grass') ? 'tile_grass' : undefined;
-    generateTransitionTextures(this, 'grass', grassSource);
+    await generateTransitionTextures(this, 'grass', grassSource);
 
     // Generate alpha-mask overlays for edge grass cells. These are transparent
     // in the grass-blob area and show water outside, so they can be rendered
     // on top of a sharp 48×48 Wang tile to hide the grass in the water zone.
     if (this.textures.exists('tile_ground')) {
-      generateTransitionAlphaMasks(this, 'grass', 'tile_ground');
+      await generateTransitionAlphaMasks(this, 'grass', 'tile_ground');
     }
 
     // Spawn and goal tiles get the same SDF-based corner blending so their
     // water-facing edges blend organically instead of showing hard squares.
     const spawnSource = this.textures.exists('tile_spawn') ? 'tile_spawn' : undefined;
-    generateTransitionTextures(this, 'spawn', spawnSource);
+    await generateTransitionTextures(this, 'spawn', spawnSource);
     const goalSource = this.textures.exists('tile_goal') ? 'tile_goal' : undefined;
-    generateTransitionTextures(this, 'goal', goalSource);
+    await generateTransitionTextures(this, 'goal', goalSource);
   }
 
   // ─── Towers ───────────────────────────────────────────────────────────────

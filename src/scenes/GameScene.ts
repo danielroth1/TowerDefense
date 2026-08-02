@@ -224,6 +224,12 @@ export class GameScene extends Phaser.Scene {
   private minimapW = 200;   // display width — updated per resize (15% of screen)
   private minimapH = 103;   // display height — updated per resize
 
+  // updateMinimap() runs every frame; cache the last painted state so we only
+  // repaint the viewport Graphics when the camera rectangle actually moved
+  // (and only toggle visibility when it changed).
+  private _mmLastRect: { rx: number; ry: number; rw: number; rh: number } | null = null;
+  private _mmVisible: boolean | null = null;
+
   constructor() { super('GameScene'); }
 
   init(data: { seed: number; seedStr?: string; debug?: boolean; perfTest?: boolean; perfSettings?: PerfSettings }) {
@@ -2279,6 +2285,10 @@ export class GameScene extends Phaser.Scene {
     this.minimapBg.lineStyle(1, 0x5a8aaa, 0.6);
     this.minimapBg.strokeRect(MM_X - MM_PAD, MM_Y - MM_PAD, newW + MM_PAD * 2, newH + MM_PAD * 2);
 
+    // Layout changed — force the viewport to repaint on the next update().
+    this._mmLastRect = null;
+    this._mmVisible = null;
+
     this.minimapMapImg.setPosition(MM_X, MM_Y).setDisplaySize(newW, newH);
     this.minimapHitArea.setPosition(MM_X + newW / 2, MM_Y + newH / 2).setSize(newW, newH);
   }
@@ -2620,10 +2630,14 @@ export class GameScene extends Phaser.Scene {
     const mmFitZoom = Math.min(vpW / mapW, vpH / mapH);
     const show = cam.zoom > mmFitZoom * 1.02;
 
-    this.minimapBg.setVisible(show);
-    this.minimapMapImg.setVisible(show);
-    this.minimapViewport.setVisible(show);
-    this.minimapHitArea.setVisible(show);
+    // Only touch visibility when it actually changed.
+    if (this._mmVisible !== show) {
+      this._mmVisible = show;
+      this.minimapBg.setVisible(show);
+      this.minimapMapImg.setVisible(show);
+      this.minimapViewport.setVisible(show);
+      this.minimapHitArea.setVisible(show);
+    }
 
     if (!show) return;
 
@@ -2636,6 +2650,15 @@ export class GameScene extends Phaser.Scene {
     const ry = this.minimapY + wv.top  * scaleY;
     const rw = Math.min(wv.width  * scaleX, this.minimapW);
     const rh = Math.min(wv.height * scaleY, this.minimapH);
+
+    // The viewport rect only changes when the camera pans/zooms — skip the
+    // Graphics clear+fill+stroke (per-frame draw cost) when it hasn't moved.
+    const last = this._mmLastRect;
+    if (last && Math.abs(last.rx - rx) < 0.5 && Math.abs(last.ry - ry) < 0.5
+      && Math.abs(last.rw - rw) < 0.5 && Math.abs(last.rh - rh) < 0.5) {
+      return;
+    }
+    this._mmLastRect = { rx, ry, rw, rh };
 
     this.minimapViewport.clear();
     this.minimapViewport.fillStyle(0xffffff, 0.08);
