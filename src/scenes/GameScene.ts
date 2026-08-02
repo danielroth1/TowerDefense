@@ -25,6 +25,7 @@ import { SoundSystem } from '../systems/SoundSystem';
 import { generateCityDecorations, type DecorationPlacement } from '../systems/CityDecorator';
 import { drawCityRoads, generateCityRoadsIncremental, type RoadNetworkState } from '../systems/CityRoadNetwork';
 import { PerfTest } from '../systems/PerfTest';
+import type { PerfSettings } from '../data/PerfSettings';
 import { EnemyGrid } from '../systems/EnemyGrid';
 import { HPBarPool } from '../systems/HPBarPool';
 import { createPRNG } from '../utils/helpers';
@@ -225,13 +226,18 @@ export class GameScene extends Phaser.Scene {
 
   constructor() { super('GameScene'); }
 
-  init(data: { seed: number; seedStr?: string; debug?: boolean; perfTest?: boolean }) {
-    this.mapData = generateMap(data.seed ?? 12345);
+  init(data: { seed: number; seedStr?: string; debug?: boolean; perfTest?: boolean; perfSettings?: PerfSettings }) {
+    const perfSettings = data.perfSettings;
+    const cols = perfSettings?.fieldCols ?? GRID_COLS;
+    const rows = perfSettings?.fieldRows ?? GRID_ROWS;
+    this.mapData = generateMap(data.seed ?? 12345, cols, rows);
     this._debug = data.debug ?? false;
     this._perfTest = data.perfTest ?? false;
+    this._perfSettings = data.perfSettings ?? null;
   }
   private _debug: boolean = false;
   private _perfTest: boolean = false;
+  private _perfSettings: PerfSettings | null = null;
 
   create() {
     // Read AI tile keys + Wang tile availability from BootScene
@@ -303,6 +309,8 @@ export class GameScene extends Phaser.Scene {
         this, this.mapData, this.decorationBlockedCells,
         this.synergySystem, this.enemyGroup, this.flyerGroup,
         this.uiCam, (type, col, row) => this.placeTower(type, col, row),
+        (type, col, row) => this.placeEconomyBuildingForPerf(type, col, row),
+        this._perfSettings,
       ).run();
       this.hud.enablePerfStats();
     }
@@ -313,19 +321,23 @@ export class GameScene extends Phaser.Scene {
 
   // ─── Setup ───────────────────────────────────────────────────────────────
   private setupPhysics() {
-    this.physics.world.setBounds(0, 0, GRID_COLS * TILE_SIZE, GRID_ROWS * TILE_SIZE);
+    const cols = this.mapData.cols ?? GRID_COLS;
+    const rows = this.mapData.rows ?? GRID_ROWS;
+    this.physics.world.setBounds(0, 0, cols * TILE_SIZE, rows * TILE_SIZE);
   }
 
   private buildMap() {
     const { grid } = this.mapData;
-    const mapW = GRID_COLS * TILE_SIZE;
-    const mapH = GRID_ROWS * TILE_SIZE;
+    const gridRows = this.mapData.rows ?? GRID_ROWS;
+    const gridCols = this.mapData.cols ?? GRID_COLS;
+    const mapW = gridCols * TILE_SIZE;
+    const mapH = gridRows * TILE_SIZE;
 
     // ── Phase 1: Create all tile sprites so we can stamp them into the RT ──
     const tempSprites: Phaser.GameObjects.Image[] = [];
 
-    for (let r = 0; r < GRID_ROWS; r++) {
-      for (let c = 0; c < GRID_COLS; c++) {
+    for (let r = 0; r < gridRows; r++) {
+      for (let c = 0; c < gridCols; c++) {
         const tile = grid[r][c];
         const cx = c * TILE_SIZE + TILE_SIZE / 2;
         const cy = r * TILE_SIZE + TILE_SIZE / 2;
@@ -702,7 +714,7 @@ export class GameScene extends Phaser.Scene {
     // economy, economySim, transportSys are created before placeCityDecorations
     this.waveManager   = new WaveManager(this, this.enemyGroup, this.flyerGroup, this.mapData.waypoints, this.mapData.spawnPoint);
     this.abilitySystem = new AbilitySystem(this);
-    this.synergySystem = new SynergySystem(this);
+    this.synergySystem = new SynergySystem(this, this.mapData.cols, this.mapData.rows);
     this.weatherSystem = new WeatherSystem(this);
     this.comboSystem   = new ComboSystem(this);
   }
@@ -862,8 +874,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private setupCamera() {
-    const W = GRID_COLS * TILE_SIZE;
-    const H = GRID_ROWS * TILE_SIZE;
+    const W = (this.mapData.cols ?? GRID_COLS) * TILE_SIZE;
+    const H = (this.mapData.rows ?? GRID_ROWS) * TILE_SIZE;
 
     // ── Main camera: renders the game world in the viewport between UI bars ──
     this.cameras.main.setBounds(0, 0, W, H);
@@ -1745,6 +1757,103 @@ export class GameScene extends Phaser.Scene {
 
     // Regenerate decorative roads to include the new economy building.
     this.regenerateAllRoads();
+  }
+
+  /**
+   * Simplified economy building placement for perf tests — places the
+   * building sprite and marks the cell, and wires it into the economy
+   * simulation so it functions normally (produces goods, spawns fishery
+   * ships). Road regeneration is skipped to keep placement fast.
+   * Straddle buildings (fishery/harbor) are oriented toward a water
+   * neighbour and repositioned so they render correctly on the shoreline.
+   */
+  private placeEconomyBuildingForPerf(type: EconomyBuildingType, col: number, row: number) {
+    const def = ECO_BUILDING_DEFS[type];
+    const rows = this.mapData.grid.length;
+    const cols = this.mapData.grid[0]?.length ?? 0;
+    // Skip if no space for multi-cell buildings
+    if (row + def.height > rows || col + def.width > cols) return;
+
+    const building = new EconomyBuilding(this, col, row, type);
+    this.economyBuildings.push(building);
+
+    if (this.uiCam) this.uiCam.ignore(building);
+
+    // Detect straddle orientation BEFORE creating ships (FisherShip
+    // constructor reads building.rotationDeg).
+    if (def.placement.straddlesWater) {
+      const dirs: Array<[number, number, number]> = [
+        [1, 0, 270],  // water bottom → rotation 270 (water top, land bottom)
+        [-1, 0, 90],  // water top → rotation 90 (land top, water bottom)
+        [0, -1, 0],   // water left → rotation 0 (water left, land right)
+        [0, 1, 180],  // water right → rotation 180 (land left, water right)
+      ];
+      for (const [dr, dc, rot] of dirs) {
+        const nr = row + dr, nc = col + dc;
+        if (nr >= 0 && nr < rows && nc >= 0 && nc < cols
+            && this.mapData.grid[nr][nc].type === 'ground') {
+          building.rotationDeg = rot;
+          break;
+        }
+      }
+    }
+
+    // Wire into the economy simulation so the building actually works
+    if (this.economySim) {
+      this.economySim.addBuilding(building);
+      const ships = this.economySim.getAllFisherShips(building);
+      for (const ship of ships) {
+        if (this.uiCam) this.uiCam.ignore(ship);
+      }
+    }
+
+    // Upgrade to max level (level 3) so the perf test also stresses upgrade
+    // visuals and the economy (extra fishery ships, faster production).
+    while (building.canUpgrade()) {
+      building.upgrade();
+      if (building.buildingType === 'fishery' && this.economySim) {
+        this.economySim.onFisheryUpgraded(building);
+        const ships = this.economySim.getAllFisherShips(building);
+        for (const ship of ships) {
+          if (this.uiCam) this.uiCam.ignore(ship);
+        }
+      }
+    }
+
+    if (def.placement.straddlesWater) {
+      // Mark only the land cell as occupied (the other half is water)
+      this.mapData.grid[row][col].type = 'path';
+
+      // Reposition the container to the correct center for each orientation
+      switch (building.rotationDeg) {
+        case 0:   // water left, land right
+          building.setPosition(col * TILE_SIZE, (row + 0.5) * TILE_SIZE);
+          break;
+        case 180: // water right, land left
+          building.setPosition((col + 1.0) * TILE_SIZE, (row + 0.5) * TILE_SIZE);
+          break;
+        case 90:  // water top, land below
+          building.setPosition((col + 0.5) * TILE_SIZE, row * TILE_SIZE);
+          break;
+        case 270: // water bottom, land top
+          building.setPosition((col + 0.5) * TILE_SIZE, (row + 1.0) * TILE_SIZE);
+          break;
+      }
+      building.redraw();
+    } else {
+      // Mark all cells as occupied
+      for (let dr = 0; dr < def.height; dr++) {
+        for (let dc = 0; dc < def.width; dc++) {
+          const r = row + dr, c = col + dc;
+          if (r < rows && c < cols) {
+            this.mapData.grid[r][c].type = 'path';
+          }
+        }
+      }
+    }
+
+    // Instant scale — no animation for perf test accuracy
+    building.setScale(1);
   }
 
   /** Incrementally update decorative roads when an economy building is

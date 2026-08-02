@@ -20,6 +20,9 @@ export interface MapData {
   spawnPoint: { x: number; y: number };
   goalPoint:  { x: number; y: number };
   seed: number;
+  /** Actual grid dimensions (may differ from GRID_COLS/GRID_ROWS constants). */
+  cols: number;
+  rows: number;
 }
 
 // Cardinal directions
@@ -37,34 +40,34 @@ function tileCenter(row: number, col: number) {
   };
 }
 
-function inBounds(row: number, col: number) {
-  return row >= 0 && row < GRID_ROWS && col >= 0 && col < GRID_COLS;
-}
-
-export function generateMap(seed: number): MapData {
+export function generateMap(seed: number, cols?: number, rows?: number): MapData {
+  const gridCols = cols ?? GRID_COLS;
+  const gridRows = rows ?? GRID_ROWS;
   const rng = createPRNG(seed);
+  const inBounds = (r: number, c: number) => r >= 0 && r < gridRows && c >= 0 && c < gridCols;
 
   // Spawn on left side, goal on right side at random rows
-  const spawnRow = Math.floor(rng() * (GRID_ROWS - 4)) + 2;
-  const goalRow  = Math.floor(rng() * (GRID_ROWS - 4)) + 2;
+  const spawnRow = Math.floor(rng() * (gridRows - 4)) + 2;
+  const goalRow  = Math.floor(rng() * (gridRows - 4)) + 2;
   const spawnCol = 0;
-  const goalCol  = GRID_COLS - 1;
+  const goalCol  = gridCols - 1;
 
   // Try to generate a valid path; retry with different seeds if too short
   for (let attempt = 0; attempt < 20; attempt++) {
-    const result = tryGeneratePath(rng, spawnRow, spawnCol, goalRow, goalCol);
+    const result = tryGeneratePath(rng, spawnRow, spawnCol, goalRow, goalCol, inBounds);
     if (result && result.length >= MIN_PATH_LENGTH) {
-      return buildMapData(seed, result, spawnRow, spawnCol, goalRow, goalCol);
+      return buildMapData(seed, result, spawnRow, spawnCol, goalRow, goalCol, gridCols, gridRows);
     }
   }
   // Fallback: straight path with some kinks
-  return buildFallbackMap(seed, spawnRow, goalRow);
+  return buildFallbackMap(seed, spawnRow, goalRow, gridCols, gridRows);
 }
 
 function tryGeneratePath(
   rng: () => number,
   startRow: number, startCol: number,
   endRow: number,   endCol: number,
+  inBounds: (r: number, c: number) => boolean,
 ): { row: number; col: number }[] | null {
   const visited = new Set<string>();
   const path: { row: number; col: number }[] = [];
@@ -150,26 +153,29 @@ function clampInt(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
 }
 
-function buildFallbackMap(seed: number, spawnRow: number, goalRow: number): MapData {
+function buildFallbackMap(
+  seed: number, spawnRow: number, goalRow: number,
+  gridCols: number, gridRows: number,
+): MapData {
   const path: { row: number; col: number }[] = [];
   let row = spawnRow;
 
   // Walk right with zigzags
-  for (let col = 0; col < GRID_COLS; col++) {
+  for (let col = 0; col < gridCols; col++) {
     path.push({ row, col });
-    if (col % 6 === 5 && col < GRID_COLS - 2) {
+    if (col % 6 === 5 && col < gridCols - 2) {
       const dir = goalRow > row ? 1 : -1;
       for (let d = 0; d < 3; d++) {
-        row = clampInt(row + dir, 1, GRID_ROWS - 2);
+        row = clampInt(row + dir, 1, gridRows - 2);
         path.push({ row, col });
       }
     }
   }
   // Ensure last cell is goal
   if (path[path.length - 1].row !== goalRow) {
-    path.push({ row: goalRow, col: GRID_COLS - 1 });
+    path.push({ row: goalRow, col: gridCols - 1 });
   }
-  return buildMapData(seed, path, spawnRow, 0, goalRow, GRID_COLS - 1);
+  return buildMapData(seed, path, spawnRow, 0, goalRow, gridCols - 1, gridCols, gridRows);
 }
 
 function buildMapData(
@@ -177,10 +183,11 @@ function buildMapData(
   path: { row: number; col: number }[],
   spawnRow: number, spawnCol: number,
   goalRow: number,  goalCol: number,
+  gridCols: number, gridRows: number,
 ): MapData {
   // Initialize grid
-  const grid: GridTile[][] = Array.from({ length: GRID_ROWS }, (_, r) =>
-    Array.from({ length: GRID_COLS }, (_, c) => ({
+  const grid: GridTile[][] = Array.from({ length: gridRows }, (_, r) =>
+    Array.from({ length: gridCols }, (_, c) => ({
       row: r, col: c, type: 'ground' as TileType, pathIndex: -1,
     }))
   );
@@ -194,8 +201,8 @@ function buildMapData(
   });
 
   // Mark buildable cells (within BUILDABLE_RADIUS tiles of path, not on path, within grid)
-  for (let r = 0; r < GRID_ROWS; r++) {
-    for (let c = 0; c < GRID_COLS; c++) {
+  for (let r = 0; r < gridRows; r++) {
+    for (let c = 0; c < gridCols; c++) {
       if (grid[r][c].type !== 'ground') continue;
       let nearPath = false;
       for (const p of path) {
@@ -215,5 +222,7 @@ function buildMapData(
     spawnPoint: tileCenter(spawnRow, spawnCol),
     goalPoint:  tileCenter(goalRow, goalCol),
     seed,
+    cols: gridCols,
+    rows: gridRows,
   };
 }
