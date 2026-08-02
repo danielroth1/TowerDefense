@@ -63,6 +63,11 @@ echo ""
 echo "▶ Applying manifests..."
 kubectl apply -f "$REPO_ROOT/k8s/"
 
+# ── Force restart to pull the new image ──────────────────────────────────
+echo ""
+echo "▶ Restarting deployment (force pull of new image)..."
+kubectl rollout restart deployment/"$PROJECT" -n "$PROJECT"
+
 # ── Wait for rollout ─────────────────────────────────────────────────────
 echo ""
 echo "▶ Waiting for deployment..."

@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test:e2e": "playwright test",
     "tiles": "node --watch --watch-path=tools/tile-generator tools/tile-generator/server.mjs",
+    "tiles:debug": "DEBUG=1 node --watch --watch-path=tools/tile-generator tools/tile-generator/server.mjs",
     "wang-tiles": "node tools/wang-tiles/generate-all.mjs",
     "wang-tiles:blend-crop": "node tools/wang-tiles/generate-all.mjs --blend-crop",
     "wang-tiles:blend-freq": "node tools/wang-tiles/generate-all.mjs --blend-freq",
