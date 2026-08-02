@@ -64,15 +64,16 @@ const ALIAS_TO_TERRAIN: Record<string, string> = {
 export class GameScene extends Phaser.Scene {
   // Map
   private mapData!: MapData;
-  private tileSprites: Phaser.GameObjects.Image[][] = [];
-  private waterSprites: Phaser.GameObjects.Image[][] = [];
 
   /**
-   * Alpha-mask overlay sprites for edge grass cells.
-   * These sit on top of a Wang tile to hide grass in the water area.
-   * Null for cells that don't need an overlay.
+   * Baked terrain texture — all static tile layers (water, grass,
+   * transitions, paths, special tiles) composited into a single
+   * RenderTexture.  Collapses ~1,140 individual tile sprites into
+   * one GPU draw call, eliminating the primary source of draw-call
+   * overhead (each Wang/crop variant is a separate WebGL texture).
    */
-  private overlaySprites: (Phaser.GameObjects.Image | null)[][] = [];
+  private terrainRT!: Phaser.GameObjects.RenderTexture;
+  private terrainImage!: Phaser.GameObjects.Image;
 
   /** Keys of AI-loaded tile textures that support crop-based variation. */
   private aiTileKeys: Set<string> = new Set();
@@ -317,48 +318,73 @@ export class GameScene extends Phaser.Scene {
 
   private buildMap() {
     const { grid } = this.mapData;
-    this.tileSprites = [];
-    this.waterSprites = [];
-    this.overlaySprites = [];
+    const mapW = GRID_COLS * TILE_SIZE;
+    const mapH = GRID_ROWS * TILE_SIZE;
+
+    // ── Phase 1: Create all tile sprites so we can stamp them into the RT ──
+    const tempSprites: Phaser.GameObjects.Image[] = [];
 
     for (let r = 0; r < GRID_ROWS; r++) {
-      this.tileSprites[r] = [];
-      this.waterSprites[r] = [];
-      this.overlaySprites[r] = [];
       for (let c = 0; c < GRID_COLS; c++) {
         const tile = grid[r][c];
-        const px = c * TILE_SIZE + TILE_SIZE / 2;
-        const py = r * TILE_SIZE + TILE_SIZE / 2;
+        const cx = c * TILE_SIZE + TILE_SIZE / 2;
+        const cy = r * TILE_SIZE + TILE_SIZE / 2;
 
-        // Layer 1: Water base under every cell — use the seamless base
-        // texture directly (not Wang/crop variants). The source is seamless,
-        // so it tiles perfectly at TILE_SIZE with 1:1 pixel mapping.
-        const waterImg = this.add.image(px, py, 'tile_ground').setDepth(0).setDisplaySize(TILE_SIZE, TILE_SIZE);
-        this.waterSprites[r][c] = waterImg;
+        // Layer 1: Water base under every cell
+        const waterImg = this.add.image(cx, cy, 'tile_ground')
+          .setDisplaySize(TILE_SIZE, TILE_SIZE);
+        tempSprites.push(waterImg);
 
         // Layer 2: Topmost tile (and optional alpha-mask overlay)
-        const { key, depth, overlayKey, overlayDepth } = this.resolveTile(tile);
-        // Apply Wang/crop variation to ALL layers including grass interior
-        // and water so the map doesn't show identical repeating tiles.
+        const { key, overlayKey } = this.resolveTile(tile);
         const displayKey = this.aiTileKeys.has(key)
           ? this.pickVariationKey(key, r, c)
           : key;
-        const img = this.add.image(px, py, displayKey).setDepth(depth).setDisplaySize(TILE_SIZE, TILE_SIZE);
-        this.tileSprites[r][c] = img;
+        const img = this.add.image(cx, cy, displayKey)
+          .setDisplaySize(TILE_SIZE, TILE_SIZE);
+        tempSprites.push(img);
 
         // Layer 3: Alpha-mask overlay (only for edge grass cells)
         if (overlayKey && this.textures.exists(overlayKey)) {
-          const overlay = this.add.image(px, py, overlayKey)
-            .setDepth(overlayDepth ?? depth + 0.01)
+          const overlay = this.add.image(cx, cy, overlayKey)
             .setDisplaySize(TILE_SIZE, TILE_SIZE);
-          this.overlaySprites[r][c] = overlay;
-        } else {
-          this.overlaySprites[r][c] = null;
+          tempSprites.push(overlay);
         }
       }
     }
 
-    this.hoverOverlay = this.add.image(0, 0, 'tile_buildable_hover').setAlpha(0).setDepth(1).setDisplaySize(TILE_SIZE, TILE_SIZE);
+    // ── Phase 2: Bake all sprites into a single RenderTexture ────────────
+    // This collapses ~1,140 individual sprites (each with a potentially
+    // unique Wang/crop texture) into ONE GPU draw call.  Phaser can batch
+    // sprites that share a texture, but every Wang variant (wang_0 …
+    // wang_15) and every crop slice (crop_0 … crop_24) is stored as a
+    // separate WebGL texture — zero batching without this bake.
+    this.terrainRT = this.add.renderTexture(0, 0, mapW, mapH);
+    // batchDraw(sprite, x, y) maps (x, y) to the sprite's origin — so we
+    // set origin to (0, 0) and stamp at the grid-aligned top-left corner.
+    this.terrainRT.beginDraw();
+    for (const sprite of tempSprites) {
+      sprite.setOrigin(0, 0);
+      // sprite center is at (c*TS + TS/2, r*TS + TS/2); convert to grid coords
+      this.terrainRT.batchDraw(sprite,
+        sprite.x - TILE_SIZE / 2,
+        sprite.y - TILE_SIZE / 2);
+    }
+    this.terrainRT.endDraw();
+    this.terrainRT.saveTexture('__terrain__');
+    // Hide the RT itself — we only want the saved-texture Image visible.
+    // (add.renderTexture adds the RT to the display list; if left visible
+    // it renders a second copy at the wrong origin/offset.)
+    this.terrainRT.setVisible(false);
+
+    // ── Phase 3: Destroy temporary sprites, replace with one Image ───────
+    for (const sprite of tempSprites) sprite.destroy();
+    this.terrainImage = this.add.image(0, 0, '__terrain__')
+      .setOrigin(0, 0)
+      .setDepth(0);
+
+    this.hoverOverlay = this.add.image(0, 0, 'tile_buildable_hover')
+      .setAlpha(0).setDepth(1).setDisplaySize(TILE_SIZE, TILE_SIZE);
   }
 
   /**
@@ -518,34 +544,45 @@ export class GameScene extends Phaser.Scene {
     return { key: waterKey, depth: 0 };
   }
 
-  /** Recompute and apply the correct tile texture and depth for a grid cell. */
+  /**
+   * Redraw a single grid cell on the baked terrain RenderTexture.
+   * Creates temporary sprites for the new tile layers, stamps them into
+   * the RT (overwriting the previous content), then destroys the temps.
+   */
   private refreshTileSprite(row: number, col: number): void {
-    const sprite = this.tileSprites[row]?.[col];
-    if (!sprite) return;
-    const { key, depth, overlayKey, overlayDepth } = this.resolveTile(this.mapData.grid[row][col]);
+    const tile = this.mapData.grid[row][col];
+    const stampX = col * TILE_SIZE;
+    const stampY = row * TILE_SIZE;
+
+    // Water base
+    const waterImg = this.add.image(0, 0, 'tile_ground')
+      .setOrigin(0, 0)
+      .setDisplaySize(TILE_SIZE, TILE_SIZE);
+
+    // Top tile
+    const { key, overlayKey } = this.resolveTile(tile);
     const displayKey = this.aiTileKeys.has(key)
       ? this.pickVariationKey(key, row, col)
       : key;
-    sprite.setTexture(displayKey).setDepth(depth);
+    const tileImg = this.add.image(0, 0, displayKey)
+      .setOrigin(0, 0)
+      .setDisplaySize(TILE_SIZE, TILE_SIZE);
 
-    // Update or destroy the overlay sprite
-    const overlay = this.overlaySprites[row]?.[col];
-    if (overlay) {
-      if (overlayKey) {
-        overlay.setTexture(overlayKey).setDepth(overlayDepth ?? depth + 0.01).setVisible(true);
-      } else {
-        overlay.setVisible(false);
-      }
-    } else if (overlayKey && this.textures.exists(overlayKey)) {
-      const px = col * TILE_SIZE + TILE_SIZE / 2;
-      const py = row * TILE_SIZE + TILE_SIZE / 2;
-      const newOverlay = this.add.image(px, py, overlayKey)
-        .setDepth(overlayDepth ?? depth + 0.01)
+    // Stamp into RT — origin (0,0) so stamp coords = grid top-left
+    this.terrainRT.beginDraw();
+    this.terrainRT.batchDraw(waterImg, stampX, stampY);
+    this.terrainRT.batchDraw(tileImg, stampX, stampY);
+    if (overlayKey && this.textures.exists(overlayKey)) {
+      const overlayImg = this.add.image(0, 0, overlayKey)
+        .setOrigin(0, 0)
         .setDisplaySize(TILE_SIZE, TILE_SIZE);
-      if (!this.overlaySprites[row]) this.overlaySprites[row] = [];
-      this.overlaySprites[row][col] = newOverlay;
-      if (this.uiCam) this.uiCam.ignore(newOverlay);
+      this.terrainRT.batchDraw(overlayImg, stampX, stampY);
+      overlayImg.destroy();
     }
+    this.terrainRT.endDraw();
+
+    waterImg.destroy();
+    tileImg.destroy();
   }
 
   /** Place city building decorations and mark cells as non-buildable. */
@@ -853,26 +890,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private setupUICameraIgnore() {
-    // Tile sprites (already exist, won't go through patched group add())
-    for (const row of this.tileSprites) {
-      for (const img of row) {
-        if (img) this.uiCam.ignore(img);
-      }
-    }
-
-    // Water base sprites — also ignore so they don't paint over the game view
-    for (const row of this.waterSprites) {
-      for (const img of row) {
-        if (img) this.uiCam.ignore(img);
-      }
-    }
-
-    // Overlay sprites (edge grass alpha masks)
-    for (const row of this.overlaySprites) {
-      for (const overlay of row) {
-        if (overlay) this.uiCam.ignore(overlay);
-      }
-    }
+    // Baked terrain image (single sprite, replaces ~1,140 individual tiles)
+    if (this.terrainImage) this.uiCam.ignore(this.terrainImage);
 
     // Wall decorations
     for (const w of this.wallDecorations) {
