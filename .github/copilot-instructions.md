@@ -212,3 +212,17 @@ This covers:
 - Adding procedural fallback generators
 - Wiring assets into game logic (abilities, decorations, towers, enemies)
 - Naming conventions and common pitfalls
+
+---
+
+## Measuring Performance
+
+For profiling the game, running the built-in perf test, capturing traces with
+Chrome DevTools MCP, and analyzing hotspots, see:
+
+**[`.github/instructions/how-to-measure-performance.instructions.md`](.github/instructions/how-to-measure-performance.instructions.md)**
+
+- Built-in perf-test mode (`PERF TEST` / `PERF SETTINGS` buttons)
+- Chrome DevTools MCP trace workflow (init-script auto-start)
+- Analyzing traces with `scripts/analyze-perf-trace.mjs`
+- Bottleneck heuristics and known pitfalls
