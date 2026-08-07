@@ -16,7 +16,7 @@ export interface SynergyEffect {
 }
 
 // Synergy is bidirectional: [A, B] applies to both A→B and B→A
-export const SYNERGY_DEFS: SynergyDef[] = [
+const SYNERGY_DEFS: SynergyDef[] = [
   {
     types: ['cannon', 'ice'],
     label: 'Shatter',

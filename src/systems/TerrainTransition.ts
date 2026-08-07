@@ -18,36 +18,6 @@ import { createPRNG } from '../utils/helpers';
  *   South (S) = 4     West (W) = 8
  */
 
-// ─── Terrain layer definitions ────────────────────────────────────────────
-
-export interface TerrainLayerDef {
-  id: string;       // unique identifier (e.g. 'water', 'sand', 'grass')
-  label: string;    // human-readable name
-  depth: number;    // rendering depth offset from base
-  tileType: string; // the GridTile.type that this layer represents
-}
-
-export const TERRAIN_LAYERS: TerrainLayerDef[] = [
-  { id: 'water', label: 'Water', depth: 0, tileType: 'ground' },
-  { id: 'sand',  label: 'Sand',  depth: 1, tileType: '' },       // reserved for future use
-  { id: 'grass', label: 'Grass', depth: 2, tileType: 'buildable' },
-];
-
-/** Get the highest terrain layer for a given tile type (or null if none). */
-export function tileTypeToLayerId(tileType: string): string | null {
-  // Walk layers in reverse so we get the highest matching layer
-  for (let i = TERRAIN_LAYERS.length - 1; i >= 0; i--) {
-    if (TERRAIN_LAYERS[i].tileType === tileType) return TERRAIN_LAYERS[i].id;
-  }
-  return null;
-}
-
-/** Get terrain layer depth by id */
-export function getLayerDepth(layerId: string): number {
-  const layer = TERRAIN_LAYERS.find(l => l.id === layerId);
-  return layer ? layer.depth : 0;
-}
-
 // ─── Blob bit constants (cardinal neighbors) ──────────────────────────────
 
 const B_N = 0x1, B_E = 0x2, B_S = 0x4, B_W = 0x8;
@@ -73,68 +43,8 @@ export function computeTerrainBlobMask(
 }
 
 /** Texture key for a transition tile. */
-export function transitionTileKey(terrainId: string, mask: number): string {
+function transitionTileKey(terrainId: string, mask: number): string {
   return `tile_trans_${terrainId}_${mask}`;
-}
-
-// ─── Wang tile corner mask ────────────────────────────────────────────────
-
-/**
- * Corner bit weights for Wang tile selection.
- *
- * A corner is 1 ("connected") only if the tile itself AND both adjacent
- * cardinal neighbours AND the diagonal neighbour all match the target
- * terrain (i.e. are NOT water/ground).
- *
- * | Corner | Bit | Value | Cells checked                            |
- * |--------|-----|-------|------------------------------------------|
- * | TL     | 0   | 1     | (r,c), (r-1,c), (r,c-1), (r-1,c-1)     |
- * | TR     | 1   | 2     | (r,c), (r-1,c), (r,c+1), (r-1,c+1)     |
- * | BR     | 2   | 4     | (r,c), (r+1,c), (r,c+1), (r+1,c+1)     |
- * | BL     | 3   | 8     | (r,c), (r+1,c), (r,c-1), (r+1,c-1)     |
- */
-export function computeCornerMask(
-  grid: { type: string }[][],
-  row: number,
-  col: number,
-  targetType: string,
-): number {
-  const same = (r: number, c: number) => {
-    if (r < 0 || r >= GRID_ROWS || c < 0 || c >= GRID_COLS) return false;
-    return grid[r][c].type === targetType;
-  };
-
-  let mask = 0;
-  const here = same(row, col);
-  if (!here) return 0; // cell itself isn't the target terrain
-
-  // TL: (r,c), (r-1,c), (r,c-1), (r-1,c-1)
-  if (same(row - 1, col) && same(row, col - 1) && same(row - 1, col - 1)) mask |= 1;
-  // TR: (r,c), (r-1,c), (r,c+1), (r-1,c+1)
-  if (same(row - 1, col) && same(row, col + 1) && same(row - 1, col + 1)) mask |= 2;
-  // BR: (r,c), (r+1,c), (r,c+1), (r+1,c+1)
-  if (same(row + 1, col) && same(row, col + 1) && same(row + 1, col + 1)) mask |= 4;
-  // BL: (r,c), (r+1,c), (r,c-1), (r+1,c-1)
-  if (same(row + 1, col) && same(row, col - 1) && same(row + 1, col - 1)) mask |= 8;
-
-  return mask;
-}
-
-/**
- * Convert a 4-bit corner mask to the Wang tile index used by
- * tools/wang-tiles/generate.mjs.
- *
- * Generator uses:  tileIndex = tl*8 + tr*4 + br*2 + bl
- * Corner mask:     TL=bit0, TR=bit1, BR=bit2, BL=bit3
- *
- * This is a 4-bit nibble reversal.
- */
-export function cornerMaskToWangIndex(cornerMask: number): number {
-  const tl = (cornerMask & 1) ? 1 : 0;       // TL → bit 0 → wang tl (value 8)
-  const tr = (cornerMask & 2) ? 1 : 0;       // TR → bit 1 → wang tr (value 4)
-  const br = (cornerMask & 4) ? 1 : 0;       // BR → bit 2 → wang br (value 2)
-  const bl = (cornerMask & 8) ? 1 : 0;       // BL → bit 3 → wang bl (value 1)
-  return tl * 8 + tr * 4 + br * 2 + bl;
 }
 
 // ─── Texture generation ───────────────────────────────────────────────────

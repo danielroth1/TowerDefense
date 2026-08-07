@@ -1,0 +1,19 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "index.html",
+    "tools/wang-tiles/generate-blend-crop.mjs",
+    "tools/wang-tiles/generate-blend-freq.mjs",
+    "tools/wang-tiles/generate-cohen-canonical.mjs",
+    "tools/wang-tiles/generate-cohen-coons.mjs",
+    "tools/wang-tiles/generate-cohen-cutpaths.mjs",
+    "tools/wang-tiles/generate-cohen-diamond.mjs",
+    "tools/wang-tiles/generate-cohen-diamondcut.mjs",
+    "tools/wang-tiles/generate-cohen-quilt.mjs",
+    "tools/wang-tiles/generate-cohen-strips.mjs",
+    "tools/wang-tiles/generate-quadrant.mjs",
+    "scripts/analyze-firefox-profile.mjs",
+    "scripts/analyze-perf-trace.mjs"
+  ],
+  "project": ["**/*.{ts,tsx,mts,cts,mjs,cjs,js,jsx}"]
+}

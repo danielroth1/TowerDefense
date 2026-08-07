@@ -119,20 +119,6 @@ export async function gameState(page: Page): Promise<any> {
   });
 }
 
-/** Screen coords of the centre of a map tile (world → screen via camera). */
-export async function tileScreen(page: Page, col: number, row: number): Promise<{ x: number; y: number }> {
-  return page.evaluate(({ col, row }) => {
-    const worldToScreen = (gs: any, wx: number, wy: number) => {
-      const m = gs.cameras.main.matrix.matrix;
-      return { x: m[0] * wx + m[2] * wy + m[4], y: m[1] * wx + m[3] * wy + m[5] };
-    };
-    const g = (window as any).__game;
-    const gs = g.scene.getScenes().find((s: any) => s.scene.key === 'GameScene');
-    const wx = col * 48 + 24, wy = row * 48 + 24;
-    return worldToScreen(gs, wx, wy);
-  }, { col, row });
-}
-
 /** Find a buildable tile currently visible in the viewport, or null. */
 export async function findVisibleBuildable(page: Page): Promise<{ col: number; row: number; x: number; y: number } | null> {
   return page.evaluate(() => {

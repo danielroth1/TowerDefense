@@ -61,8 +61,10 @@ deterministically from `(row, col, seed)`. This means:
 - The same seed always produces the same crop layout (maps are reproducible)
 - ~441 unique crops per dimension at 1024×1024 — effectively infinite variation
 
-Crop selection is handled by `src/utils/TileCropSelector.ts` and applied in
-`GameScene.buildMap()` via Phaser's `sprite.setCrop()`.
+At boot, `BootScene.sliceCropTextures()` slices each large AI texture into
+TILE_SIZE×TILE_SIZE sub-textures registered as `{baseKey}_crop_N`.
+`GameScene.pickVariationKey()` then picks a per-cell variant with priority
+Wang tiles (corner-matched) > Wang tiles (random) > crop variants > base texture.
 
 ### Transition tiles
 

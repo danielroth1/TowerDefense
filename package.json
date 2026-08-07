@@ -24,11 +24,11 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
+    "knip": "^6.32.0",
     "typescript": "~6.0.2",
     "vite": "^8.0.12"
   },
   "dependencies": {
-    "codebase-context": "^2.2.0",
     "phaser": "^3.60.0",
     "sharp": "^0.33.5"
   }

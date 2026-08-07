@@ -17,7 +17,7 @@ import { createPRNG } from '../utils/helpers';
 
 // ─── Frequency parameters ───────────────────────────────────────────────────
 
-export const CITY_PARAMS = {
+const CITY_PARAMS = {
   /** Exact number of markets to place (will place fewer if not enough candidates). */
   marketCount: 2,
   /** Probability a candidate grass+water edge becomes a harbor. */
@@ -40,7 +40,7 @@ export const CITY_PARAMS = {
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-export interface DecorationGroupDef {
+interface DecorationGroupDef {
   id: string;
   label: string;
   w: number;

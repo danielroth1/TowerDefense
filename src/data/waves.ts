@@ -1,7 +1,7 @@
 import type { EnemyType, BossType } from './enemies';
 import { BOSS_EVERY_N, TOTAL_WAVES } from '../utils/constants';
 
-export interface SpawnGroup {
+interface SpawnGroup {
   type: EnemyType | BossType;
   count: number;
   interval: number;  // ms between spawns in this group
@@ -48,7 +48,7 @@ function buildWave(wave: number): WaveDef {
   return { wave, groups, isBoss };
 }
 
-export const WAVE_DEFS: WaveDef[] = Array.from(
+const WAVE_DEFS: WaveDef[] = Array.from(
   { length: TOTAL_WAVES },
   (_, i) => buildWave(i + 1),
 );

@@ -59,8 +59,8 @@ src/
                    AbilitySystem, ComboSystem, SynergySystem, EconomyManager,
                    CityDecorator, CityRoadNetwork, WeatherSystem, SoundSystem
   data/            Towers, enemies, abilities, waves, synergies (data-driven)
-  ui/              HUD, BottomBar, TowerPanel
-  utils/           TileCropSelector, TileColorExtractor, constants, helpers
+  ui/              HUD, BottomBar
+  utils/           TileColorExtractor, constants, helpers
 tools/
   tile-generator/  Browser UI + Node.js proxy server for fal.ai image generation
   wang-tiles/      Wang tile set generators (7 algorithm variants)
@@ -74,7 +74,7 @@ The tile generation workflow is a two-tool pipeline:
 
 1. **Generator** (`tools/tile-generator/`) — A dark-themed browser UI backed by a Node.js server that proxies requests to fal.ai. Supports multiple models (Fast SDXL, Flux Schnell, Flux Dev, SD 3.5) with live pricing. Generated images are saved as 1024x1024 PNGs to `public/assets/tiles/`.
 
-2. **Game** (`src/`) — On boot, `BootScene` loads any AI-generated PNGs found in the tiles folder. `TileColorExtractor` samples pixel data to build palettes for procedural transition tiles. `TileCropSelector` assigns unique crops per grid cell to eliminate repetition. Missing tiles fall back to procedural generation automatically.
+2. **Game** (`src/`) — On boot, `BootScene` loads any AI-generated PNGs found in the tiles folder. `TileColorExtractor` samples pixel data to build palettes for procedural transition tiles. `BootScene` slices AI textures into crop sub-textures and `GameScene` picks per-cell variants (Wang tiles > crop variants > base) to eliminate repetition. Missing tiles fall back to procedural generation automatically.
 
 Transition tiles (grass-to-water edges) are always procedural — they use corner-bitmask polygon fills with alpha blending so they blend seamlessly into whichever AI texture is loaded.
 

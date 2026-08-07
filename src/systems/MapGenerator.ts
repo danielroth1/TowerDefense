@@ -4,7 +4,7 @@ import {
 } from '../utils/constants';
 import { createPRNG } from '../utils/helpers';
 
-export type TileType = 'ground' | 'path' | 'buildable' | 'spawn' | 'goal';
+type TileType = 'ground' | 'path' | 'buildable' | 'spawn' | 'goal';
 
 export interface GridTile {
   row: number;

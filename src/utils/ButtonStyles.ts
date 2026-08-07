@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 
-export type ButtonTheme = 'tower' | 'wave' | 'ability' | 'upgrade' | 'badge' | 'settings';
+type ButtonTheme = 'tower' | 'wave' | 'ability' | 'upgrade' | 'badge' | 'settings';
 
 export interface ElevatedButtonOpts {
   cx: number; cy: number; w: number; h: number;

@@ -304,22 +304,16 @@ export const ECO_BUILDING_TYPES: EconomyBuildingType[] = [
 // ─── Escalating cost ─────────────────────────────────────────────────────────
 
 /** Factor by which cost increases per additional building of the same type. */
-export const ECO_COST_ESCALATION = 1.25;
+const ECO_COST_ESCALATION = 1.25;
 
 /** Calculate the cost of the nth building of a given type (1-based). */
 export function escalatedCost(def: EconomyBuildingDef, count: number): number {
   return Math.floor(def.baseCost * Math.pow(ECO_COST_ESCALATION, count));
 }
 
-// ─── Chain bonus ─────────────────────────────────────────────────────────────
-
-/** Multiplier applied when a good passes through a complete chain. */
-export const CHAIN_BONUS_MULTIPLIER = 1.25;
-
 // ─── Warehouse ───────────────────────────────────────────────────────────────
 
 export const WAREHOUSE_CAPACITY = 5;
-export const WAREHOUSE_BULK_BONUS = 1.5;  // 50% bonus when full
 
 // ─── Delivery config (from economy-config.json) ─────────────────────────────
 

@@ -75,13 +75,9 @@ export const STARTING_GOLD  = 200;
 export const DEBUG_STARTING_GOLD = 10000;
 export const STARTING_LIVES = 20;
 
-// ─── Economy Simulation ──────────────────────────────────────────────────────
-export const MAX_ECO_BUILDING_LEVEL = 3;
-
 // ─── Waves ───────────────────────────────────────────────────────────────────
 export const TOTAL_WAVES   = 50;
 export const BOSS_EVERY_N  = 5;
-export const EARLY_WAVE_BONUS_PER_SEC = 2;
 
 // ─── Tower ───────────────────────────────────────────────────────────────────
 export const SELL_REFUND_RATIO = 0.6;
@@ -91,9 +87,6 @@ export const MAX_TOWER_LEVEL   = 3; // then evolve
 export const MIN_PATH_LENGTH = 10;
 export const MAX_PATH_LENGTH = 400;
 export const BUILDABLE_RADIUS = 2; // tiles around path that are buildable
-
-// ─── Abilities ───────────────────────────────────────────────────────────────
-export const ABILITY_SLOT_COUNT = 4;
 
 // ─── Hero ────────────────────────────────────────────────────────────────────
 export const HERO_RESPAWN_TIME = 15000; // ms
@@ -113,12 +106,6 @@ export const WEATHER_CHANGE_INTERVAL = 75000; // ms between weather shifts
 
 // ─── UI Layout (screen pixels, RESIZE mode) ─────────────────────────────────
 export const UI_TOP_HEIGHT    = 0;   // top bar removed — world renders from y=0
-export const UI_BOTTOM_HEIGHT = 200; // BottomBar initial height (screen px)
-
-// Floating badge layout (screen pixels)
-export const BADGE_HEIGHT    = 36;   // pill badge height
-export const BADGE_GAP       = 8;    // gap between badges
-export const BADGE_PADDING_X = 12;   // horizontal padding inside badge
 
 // ─── Camera ─────────────────────────────────────────────────────────────────
 export const CAMERA_MIN_ZOOM = 0.3;

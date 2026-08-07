@@ -25,15 +25,15 @@ import { buildWalkabilityGrid, findCartPath } from './CartPathfinder';
 
 // ─── Public types ───────────────────────────────────────────────────────────
 
-export interface Vec2 { x: number; y: number; }
+interface Vec2 { x: number; y: number; }
 
 /** A smoothed road segment (spine polyline between two nodes). */
-export interface CityRoad {
+interface CityRoad {
   points: Vec2[];
 }
 
 /** A junction or intersection node. */
-export interface JunctionNode {
+interface JunctionNode {
   /** Pixel position (world coordinates). */
   x: number;
   y: number;
@@ -106,7 +106,7 @@ class UnionFind {
  * A cell is marked as "road" if any road point falls within
  * ROAD_HALF_WIDTH * 2 pixels of its center.
  */
-export function buildRoadGrid(roads: CityRoad[]): Uint8Array {
+function buildRoadGrid(roads: CityRoad[]): Uint8Array {
   const grid = new Uint8Array(GRID_ROWS * GRID_COLS);
   const halfTile = TILE_SIZE / 2;
   const radius = ROAD_HALF_WIDTH * 3; // generous coverage for rendered width
@@ -398,33 +398,6 @@ function computeRoadNetwork(
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
-
-/**
- * Generate the full city road network (stateless — always from scratch).
- * Use this for the initial map load.
- */
-export function generateCityRoads(
-  grid: GridTile[][],
-  placements: DecorationPlacement[],
-  blockedCells: Set<string>,
-  seed: number,
-): CityRoadResult {
-  if (placements.length < 2) return { roads: [], junctions: [] };
-
-  const rng = createPRNG(seed + 0xC0DE);
-  const { segments, mergedIntersections } = computeRoadNetwork(grid, placements, blockedCells);
-
-  const roads: CityRoad[] = [];
-  for (const seg of segments) {
-    let points = [...seg.path];
-    points = insertIntersectionWaypoints(points, mergedIntersections);
-    points = smoothPath(points, SMOOTH_ITERATIONS);
-    addNoise(points, rng, NOISE_AMP);
-    roads.push({ points });
-  }
-
-  return { roads, junctions: [] };
-}
 
 /**
  * Incremental road network update.

@@ -39,7 +39,7 @@ export interface UpgradeTier {
   effectValue?: number;
 }
 
-export interface EvolutionDef {
+interface EvolutionDef {
   type: EvolutionType;
   label: string;
   description: string;

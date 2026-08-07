@@ -215,9 +215,9 @@ top-down/isometric view at 256×256 or 512×512:
    the existing `earn()` method
 
 ### Phase 3: Building Placement UI
-1. Create `src/ui/EconomyPanel.ts` — similar to `TowerPanel` but for economy
-   buildings. Shows available buildings, costs, and a toggle button in the
-   bottom bar
+1. Create `src/ui/EconomyPanel.ts` — similar to the tower build panel but for
+   economy buildings. Shows available buildings, costs, and a toggle button in
+   the bottom bar
 2. Add a tab/toggle in the HUD to switch between Tower build mode and
    Economy build mode
 3. Placement logic in `GameScene`:
